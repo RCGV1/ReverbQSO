@@ -1,0 +1,26 @@
+.DS_Store
+.worktrees/
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.swiftpm
+.build/
+
+# Local tooling and review artifacts
+.codex/
+.agents/
+AGENTS.md
+*.rtf
+*.xcresult/
+*.log
+*.partial
+*.mobileprovision
+*.p12
+*.pem

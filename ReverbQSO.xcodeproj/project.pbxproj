@@ -1,0 +1,2019 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		021019035D62E6A85212386A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65ED74C4A4BFBE60B535920A /* AppState.swift */; };
+		0235868D948F2D051CC98264 /* gain_table_lbr.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C994F6CBD263D438531D247 /* gain_table_lbr.c */; };
+		032ECA4C560AE008A7FAA909 /* WatchPhoneBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48073EE255B887359F1EC185 /* WatchPhoneBridge.swift */; };
+		033EC3ACFE2AC2C36CB42D0F /* QSOActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58D75CFFD097E5988BF2918 /* QSOActivityAttributes.swift */; };
+		034D5C698299C67A13190185 /* CallAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DCEF6146DA2810B27C7DD1 /* CallAccessPolicy.swift */; };
+		038DDBDFC88237144FE552DD /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = 540BBC2FF76B995FFDDD95D2 /* lpc.c */; };
+		04F97B4AB224F050B530B3F9 /* VoiceDiagnosticLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */; };
+		0506B928E6A23A39B4CF0E51 /* debug.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E104D810A0B3F911DB4AB90 /* debug.c */; };
+		076678571E383A20B8EDD79D /* ConferenceFloorRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F58266ADAC833BA9E40B206 /* ConferenceFloorRouter.swift */; };
+		0792E613226E414FA0339129 /* high_lsp_tables.c in Sources */ = {isa = PBXBuildFile; fileRef = AD18AEA7984E41E3A9F31558 /* high_lsp_tables.c */; };
+		084305E82CB9FE2F323033E7 /* MicrophoneAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC13B0201548F1CD64A985FB /* MicrophoneAccess.swift */; };
+		08A39E781D127EBF6F756039 /* hexc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 4817DD9C6319A3EA3180EFBE /* hexc_10_32_table.c */; };
+		08D8075485CB1C0FEFD3CC79 /* FavoritesViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BAC19EA88D18BE0291B97B2 /* FavoritesViewModelTests.swift */; };
+		08E74CEFFBC91BDA1659BB82 /* SignalMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA3E949DBB721E318D1084FB /* SignalMeter.swift */; };
+		0916AB0746E5E3064A55FBCB /* EchoLinkConferenceHostServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF2ED53939418F353B1714C /* EchoLinkConferenceHostServiceTests.swift */; };
+		0B47D13DCD497D5497506E7A /* DirectoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D316A96EFBFAF3D90B8F217E /* DirectoryViewModel.swift */; };
+		0B5D103D7E69632D55C78CF6 /* AudioRouteControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = C32BF61F3C71F980DACE493D /* AudioRouteControl.swift */; };
+		0B7BD9344CF04E8209EC9A2D /* EchoLinkAudioPacketCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56915CEFBA0C1EB93D38FE89 /* EchoLinkAudioPacketCodecTests.swift */; };
+		0C00649D1CB43E2F6BDCEB1C /* hexc_table.c in Sources */ = {isa = PBXBuildFile; fileRef = C5B801BC8CE57413932CAA3D /* hexc_table.c */; };
+		0D5F495560D7CE7B846D2353 /* WatchPTTIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E357E23B6E8B4CDB554D59F /* WatchPTTIntent.swift */; };
+		0E73982661C751D0A76E7703 /* speex_header.c in Sources */ = {isa = PBXBuildFile; fileRef = D790AAEAE5EBAA579958143F /* speex_header.c */; };
+		0F6C1CD9C602E0B8E09F48A2 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC3E5EBB13F7438A00FE95E /* KeychainService.swift */; };
+		0F707F4FAE23681566E305CC /* VoicePipelineQualityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48E211EF2DFE11CB88AB9E4 /* VoicePipelineQualityTests.swift */; };
+		0F8EA8572D793DE17D33E652 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6D0EEB971EC92EB2FE7F099C /* Security.framework */; };
+		10043EEFEB50810C4A9DF4ED /* exc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */; };
+		16DC37A10F8FDA218C1B2D62 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */; };
+		184A5827CA66CC0AC2BCCF01 /* EchoLinkPublicProxyList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */; };
+		18D276EADE0C29BF246B985B /* EchoLinkRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */; };
+		191D15BCBB286366E86AF0EC /* add.c in Sources */ = {isa = PBXBuildFile; fileRef = AAB92D68E6ABFC59CE9AA61D /* add.c */; };
+		1A7162F8E63DFAF1D469A47F /* MicrophoneAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC13B0201548F1CD64A985FB /* MicrophoneAccess.swift */; };
+		1A8D4FAB222FCEF64A269E5D /* RecentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13AECC454C0E3A6C130018BA /* RecentView.swift */; };
+		1B1AC9B05CF0414322A1FD15 /* exc_8_128_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 850E2724B4EA1B7110B85BCB /* exc_8_128_table.c */; };
+		1C4B95601C5E8A753FA7B4C1 /* filters.c in Sources */ = {isa = PBXBuildFile; fileRef = C44CD3C28C8255DC249F6ADA /* filters.c */; };
+		1D1E7B28ACD451BE674CDDFE /* ConferenceReceiveAudioCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21CC0DAA4C3D90A827733833 /* ConferenceReceiveAudioCodecTests.swift */; };
+		1D86EA79E588DCB5F1BEB123 /* nb_celp.c in Sources */ = {isa = PBXBuildFile; fileRef = 9438F25F6A48DC6CC461D715 /* nb_celp.c */; };
+		1E13F323AB9DC447FFEED313 /* QSOActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58D75CFFD097E5988BF2918 /* QSOActivityAttributes.swift */; };
+		201EA7D4242405F1E3930CD0 /* modes_wb.c in Sources */ = {isa = PBXBuildFile; fileRef = C71DD22FFDFBA509336DBD81 /* modes_wb.c */; };
+		2028EC8A218C0399BD83FFD3 /* EchoLinkRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B54A4D8D6A20FF5BA944A0 /* EchoLinkRelayClient.swift */; };
+		20348FDE5461EDB554E4612D /* exc_5_64_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 09A2E4FAB66390BE5E9512D2 /* exc_5_64_table.c */; };
+		2059543F4C7C559E7FCD5CDE /* ChatMessageNotificationCursorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 207144B98F24C531C7B55843 /* ChatMessageNotificationCursorTests.swift */; };
+		208333EA314B79BF64DD5C37 /* ConferenceFloorRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8A1DE4FA89DB9DCFC0DF96 /* ConferenceFloorRouterTests.swift */; };
+		21997753A7650BFBE1EE9C11 /* gsm_print.c in Sources */ = {isa = PBXBuildFile; fileRef = 4CBA4DF9BC6DFC895B7C358C /* gsm_print.c */; };
+		21C8247622BC562D8FC64508 /* vq.c in Sources */ = {isa = PBXBuildFile; fileRef = 8920A84CAF5C5910BE79D7B5 /* vq.c */; };
+		25CF6607D69F42EDEEBBC361 /* rpe.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E1C870C75EFB0D77AE8F29A /* rpe.c */; };
+		25DB98D46F3FF6DAC2DDC197 /* CallCQWireTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BA3B025A12811D1FA4D19B /* CallCQWireTests.swift */; };
+		2698D150EC9DC2375B4148F7 /* EchoTestWelcome.gsm in Resources */ = {isa = PBXBuildFile; fileRef = E4FDCD1D3602EA1229B2E5CB /* EchoTestWelcome.gsm */; };
+		26C602485E4669A04CD5BDE3 /* CallCQClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B5F2805612ED351FB9E86D /* CallCQClient.swift */; };
+		2741AFAB11A43B290158332F /* MacMenuBarProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4569455FBA9B4F235468EEA9 /* MacMenuBarProtocol.swift */; };
+		297D9E1442AF9FFEAF811AA3 /* QSOView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E7C96DEF0AC33E9E3A9708 /* QSOView.swift */; };
+		298D5E24ED9F44CFC007D8F6 /* EchoTestWelcome.gsm in Resources */ = {isa = PBXBuildFile; fileRef = E4FDCD1D3602EA1229B2E5CB /* EchoTestWelcome.gsm */; };
+		29BEA05925DAE8D131603FC5 /* oe_speex.c in Sources */ = {isa = PBXBuildFile; fileRef = BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */; };
+		2D7645E0823FA9017E7FC51C /* gsm_destroy.c in Sources */ = {isa = PBXBuildFile; fileRef = 4D9043D7B8497DCBA7B0A88E /* gsm_destroy.c */; };
+		2D7CEFB6051D9B1E705B4B0A /* gain_table_lbr.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C994F6CBD263D438531D247 /* gain_table_lbr.c */; };
+		30157DE6EC53AF3B7A5CF8F9 /* ConferenceReceiveAudioCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5905F0C404FCEB7D4B845D6 /* ConferenceReceiveAudioCodec.swift */; };
+		32CA2D2D3313AAEA9BB0D581 /* AudioEngineMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7DCFBAA2398518405D9B3EF /* AudioEngineMeterTests.swift */; };
+		32F2A307A0BE7C5D08605CC4 /* QSOActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75ACD42FABF777BCD5F3E642 /* QSOActivityWidget.swift */; };
+		338F0F6E8D1BFDC1E20E402C /* table.c in Sources */ = {isa = PBXBuildFile; fileRef = 6E255B3BF91775C965FB1FF6 /* table.c */; };
+		347AF87AECDB052CAB3BD05E /* LocalDemoConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F06CE461936AB642879E5B8 /* LocalDemoConnectionTests.swift */; };
+		351FB9B783B28806EB7534D9 /* RecordingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC67AFDF8A99EB55D03939F /* RecordingsView.swift */; };
+		36AC9B6FB8B22CC91C6C646F /* bits.c in Sources */ = {isa = PBXBuildFile; fileRef = 2389A93C460281932BAF12B3 /* bits.c */; };
+		36DE69DE126CCD0AAC21B0C4 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 974F1A659815E325DADC68A2 /* LicensesView.swift */; };
+		37A348F9E3A0B98870A72F8D /* SvxLinkControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB9B23D4DBAC0A508F74AAF /* SvxLinkControlProtocol.swift */; };
+		38FC08E4AF82B6C2F9DF25FC /* exc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */; };
+		39C15709E060E9672A17E0CE /* EchoLinkProxySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCE5B934899E909C6178B00 /* EchoLinkProxySession.swift */; };
+		39FFA601BC066B520C16ACC7 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BA3E849C58E3D22005A41F /* FavoritesView.swift */; };
+		3C28AB947A198413B1B546CF /* EchoLinkDTMFToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DDD9699C439E9FF767B022C /* EchoLinkDTMFToneGenerator.swift */; };
+		3CDE95296E662CF19D59BCBF /* gsm_destroy.c in Sources */ = {isa = PBXBuildFile; fileRef = 4D9043D7B8497DCBA7B0A88E /* gsm_destroy.c */; };
+		3D6E1F300D167144C2FFACE6 /* exc_10_16_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C89ACCDAF59AD3E0795D757 /* exc_10_16_table.c */; };
+		3E5A8695414DD4A348E51C78 /* gsm_option.c in Sources */ = {isa = PBXBuildFile; fileRef = B75F5C04BC0B9CF5A0A76CE9 /* gsm_option.c */; };
+		3FB5A94BC3790CC5427E4EA3 /* EchoLinkPTTTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2018F4783A7484CCB5D36ECD /* EchoLinkPTTTransitionTests.swift */; };
+		40BFCE014EECF551CED7CC4D /* EchoLinkPublicProxyListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABBDD741C05A2804F8184B /* EchoLinkPublicProxyListTests.swift */; };
+		40C636597EF842945683C23C /* LocalDemoAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5240BE8F4255098747FDD95C /* LocalDemoAccountTests.swift */; };
+		4121A4910B383516F9049880 /* PTTIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 666F258FA239959760439D55 /* PTTIntent.swift */; };
+		414A29735503DFE5E725E8FC /* hexc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 4817DD9C6319A3EA3180EFBE /* hexc_10_32_table.c */; };
+		4199C91AB5D3787EAB050C76 /* vbr.c in Sources */ = {isa = PBXBuildFile; fileRef = FD351DC71F0566322AB6448A /* vbr.c */; };
+		424ADD1D2E000DF51E23889D /* quant_lsp.c in Sources */ = {isa = PBXBuildFile; fileRef = AA78122D8FC42A65E184D975 /* quant_lsp.c */; };
+		44103B205D857EDC4EB2870B /* speex_header.c in Sources */ = {isa = PBXBuildFile; fileRef = D790AAEAE5EBAA579958143F /* speex_header.c */; };
+		44C9C4C99A7B6299D00F3A84 /* vq.c in Sources */ = {isa = PBXBuildFile; fileRef = 8920A84CAF5C5910BE79D7B5 /* vq.c */; };
+		475A2F56BFED26C94B3E8FA0 /* VoiceDiagnosticLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */; };
+		47A9D6E9B988ABC584CED286 /* gsm_implode.c in Sources */ = {isa = PBXBuildFile; fileRef = E8BC7788B9DCE592355F4DD2 /* gsm_implode.c */; };
+		4847C24384D76F03098EC5E3 /* EchoLinkDirectoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B8CE96F7CB370565984790 /* EchoLinkDirectoryService.swift */; };
+		4899E16BDA4121AE091BD007 /* GPL-3.0.txt in Resources */ = {isa = PBXBuildFile; fileRef = B10B94BB44D80968D929DF15 /* GPL-3.0.txt */; };
+		49172B48CDCC57C0395C3C9C /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D74DFDDD365B8B32CB0BF1 /* Station.swift */; };
+		49FD46CB8069D57F33FD88FA /* EchoLinkRegistrationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAAD9517A7E5BBFCFEC23A /* EchoLinkRegistrationClient.swift */; };
+		4AFA94078584154DA3874CCC /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE902BACF5D5E9E9421692AA /* Network.framework */; };
+		4B0F81D0401A4559D0BD4259 /* EchoLinkAutomaticTransportSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE44705AB6D2A345B0D324B /* EchoLinkAutomaticTransportSelector.swift */; };
+		4C555A734F39EAFB9323DE63 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */; };
+		4C92B055EFCC52B7E4F057BF /* DirectCQSocketPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */; };
+		4D743BB3690EF1522F7769D0 /* LocalDemoHostingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A589F5DEFDA7E71736CF95BB /* LocalDemoHostingTests.swift */; };
+		4DC6DD4D9065A3422F1542D4 /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = BF2049383B9D05134465FD85 /* lpc.c */; };
+		4E213BDDBEC38BC37D07903D /* EchoLinkRelayClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FCFE0628164575D1111C6CC /* EchoLinkRelayClientTests.swift */; };
+		4E675408DBC15CC6C74EB388 /* EchoLinkRelayProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5809DBE651C23428FB3F1B6 /* EchoLinkRelayProtocolTests.swift */; };
+		4F11705217DFEF9695077D48 /* CallCQ.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89EF774CA60188FC6106E2A /* CallCQ.swift */; };
+		4FB96A59D4BBEC1029C27317 /* EchoLinkProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D8A245BA2FB55CEB5CB4B7C /* EchoLinkProxyConfiguration.swift */; };
+		5094BB0A0DF800E4CFCD81AC /* oe_speex.c in Sources */ = {isa = PBXBuildFile; fileRef = BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */; };
+		50C1817EFBB0A19A9D3A49DF /* gsm_create.c in Sources */ = {isa = PBXBuildFile; fileRef = 5A9FEC91B610C26333F3E8E5 /* gsm_create.c */; };
+		5250DD74CA8893F08B30A4F0 /* QSOViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 563A30A094C99FE043DBC099 /* QSOViewModel.swift */; };
+		5320F64A4AC3EE0242DBB64D /* gain_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 18DE9595BD7F0CA4E517E932 /* gain_table.c */; };
+		5340BD8AAE8F997C6FA50902 /* EchoLinkRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B54A4D8D6A20FF5BA944A0 /* EchoLinkRelayClient.swift */; };
+		53CF091FACA3C57AD7AFB2D8 /* QSOSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B083C35268C27C15951976 /* QSOSession.swift */; };
+		55C19C6A16E79549D0600B73 /* quant_lsp.c in Sources */ = {isa = PBXBuildFile; fileRef = AA78122D8FC42A65E184D975 /* quant_lsp.c */; };
+		578A7E96E0AA0533EAAC20EA /* SvxLinkPTYTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99B6AACF4601933F1DC7E923 /* SvxLinkPTYTransportTests.swift */; };
+		579609EA2A9632802988D24F /* lsp.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F22AA24E3CA040D11C6ABC1 /* lsp.c */; };
+		57D1A67D096202A978EAF481 /* DirectCQSocketPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */; };
+		5988D1BA00954DDC4615D1C5 /* EchoLinkProxyProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46FE451B3C6D89DD6CA5AAD /* EchoLinkProxyProtocolTests.swift */; };
+		5A500FEA2F096E5CEC9FE665 /* modes_wb.c in Sources */ = {isa = PBXBuildFile; fileRef = C71DD22FFDFBA509336DBD81 /* modes_wb.c */; };
+		5ADBA4AD72ACEB13E0B4284A /* MacMenuBarProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4569455FBA9B4F235468EEA9 /* MacMenuBarProtocol.swift */; };
+		5C32ED78B092B6625D44F9A0 /* vbr.c in Sources */ = {isa = PBXBuildFile; fileRef = FD351DC71F0566322AB6448A /* vbr.c */; };
+		5C382F32CD0FF6FE793ED6E6 /* EchoLinkParticipantParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D265BFCB3F8D19817B9DB1F /* EchoLinkParticipantParser.swift */; };
+		5CA6BDF487EB6E9679B3803D /* DirectoryClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21118117E514A70F447CA1FC /* DirectoryClientTests.swift */; };
+		5E2DB4802FA29D7E973307B3 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C24342507C46DB012DB052C /* Theme.swift */; };
+		5E86CAC7C9FB1A1004C8F4E4 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC3E5EBB13F7438A00FE95E /* KeychainService.swift */; };
+		5F3440AFDA1799821BBF3A42 /* ActiveNodeParticipant.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB00632BC7FE525A8838DB8C /* ActiveNodeParticipant.swift */; };
+		619C422E5DF5ACDBA71EF626 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F6ECFF995D6ED0366045956C /* Assets.xcassets */; };
+		627066B30CE5EDE3EA97B5F8 /* GSMCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D3B239D0A3AB9496A3E191E /* GSMCodec.swift */; };
+		62E1E8C1FAF5951FB5001488 /* GSMCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D3B239D0A3AB9496A3E191E /* GSMCodec.swift */; };
+		65B15B3E386F5814466910F1 /* WatchAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E44415E3AFF18DB4A066ED0 /* WatchAppModel.swift */; };
+		66EEE92D5BD66D38C3D0A7AC /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D74DFDDD365B8B32CB0BF1 /* Station.swift */; };
+		67073044CF41728F108E9A3B /* ReverbQSOMenuBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 548C83CE5A2D89DD54938BF9 /* ReverbQSOMenuBarApp.swift */; };
+		686BE471F1CABA08EC7C821D /* VoicePipelineSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F9E7DB3830DDC7AD71AF54 /* VoicePipelineSmokeTests.swift */; };
+		686E4FD292C9858CDE7A37A5 /* StationParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6588487C3BF2989B9C82C3F0 /* StationParserTests.swift */; };
+		695CFACC6509297EC4D64096 /* InboundStationVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32444518FE355D2119D6015 /* InboundStationVerifierTests.swift */; };
+		6AD1DBF1A7FAB887C490620A /* LocalDemoAnnouncement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F117EED259DCA53C15B7A085 /* LocalDemoAnnouncement.swift */; };
+		6C5C6FC2276D6096820D256C /* GSMCodecStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376C2423E9F207C5AA18744 /* GSMCodecStreamingTests.swift */; };
+		6CC2DDE13F3E24FB40C6A8F4 /* exc_8_128_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 850E2724B4EA1B7110B85BCB /* exc_8_128_table.c */; };
+		6D9A9ECB82DFBDBE3F0D3F8C /* CallCQ.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89EF774CA60188FC6106E2A /* CallCQ.swift */; };
+		6E23B4706FE4C0D253EA7B1D /* QSORecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */; };
+		6E87B621682DE1896EB42C79 /* long_term.c in Sources */ = {isa = PBXBuildFile; fileRef = 7FE4420220A9AF3ECCD84FDB /* long_term.c */; };
+		7114D4AC8A497D2C2F1723F7 /* exc_5_64_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 09A2E4FAB66390BE5E9512D2 /* exc_5_64_table.c */; };
+		715B4301C91EDC7B4610F12F /* EchoLinkRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */; };
+		71891DFCED8E6B3E24F4B26F /* LiveTransportSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0868D0D823C31322A9966D15 /* LiveTransportSmokeTests.swift */; };
+		71D1EAAA46F51DC9603DB04C /* EchoLinkAudioPacketCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD9C77E7FE189E57217A4471 /* EchoLinkAudioPacketCodec.swift */; };
+		7226908CF383643DADC7BCE0 /* speex.c in Sources */ = {isa = PBXBuildFile; fileRef = EEC1CB51BBBAB2A3879362BA /* speex.c */; };
+		72941FCC04E2F94081439A0D /* preprocess.c in Sources */ = {isa = PBXBuildFile; fileRef = 8794B05E140F9A7E6B8CAA55 /* preprocess.c */; };
+		73250F646978EA64D4734CFC /* exc_20_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 2058095D6A00537B0BCB311E /* exc_20_32_table.c */; };
+		73F0F50A3EA272CD87E3255E /* QSOActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E02AD33FF0D7EC7FE72E007 /* QSOActivityController.swift */; };
+		756761DE246C3DF2E3EC52FC /* Station+Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16252E19E45B823180D32398 /* Station+Location.swift */; };
+		76DEAADC0DC96FE7A7CEFB1C /* EchoLinkProxyProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F349C56B39473A8B9FF00620 /* EchoLinkProxyProtocol.swift */; };
+		76DFFE0CB6E660E39AC753A5 /* gsm_create.c in Sources */ = {isa = PBXBuildFile; fileRef = 5A9FEC91B610C26333F3E8E5 /* gsm_create.c */; };
+		77BC96485A0B74950F76B150 /* PCMLinearResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */; };
+		793CE5F371DFA0BBCB61D10A /* DirectorySearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD466FE90495150F47D7079 /* DirectorySearchTests.swift */; };
+		7A0CE7B8A584C6106159E1E2 /* LocalDemoAudioBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F58F29DD9D6514550B77B75 /* LocalDemoAudioBuffer.swift */; };
+		7A98D19FE19268F42BC57C38 /* StationLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ED33A0FCE92FF8ECD1BBBE1 /* StationLocationTests.swift */; };
+		7AEC38711B265F6749B2F286 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A522A7344F5E97A24AA170C /* SettingsViewModel.swift */; };
+		7B0BED77A2FAF34BF201A85A /* exc_5_256_table.c in Sources */ = {isa = PBXBuildFile; fileRef = ED1F333CE93C0F75C93740D8 /* exc_5_256_table.c */; };
+		7C946AA507A6FEBFE50E8952 /* gsm_explode.c in Sources */ = {isa = PBXBuildFile; fileRef = 74A3C8B5FC58640E614541B3 /* gsm_explode.c */; };
+		7D2E1B5749FB3CD21B7E44E3 /* modes.c in Sources */ = {isa = PBXBuildFile; fileRef = 7935FF2131E8B9B7F23AA7AF /* modes.c */; };
+		7D394FD29AD0E853B9D1C438 /* QSOHubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641E5CA234459D7B966CA2A9 /* QSOHubTests.swift */; };
+		7DFE71A35DB6D1FA69060762 /* long_term.c in Sources */ = {isa = PBXBuildFile; fileRef = 7FE4420220A9AF3ECCD84FDB /* long_term.c */; };
+		7E767CE10AE8B406BA0692A5 /* BoundUDPSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7377924654671BCB1D441E7 /* BoundUDPSocket.swift */; };
+		7E9A8B9F09523B6025EAB818 /* exc_5_256_table.c in Sources */ = {isa = PBXBuildFile; fileRef = ED1F333CE93C0F75C93740D8 /* exc_5_256_table.c */; };
+		800018790496AA13D682A761 /* CallAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DCEF6146DA2810B27C7DD1 /* CallAccessPolicy.swift */; };
+		8444049B055945FAF5D5E9C2 /* lsp_tables_nb.c in Sources */ = {isa = PBXBuildFile; fileRef = F066B9F54ED35CBA89C6C937 /* lsp_tables_nb.c */; };
+		84CB3AB1FFB8C7C29A396FDF /* decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 8C72D8DEA106DEFAD2868625 /* decode.c */; };
+		84E9021F9F07B0AC62BFDC62 /* ltp.c in Sources */ = {isa = PBXBuildFile; fileRef = A26BB8ABEF7B95D9E05E2365 /* ltp.c */; };
+		85B8BF98DA518BE9AB788C4E /* rpe.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E1C870C75EFB0D77AE8F29A /* rpe.c */; };
+		877B72FFC31582F08F74C2DC /* code.c in Sources */ = {isa = PBXBuildFile; fileRef = 946733CA1FC5012A240792CA /* code.c */; };
+		88D3077F693C42A43BD5C244 /* EchoLinkProxyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F056559D3E04DA72FF6FDA /* EchoLinkProxyClient.swift */; };
+		8924175E608905519F1E20CB /* SvxLinkPTYTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DED06C2E2DB60658CC1AA2 /* SvxLinkPTYTransport.swift */; };
+		8AA96E887B61D0AE2D036852 /* InboundHostSessionMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FA40CA3FB11465D5ECAC9A /* InboundHostSessionMachine.swift */; };
+		8F08D59E2CA78A98A0CB1FC0 /* BoundUDPSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8AB645B1086D55A593508F7 /* BoundUDPSocketTests.swift */; };
+		8FF100F43D8401823EEBB2A3 /* CallCQService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */; };
+		90053FF31E51AD107054AF7F /* cb_search.c in Sources */ = {isa = PBXBuildFile; fileRef = 6F6B82FDD60798A38F9145E0 /* cb_search.c */; };
+		9049CA223D3D254C8C756125 /* lsp_tables_nb.c in Sources */ = {isa = PBXBuildFile; fileRef = F066B9F54ED35CBA89C6C937 /* lsp_tables_nb.c */; };
+		90A1A652861E35A9BB2674A7 /* CallCQView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E46B3D0B9DD67B5D3E0B1EE5 /* CallCQView.swift */; };
+		9332E43BFAB873AB64A6573E /* DirectoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6190CABA5CE02F9171FB0509 /* DirectoryView.swift */; };
+		93DAE693A7119F922144BAD9 /* modes.c in Sources */ = {isa = PBXBuildFile; fileRef = 7935FF2131E8B9B7F23AA7AF /* modes.c */; };
+		9442B2A6A3AB309FA32C3B53 /* DirectoryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F386690E3D817CE2EE709B11 /* DirectoryClient.swift */; };
+		94475626AF23EA0A04ADA252 /* gsm_decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 93304898C5B9D4B78B98237E /* gsm_decode.c */; };
+		95B6744AB09D532C906FAF85 /* EchoLinkProxyProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F349C56B39473A8B9FF00620 /* EchoLinkProxyProtocol.swift */; };
+		95D350E3F5679477818A7C97 /* EchoLinkDirectoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B8CE96F7CB370565984790 /* EchoLinkDirectoryService.swift */; };
+		9638E3C7916D3E5E369D55D8 /* CallCQClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B5F2805612ED351FB9E86D /* CallCQClient.swift */; };
+		964ED6C4B640146A330F8523 /* QSOSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B083C35268C27C15951976 /* QSOSession.swift */; };
+		969EA72E52B7723F16B67150 /* QSOSharedPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CEFCF75CD4167060468E9B1 /* QSOSharedPanels.swift */; };
+		97416DBDFC5FA3AB6228B8B7 /* PTTIntentSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E42AD9781FFBA40E131751 /* PTTIntentSelectionTests.swift */; };
+		979C0E0B4B9DF55D013B7969 /* WatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CF47B30ABAE20BF606F9324 /* WatchApp.swift */; };
+		9944E84DEF246D3BDD525C8D /* EchoLinkConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FC7B0125184C014B0BBB878 /* EchoLinkConnectionService.swift */; };
+		9946697E0BF0066E36B31874 /* speex_callbacks.c in Sources */ = {isa = PBXBuildFile; fileRef = CB5E241E34C943B235347E15 /* speex_callbacks.c */; };
+		9948946693DC2FCDF73DD80F /* SvxLinkControlProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B522515CD21BF1C4241AE397 /* SvxLinkControlProtocolTests.swift */; };
+		9A71926034EED8D3EBA9F24F /* window.c in Sources */ = {isa = PBXBuildFile; fileRef = 3B33841C21AE763BB44093FA /* window.c */; };
+		9ABC42B6BD501158C5BF9207 /* SpeexCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */; };
+		9B6711E47793098542E480AB /* BoundUDPSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7377924654671BCB1D441E7 /* BoundUDPSocket.swift */; };
+		9CCEA08E8CE05EFABCACB3D6 /* InboundStationVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338AB0FEADA762E13F22D83C /* InboundStationVerifier.swift */; };
+		9DF4B545DBAAB048C3972AC7 /* high_lsp_tables.c in Sources */ = {isa = PBXBuildFile; fileRef = AD18AEA7984E41E3A9F31558 /* high_lsp_tables.c */; };
+		9EEEAB096E466F5A266197FB /* EchoLinkProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D8A245BA2FB55CEB5CB4B7C /* EchoLinkProxyConfiguration.swift */; };
+		9F7683F6C3D0625106339643 /* EchoLinkProxySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCE5B934899E909C6178B00 /* EchoLinkProxySession.swift */; };
+		A16514B7B4F5109F4E234405 /* ActiveNodeParticipant.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB00632BC7FE525A8838DB8C /* ActiveNodeParticipant.swift */; };
+		A249A59197CC1395C8A1CD18 /* StationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43631BB64688D1A3FC8A1AB0 /* StationDetailSheet.swift */; };
+		A2557EB720D58E0E533A3D3B /* LocalDemoAudioBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F698176A60DD005C9990551C /* LocalDemoAudioBufferTests.swift */; };
+		A2D4FCAE1B68702BA5A33F52 /* EchoLinkAutomaticDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85EA15343F2892B2CDF4D408 /* EchoLinkAutomaticDirectoryTests.swift */; };
+		A4B31933217A689C62BFC076 /* CallCQTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9B8219BBAAB71988872820 /* CallCQTests.swift */; };
+		A76C47D2BC06F34A0799D067 /* CallAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18704A39DC9EB635C80C43DC /* CallAccessPolicyTests.swift */; };
+		A879B4C4107D3EFB9F13A0F5 /* exc_10_16_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C89ACCDAF59AD3E0795D757 /* exc_10_16_table.c */; };
+		AA6F0F453BA48B74A6FCB8BB /* ReverbQSOLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B86D4ECD7CF94CE219DA67D5 /* ReverbQSOLiveActivity.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AC71A364B592C9C9C1C22256 /* debug.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E104D810A0B3F911DB4AB90 /* debug.c */; };
+		ACD83EE9294A87E65F722D1C /* code.c in Sources */ = {isa = PBXBuildFile; fileRef = 946733CA1FC5012A240792CA /* code.c */; };
+		ADBA33E5E994EABA9EEE8032 /* QSORecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF9EC01347B55DF2ED92158 /* QSORecordingTests.swift */; };
+		AED126344E843568ECC2775A /* DemoCallCQBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFDD947DEC6E73999CA1947E /* DemoCallCQBackend.swift */; };
+		AF422DF83AFF4F73C13E9F2B /* EchoLinkConferenceHostService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */; };
+		AFACD13DAD8583A5F3A4A719 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A88B9776F4DD27D96376EBF /* SettingsView.swift */; };
+		B0724361B45D1FF67D1DFA63 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CCE1B83C11A08A41F7474DF4 /* WatchConnectivity.framework */; };
+		B0AA5120ED2DBA39C473D53A /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = 540BBC2FF76B995FFDDD95D2 /* lpc.c */; };
+		B0AA6CE5F763E1C262B5C492 /* gsm_explode.c in Sources */ = {isa = PBXBuildFile; fileRef = 74A3C8B5FC58640E614541B3 /* gsm_explode.c */; };
+		B25567AA490EC9BBCD3DD5D2 /* stereo.c in Sources */ = {isa = PBXBuildFile; fileRef = B06333F5368B070986E69E53 /* stereo.c */; };
+		B2C5253C06B8D7BEFB800BFF /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */; };
+		B331EDD994D2792DB6C0EC31 /* LocalDemoAudioBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F58F29DD9D6514550B77B75 /* LocalDemoAudioBuffer.swift */; };
+		B4329F557E48B03236CC1F7A /* PCMLinearResamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7A3F3EF59B5150450CA40B /* PCMLinearResamplerTests.swift */; };
+		B53CB55AA1867768F60264DE /* EchoLinkRegistrationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAAD9517A7E5BBFCFEC23A /* EchoLinkRegistrationClient.swift */; };
+		B54E8E96A9C3DAF0A9A2DFD5 /* PersonalStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2E5154D0CAC74CE254C46B /* PersonalStationView.swift */; };
+		B5FAFBA6E2ACDC727720E475 /* FavoritesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448A6DBA626F851FDB93E89C /* FavoritesViewModel.swift */; };
+		B6C59E9D05F8742F2242028E /* EchoLinkRegistrationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */; };
+		B94FBDF96B0B8A4B94EAC061 /* LocalDemoAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */; };
+		BD8163EC6791FD3B8FCEA70B /* speex.c in Sources */ = {isa = PBXBuildFile; fileRef = EEC1CB51BBBAB2A3879362BA /* speex.c */; };
+		BEB354C07BFC852E32F9FFF2 /* gsm_implode.c in Sources */ = {isa = PBXBuildFile; fileRef = E8BC7788B9DCE592355F4DD2 /* gsm_implode.c */; };
+		BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */; };
+		C02230AAF3750891766654C5 /* InboundHostSessionMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FA40CA3FB11465D5ECAC9A /* InboundHostSessionMachine.swift */; };
+		C03632AC19A627B7CD4EDCCB /* RecentConnectionsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */; };
+		C08F21E39AED98174979350D /* libgsm-COPYRIGHT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 9B41435EC287F7056247E1CA /* libgsm-COPYRIGHT.txt */; };
+		C239F7A64A0060C733F54887 /* RecentConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B67CB43BBD0B2ABDC8D144A /* RecentConnection.swift */; };
+		C2CA22193ECBDFB9BC8ABE5A /* QSORecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */; };
+		C3D2C10880DD8023F2157575 /* table.c in Sources */ = {isa = PBXBuildFile; fileRef = 6E255B3BF91775C965FB1FF6 /* table.c */; };
+		C5E80421B7EB42583CD19CD6 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF565DD4475E19F4A8C264C /* AudioEngine.swift */; };
+		C6ABFC8C479EB005CBD69933 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE902BACF5D5E9E9421692AA /* Network.framework */; };
+		C6DD77E5AE4984630CC2B51D /* gsm_decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 93304898C5B9D4B78B98237E /* gsm_decode.c */; };
+		C7E34A4B73A27839EAB76562 /* speex_callbacks.c in Sources */ = {isa = PBXBuildFile; fileRef = CB5E241E34C943B235347E15 /* speex_callbacks.c */; };
+		C82AD6645A5EB0147870744C /* ReverbQSOApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C38FC54681270081A0DD0F /* ReverbQSOApp.swift */; };
+		C8BA15F960E39C5FC451BCC6 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6D0EEB971EC92EB2FE7F099C /* Security.framework */; };
+		C94AB257995CCD2E953202C7 /* RecordingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC67AFDF8A99EB55D03939F /* RecordingsView.swift */; };
+		CA63147E3FA34B747AE3B1F5 /* DirectoryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F386690E3D817CE2EE709B11 /* DirectoryClient.swift */; };
+		CB4D868D2073505AC70B7287 /* StationParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6854FEBB9C8E8F8282081A3 /* StationParser.swift */; };
+		CE660C4BA8192D706E37A667 /* CallRestrictionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DD9CC149C9EF38AF97567B3 /* CallRestrictionsView.swift */; };
+		CF3455D43AD11C094A873E4C /* gsm_encode.c in Sources */ = {isa = PBXBuildFile; fileRef = 81575DAAD603968D8BDCBA00 /* gsm_encode.c */; };
+		D090A7E9ABF3A6D16C1BC19C /* bits.c in Sources */ = {isa = PBXBuildFile; fileRef = 2389A93C460281932BAF12B3 /* bits.c */; };
+		D2B6E6B5322408D2B41EA69B /* StationRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 978F78A424A8084D5A4FA09C /* StationRow.swift */; };
+		D338C344B04CE7447A030F54 /* SpeexCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C9B9A149D9B1ADA8FC591DD /* SpeexCodec.swift */; };
+		D3B355EDDE31A6291E19B97B /* LocalDemoAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */; };
+		D3F358E5FC6724C23FD6DA1C /* ConferenceHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B3D70C1D1DC72D5A640FF6 /* ConferenceHostView.swift */; };
+		D491E6BB6104D0784CD4146F /* EchoLinkConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FC7B0125184C014B0BBB878 /* EchoLinkConnectionService.swift */; };
+		D4A320210325C480446A4ABD /* nb_celp.c in Sources */ = {isa = PBXBuildFile; fileRef = 9438F25F6A48DC6CC461D715 /* nb_celp.c */; };
+		D5B6057F855E93BC29452054 /* EchoLinkAudioPacketCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD9C77E7FE189E57217A4471 /* EchoLinkAudioPacketCodec.swift */; };
+		D6DCE1805CD24A9BF307C4F4 /* window.c in Sources */ = {isa = PBXBuildFile; fileRef = 3B33841C21AE763BB44093FA /* window.c */; };
+		D70F8F05F92EC9F779B04AEA /* QSOHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7BB94D5DD2FD18660428C1 /* QSOHub.swift */; };
+		D779D1CAC42370718379092D /* Station+Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16252E19E45B823180D32398 /* Station+Location.swift */; };
+		D7A301772D3C88F82035FCA0 /* EchoLinkRelayConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD741F40E453F9281698051 /* EchoLinkRelayConnectionTests.swift */; };
+		D9B0C5FBA9E29A6221DA832A /* CallCQService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */; };
+		DA0EBF6389ED83D7DDA9B083 /* EchoLinkDTMFToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DDD9699C439E9FF767B022C /* EchoLinkDTMFToneGenerator.swift */; };
+		DA965CCC26750FBFA4FE8D9D /* libspeex-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = 02C75C610A6A12E74CBAFA1E /* libspeex-COPYING.txt */; };
+		DB47D17FB205FFE9F6026275 /* gsm_print.c in Sources */ = {isa = PBXBuildFile; fileRef = 4CBA4DF9BC6DFC895B7C358C /* gsm_print.c */; };
+		DB825C1D3F9E847FF6B11C6B /* exc_20_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 2058095D6A00537B0BCB311E /* exc_20_32_table.c */; };
+		DBE49AB50EBD26FBD16620CD /* CallRestrictionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DD9CC149C9EF38AF97567B3 /* CallRestrictionsView.swift */; };
+		DC3A6FDBF08BF30CB5FA45C4 /* stereo.c in Sources */ = {isa = PBXBuildFile; fileRef = B06333F5368B070986E69E53 /* stereo.c */; };
+		DDB74CD033E92065A76BE254 /* add.c in Sources */ = {isa = PBXBuildFile; fileRef = AAB92D68E6ABFC59CE9AA61D /* add.c */; };
+		DF0CA91EBFF1804635F74AB5 /* SvxLinkPTYTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DED06C2E2DB60658CC1AA2 /* SvxLinkPTYTransport.swift */; };
+		DFF95137FC59E841C68737C0 /* EchoLinkPublicProxyList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */; };
+		E1A8C3F5C8697B2BBEAA7F47 /* ConferenceFloorRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F58266ADAC833BA9E40B206 /* ConferenceFloorRouter.swift */; };
+		E3122362A6E2E2DE2F2E9520 /* gsm_option.c in Sources */ = {isa = PBXBuildFile; fileRef = B75F5C04BC0B9CF5A0A76CE9 /* gsm_option.c */; };
+		E334456CD6F9133D78385090 /* preprocess.c in Sources */ = {isa = PBXBuildFile; fileRef = 8794B05E140F9A7E6B8CAA55 /* preprocess.c */; };
+		E448A9A60D35F0812700A066 /* lsp.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F22AA24E3CA040D11C6ABC1 /* lsp.c */; };
+		E44FC2CE71ABBFFB2AAF2D59 /* Upstream-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = F1D19C66A8D6697C34C7ABEE /* Upstream-MIT.txt */; };
+		E50BAA77BABF6AD040645D31 /* EchoLinkAutomaticTransportSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE44705AB6D2A345B0D324B /* EchoLinkAutomaticTransportSelector.swift */; };
+		E50F8964FE8149688CE79D9C /* EchoLinkDTMFToneGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A365293C9B8CE2A7F3ABF64 /* EchoLinkDTMFToneGeneratorTests.swift */; };
+		E649AEFCAD2E0874E16D92BF /* hexc_table.c in Sources */ = {isa = PBXBuildFile; fileRef = C5B801BC8CE57413932CAA3D /* hexc_table.c */; };
+		E70E441F228E14A2DD45FB35 /* EchoLinkAutomaticTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7319FA73A2AEE0477D89F4 /* EchoLinkAutomaticTransportTests.swift */; };
+		E74B32228F3B61D99393033D /* ConferenceReceiveAudioCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5905F0C404FCEB7D4B845D6 /* ConferenceReceiveAudioCodec.swift */; };
+		E88254BFFAEFFD3D3757F979 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2EE327B18F5BB1536DCE6F /* ChatViewModel.swift */; };
+		E8E31F95B72FA9F44A81DD9F /* StationParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6854FEBB9C8E8F8282081A3 /* StationParser.swift */; };
+		E92838737F5E197F186B386D /* ReverbQSOWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 786A980CCA06660F26018B73 /* ReverbQSOWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EB142C8331261747EC78878E /* sb_celp.c in Sources */ = {isa = PBXBuildFile; fileRef = FD5302BEBABF06ADEA772F34 /* sb_celp.c */; };
+		EF587A881B3A96A15FADC450 /* MacMenuBarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 813D5F261DCB865687D52193 /* MacMenuBarBridge.swift */; };
+		EFABEC182E686CF6977500C9 /* EchoLinkParticipantParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A551210CAF19BE6A4905217B /* EchoLinkParticipantParserTests.swift */; };
+		EFB1D0D5EA0728AB17793F16 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF565DD4475E19F4A8C264C /* AudioEngine.swift */; };
+		F021D91D685C83A04068DABF /* SpeexCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C9B9A149D9B1ADA8FC591DD /* SpeexCodec.swift */; };
+		F031320341C277C9E119DA21 /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = BF2049383B9D05134465FD85 /* lpc.c */; };
+		F05B64227F99934D4886FD51 /* filters.c in Sources */ = {isa = PBXBuildFile; fileRef = C44CD3C28C8255DC249F6ADA /* filters.c */; };
+		F212550C88F1C3BC34A17611 /* DemoCallCQBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFDD947DEC6E73999CA1947E /* DemoCallCQBackend.swift */; };
+		F3EDF6C71ECEDC5C596AB0EE /* PermissionOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004D8200E823E3E5861D4CEB /* PermissionOnboardingView.swift */; };
+		F542E433FF361780C8343B26 /* LocalDemoAnnouncement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F117EED259DCA53C15B7A085 /* LocalDemoAnnouncement.swift */; };
+		F5FDDE175F912C0DEDA7B213 /* PCMLinearResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */; };
+		F6A8EF258F54DA4ECDE8AC97 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8B202E231EC5BD0BBA49C12 /* ChatView.swift */; };
+		F8602C2973C6C9D4F2B33360 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */; };
+		F8D1508BC5BA5771011B7865 /* decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 8C72D8DEA106DEFAD2868625 /* decode.c */; };
+		F8F9C851BA3574C9D8B97A4C /* InboundStationVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338AB0FEADA762E13F22D83C /* InboundStationVerifier.swift */; };
+		F93FE3B28F807DF40498D63B /* EchoLinkProxyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F056559D3E04DA72FF6FDA /* EchoLinkProxyClient.swift */; };
+		F9AC483535235538BE861ECA /* EchoLinkParticipantParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D265BFCB3F8D19817B9DB1F /* EchoLinkParticipantParser.swift */; };
+		FA5064DEEAC522E34334FF68 /* CountryFilterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E19CFA9864CE55BB358E5E7 /* CountryFilterView.swift */; };
+		FA5B3B1C1B2880DD6682E2DC /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAC1A809039A9D6FD61B7D34 /* StatusBadge.swift */; };
+		FA7C8E01F5C7B5FAB9F38C7E /* PTTButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF817B0C6CDCCE5A10777A8 /* PTTButton.swift */; };
+		FAA05E3CBE1EB8F1B7F66EB8 /* InboundHostSessionMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED2D9E8155E35AF335F677E7 /* InboundHostSessionMachineTests.swift */; };
+		FAD243184FBAEE5721CE0E8D /* ltp.c in Sources */ = {isa = PBXBuildFile; fileRef = A26BB8ABEF7B95D9E05E2365 /* ltp.c */; };
+		FBA553C3CDBCB20CD88EA4FC /* gsm_encode.c in Sources */ = {isa = PBXBuildFile; fileRef = 81575DAAD603968D8BDCBA00 /* gsm_encode.c */; };
+		FC418E1729779C61928F53DE /* sb_celp.c in Sources */ = {isa = PBXBuildFile; fileRef = FD5302BEBABF06ADEA772F34 /* sb_celp.c */; };
+		FCC1213CEBB82588A71FC217 /* short_term.c in Sources */ = {isa = PBXBuildFile; fileRef = 4819D3181286272AEE95C4D1 /* short_term.c */; };
+		FCE4311C8A97BF3D698AA7EF /* gain_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 18DE9595BD7F0CA4E517E932 /* gain_table.c */; };
+		FD814250832A9BF6533E37A1 /* SvxLinkControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB9B23D4DBAC0A508F74AAF /* SvxLinkControlProtocol.swift */; };
+		FDCF2BD94C2ED4CF90DCB2F8 /* WatchViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE35A47DD3CB006D1844A11F /* WatchViews.swift */; };
+		FE457B84921483D3C2355B0B /* short_term.c in Sources */ = {isa = PBXBuildFile; fileRef = 4819D3181286272AEE95C4D1 /* short_term.c */; };
+		FEF9695AB272C78EE6F31D4C /* cb_search.c in Sources */ = {isa = PBXBuildFile; fileRef = 6F6B82FDD60798A38F9145E0 /* cb_search.c */; };
+		FF38F2997CC5CBB8009DCBE0 /* EchoLinkConferenceHostService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		69DC81CA102F99E873E16C01 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E9057CD74AB7C46BE4C5AF14 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0963C9641D1783EC17664061;
+			remoteInfo = ReverbQSO;
+		};
+		7B334319B179D5016FBF2B19 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E9057CD74AB7C46BE4C5AF14 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E768610831FB4E200906B7BF;
+			remoteInfo = ReverbQSOWatch;
+		};
+		EBBFB912EC9E34540210FEC1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E9057CD74AB7C46BE4C5AF14 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 119E4B54D7653CBE63E132E4;
+			remoteInfo = ReverbQSOLiveActivity;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		156EBDFB4A40747EF209272F /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				E92838737F5E197F186B386D /* ReverbQSOWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4F79BB1F6DF511A2034DC30 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AA6F0F453BA48B74A6FCB8BB /* ReverbQSOLiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		004D8200E823E3E5861D4CEB /* PermissionOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionOnboardingView.swift; sourceTree = "<group>"; };
+		02C75C610A6A12E74CBAFA1E /* libspeex-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "libspeex-COPYING.txt"; sourceTree = "<group>"; };
+		054B7BD7041172EBD9AC6D6E /* arch.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = arch.h; sourceTree = "<group>"; };
+		0868D0D823C31322A9966D15 /* LiveTransportSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTransportSmokeTests.swift; sourceTree = "<group>"; };
+		09A2E4FAB66390BE5E9512D2 /* exc_5_64_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_5_64_table.c; sourceTree = "<group>"; };
+		0B93CA5137AEFF7BD423634C /* ReverbQSOMenuBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ReverbQSOMenuBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0BB3C5176E6E8C112434BA90 /* fixed_debug.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fixed_debug.h; sourceTree = "<group>"; };
+		0C023F9762DE7E7D40B25C57 /* ReverbQSOTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ReverbQSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		0C7BB94D5DD2FD18660428C1 /* QSOHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOHub.swift; sourceTree = "<group>"; };
+		0CEFCF75CD4167060468E9B1 /* QSOSharedPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOSharedPanels.swift; sourceTree = "<group>"; };
+		0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeexCodecTests.swift; sourceTree = "<group>"; };
+		0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayProtocol.swift; sourceTree = "<group>"; };
+		0EF259205F25C1F6433FA1F1 /* lpc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lpc.h; sourceTree = "<group>"; };
+		0F9B8219BBAAB71988872820 /* CallCQTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQTests.swift; sourceTree = "<group>"; };
+		13AECC454C0E3A6C130018BA /* RecentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentView.swift; sourceTree = "<group>"; };
+		16252E19E45B823180D32398 /* Station+Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Station+Location.swift"; sourceTree = "<group>"; };
+		1772D228B4CB8B1F1BB95A54 /* filters_sse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = filters_sse.h; sourceTree = "<group>"; };
+		18704A39DC9EB635C80C43DC /* CallAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAccessPolicyTests.swift; sourceTree = "<group>"; };
+		18DE9595BD7F0CA4E517E932 /* gain_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gain_table.c; sourceTree = "<group>"; };
+		19672D87B92EB2DD4C10790C /* math_approx.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = math_approx.h; sourceTree = "<group>"; };
+		1C4B5207E290F64A1C3FB971 /* lpc_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lpc_bfin.h; sourceTree = "<group>"; };
+		1D265BFCB3F8D19817B9DB1F /* EchoLinkParticipantParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkParticipantParser.swift; sourceTree = "<group>"; };
+		1E104D810A0B3F911DB4AB90 /* debug.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = debug.c; sourceTree = "<group>"; };
+		2018F4783A7484CCB5D36ECD /* EchoLinkPTTTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkPTTTransitionTests.swift; sourceTree = "<group>"; };
+		2058095D6A00537B0BCB311E /* exc_20_32_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_20_32_table.c; sourceTree = "<group>"; };
+		207144B98F24C531C7B55843 /* ChatMessageNotificationCursorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageNotificationCursorTests.swift; sourceTree = "<group>"; };
+		21118117E514A70F447CA1FC /* DirectoryClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryClientTests.swift; sourceTree = "<group>"; };
+		21CC0DAA4C3D90A827733833 /* ConferenceReceiveAudioCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceReceiveAudioCodecTests.swift; sourceTree = "<group>"; };
+		223F4858A0A70CB4ABD9FF22 /* fftwrap.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fftwrap.h; sourceTree = "<group>"; };
+		2354B7B407A484B664195349 /* smallft.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = smallft.h; sourceTree = "<group>"; };
+		2389A93C460281932BAF12B3 /* bits.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bits.c; sourceTree = "<group>"; };
+		2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentConnectionsService.swift; sourceTree = "<group>"; };
+		29B8CE96F7CB370565984790 /* EchoLinkDirectoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkDirectoryService.swift; sourceTree = "<group>"; };
+		2A335C8980965D0ED905D32F /* ReverbQSOMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ReverbQSOMac.entitlements; sourceTree = "<group>"; };
+		2AD466FE90495150F47D7079 /* DirectorySearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectorySearchTests.swift; sourceTree = "<group>"; };
+		2B67CB43BBD0B2ABDC8D144A /* RecentConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentConnection.swift; sourceTree = "<group>"; };
+		2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQService.swift; sourceTree = "<group>"; };
+		2CCD391EA2912194E9992E5C /* vq_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vq_arm4.h; sourceTree = "<group>"; };
+		2CF47B30ABAE20BF606F9324 /* WatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchApp.swift; sourceTree = "<group>"; };
+		2D8A245BA2FB55CEB5CB4B7C /* EchoLinkProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxyConfiguration.swift; sourceTree = "<group>"; };
+		2DDD9699C439E9FF767B022C /* EchoLinkDTMFToneGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkDTMFToneGenerator.swift; sourceTree = "<group>"; };
+		2E1C870C75EFB0D77AE8F29A /* rpe.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = rpe.c; sourceTree = "<group>"; };
+		31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteVoiceActivityTests.swift; sourceTree = "<group>"; };
+		338AB0FEADA762E13F22D83C /* InboundStationVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboundStationVerifier.swift; sourceTree = "<group>"; };
+		3622B4A164BD5FF13AAC02C6 /* ltp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ltp.h; sourceTree = "<group>"; };
+		37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceDiagnosticLog.swift; sourceTree = "<group>"; };
+		3845A3F2B147B6AD5615E387 /* cb_search_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search_bfin.h; sourceTree = "<group>"; };
+		3AD741F40E453F9281698051 /* EchoLinkRelayConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayConnectionTests.swift; sourceTree = "<group>"; };
+		3B33841C21AE763BB44093FA /* window.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = window.c; sourceTree = "<group>"; };
+		3C24342507C46DB012DB052C /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		3ED33A0FCE92FF8ECD1BBBE1 /* StationLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationLocationTests.swift; sourceTree = "<group>"; };
+		3F4AC8ABDC969976817E1E46 /* config.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = config.h; sourceTree = "<group>"; };
+		3F58F29DD9D6514550B77B75 /* LocalDemoAudioBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAudioBuffer.swift; sourceTree = "<group>"; };
+		3FCFE0628164575D1111C6CC /* EchoLinkRelayClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayClientTests.swift; sourceTree = "<group>"; };
+		40B54A4D8D6A20FF5BA944A0 /* EchoLinkRelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayClient.swift; sourceTree = "<group>"; };
+		43631BB64688D1A3FC8A1AB0 /* StationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationDetailSheet.swift; sourceTree = "<group>"; };
+		448A6DBA626F851FDB93E89C /* FavoritesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModel.swift; sourceTree = "<group>"; };
+		44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAccount.swift; sourceTree = "<group>"; };
+		4569455FBA9B4F235468EEA9 /* MacMenuBarProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuBarProtocol.swift; sourceTree = "<group>"; };
+		46F09EEB9EBD66D0CCB435A5 /* vq_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vq_bfin.h; sourceTree = "<group>"; };
+		47557F6D7931EBD2F3309E6E /* ReverbQSO.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ReverbQSO.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		48073EE255B887359F1EC185 /* WatchPhoneBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPhoneBridge.swift; sourceTree = "<group>"; };
+		4817DD9C6319A3EA3180EFBE /* hexc_10_32_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hexc_10_32_table.c; sourceTree = "<group>"; };
+		4819D3181286272AEE95C4D1 /* short_term.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = short_term.c; sourceTree = "<group>"; };
+		4CBA4DF9BC6DFC895B7C358C /* gsm_print.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_print.c; sourceTree = "<group>"; };
+		4CC3F3D7AFC4098E4D1B3011 /* vorbis_psy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vorbis_psy.h; sourceTree = "<group>"; };
+		4D9043D7B8497DCBA7B0A88E /* gsm_destroy.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_destroy.c; sourceTree = "<group>"; };
+		4DD9CC149C9EF38AF97567B3 /* CallRestrictionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRestrictionsView.swift; sourceTree = "<group>"; };
+		4F0BC3F26B40B9848A3D6DAA /* vq_sse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vq_sse.h; sourceTree = "<group>"; };
+		5240BE8F4255098747FDD95C /* LocalDemoAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAccountTests.swift; sourceTree = "<group>"; };
+		53E7C96DEF0AC33E9E3A9708 /* QSOView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOView.swift; sourceTree = "<group>"; };
+		540BBC2FF76B995FFDDD95D2 /* lpc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lpc.c; sourceTree = "<group>"; };
+		548C83CE5A2D89DD54938BF9 /* ReverbQSOMenuBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReverbQSOMenuBarApp.swift; sourceTree = "<group>"; };
+		563A30A094C99FE043DBC099 /* QSOViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOViewModel.swift; sourceTree = "<group>"; };
+		56915CEFBA0C1EB93D38FE89 /* EchoLinkAudioPacketCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAudioPacketCodecTests.swift; sourceTree = "<group>"; };
+		5A522A7344F5E97A24AA170C /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		5A76596A804ABD401B3D7DB4 /* misc_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = misc_bfin.h; sourceTree = "<group>"; };
+		5A9FEC91B610C26333F3E8E5 /* gsm_create.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_create.c; sourceTree = "<group>"; };
+		5BAC19EA88D18BE0291B97B2 /* FavoritesViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModelTests.swift; sourceTree = "<group>"; };
+		5C89ACCDAF59AD3E0795D757 /* exc_10_16_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_10_16_table.c; sourceTree = "<group>"; };
+		5C994F6CBD263D438531D247 /* gain_table_lbr.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gain_table_lbr.c; sourceTree = "<group>"; };
+		5D3B239D0A3AB9496A3E191E /* GSMCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GSMCodec.swift; sourceTree = "<group>"; };
+		60B5F2805612ED351FB9E86D /* CallCQClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQClient.swift; sourceTree = "<group>"; };
+		6190CABA5CE02F9171FB0509 /* DirectoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryView.swift; sourceTree = "<group>"; };
+		62021BBBE6F315E82F4A880D /* lsp_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lsp_bfin.h; sourceTree = "<group>"; };
+		62F0A3C60E85BEE4EDF9C8C5 /* fixed_arm5e.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fixed_arm5e.h; sourceTree = "<group>"; };
+		641E5CA234459D7B966CA2A9 /* QSOHubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOHubTests.swift; sourceTree = "<group>"; };
+		64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSORecordingService.swift; sourceTree = "<group>"; };
+		6588487C3BF2989B9C82C3F0 /* StationParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationParserTests.swift; sourceTree = "<group>"; };
+		65ED74C4A4BFBE60B535920A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		666F258FA239959760439D55 /* PTTIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTTIntent.swift; sourceTree = "<group>"; };
+		684E37027F559B5EF9AA9458 /* lsp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lsp.h; sourceTree = "<group>"; };
+		69BA3B025A12811D1FA4D19B /* CallCQWireTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQWireTests.swift; sourceTree = "<group>"; };
+		6D0EEB971EC92EB2FE7F099C /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		6E255B3BF91775C965FB1FF6 /* table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = table.c; sourceTree = "<group>"; };
+		6E357E23B6E8B4CDB554D59F /* WatchPTTIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPTTIntent.swift; sourceTree = "<group>"; };
+		6E44415E3AFF18DB4A066ED0 /* WatchAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAppModel.swift; sourceTree = "<group>"; };
+		6F6B82FDD60798A38F9145E0 /* cb_search.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = cb_search.c; sourceTree = "<group>"; };
+		707F21B4128615CACF0B7725 /* vq.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vq.h; sourceTree = "<group>"; };
+		7376C2423E9F207C5AA18744 /* GSMCodecStreamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GSMCodecStreamingTests.swift; sourceTree = "<group>"; };
+		74A3C8B5FC58640E614541B3 /* gsm_explode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_explode.c; sourceTree = "<group>"; };
+		75ACD42FABF777BCD5F3E642 /* QSOActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOActivityWidget.swift; sourceTree = "<group>"; };
+		786A980CCA06660F26018B73 /* ReverbQSOWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ReverbQSOWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7935FF2131E8B9B7F23AA7AF /* modes.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = modes.c; sourceTree = "<group>"; };
+		79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkPublicProxyList.swift; sourceTree = "<group>"; };
+		7A88B9776F4DD27D96376EBF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		7B0BD0230A5B299FCB9C2C1C /* bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bfin.h; sourceTree = "<group>"; };
+		7CC3EB3076AAB4E128370C9C /* kiss_fft.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = kiss_fft.h; sourceTree = "<group>"; };
+		7E54FFFACEC515B96D307039 /* ltp_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ltp_bfin.h; sourceTree = "<group>"; };
+		7EDFA4F00E3FB6A811C80199 /* filters.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = filters.h; sourceTree = "<group>"; };
+		7F22AA24E3CA040D11C6ABC1 /* lsp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lsp.c; sourceTree = "<group>"; };
+		7FE4420220A9AF3ECCD84FDB /* long_term.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = long_term.c; sourceTree = "<group>"; };
+		813D5F261DCB865687D52193 /* MacMenuBarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuBarBridge.swift; sourceTree = "<group>"; };
+		81575DAAD603968D8BDCBA00 /* gsm_encode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_encode.c; sourceTree = "<group>"; };
+		850E2724B4EA1B7110B85BCB /* exc_8_128_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_8_128_table.c; sourceTree = "<group>"; };
+		85EA15343F2892B2CDF4D408 /* EchoLinkAutomaticDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAutomaticDirectoryTests.swift; sourceTree = "<group>"; };
+		8794B05E140F9A7E6B8CAA55 /* preprocess.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = preprocess.c; sourceTree = "<group>"; };
+		8920A84CAF5C5910BE79D7B5 /* vq.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = vq.c; sourceTree = "<group>"; };
+		8C72D8DEA106DEFAD2868625 /* decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = decode.c; sourceTree = "<group>"; };
+		8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectCQSocketPair.swift; sourceTree = "<group>"; };
+		8F06CE461936AB642879E5B8 /* LocalDemoConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoConnectionTests.swift; sourceTree = "<group>"; };
+		8F58266ADAC833BA9E40B206 /* ConferenceFloorRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceFloorRouter.swift; sourceTree = "<group>"; };
+		8FC50F141ED5191797613ED8 /* cb_search_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search_arm4.h; sourceTree = "<group>"; };
+		8FC7B0125184C014B0BBB878 /* EchoLinkConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConnectionService.swift; sourceTree = "<group>"; };
+		90ABBDD741C05A2804F8184B /* EchoLinkPublicProxyListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkPublicProxyListTests.swift; sourceTree = "<group>"; };
+		93304898C5B9D4B78B98237E /* gsm_decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_decode.c; sourceTree = "<group>"; };
+		9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConferenceHostService.swift; sourceTree = "<group>"; };
+		9438F25F6A48DC6CC461D715 /* nb_celp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = nb_celp.c; sourceTree = "<group>"; };
+		946733CA1FC5012A240792CA /* code.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = code.c; sourceTree = "<group>"; };
+		94B3D70C1D1DC72D5A640FF6 /* ConferenceHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceHostView.swift; sourceTree = "<group>"; };
+		96728BCB91479970431E2705 /* os_support.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = os_support.h; sourceTree = "<group>"; };
+		974F1A659815E325DADC68A2 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
+		978F78A424A8084D5A4FA09C /* StationRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationRow.swift; sourceTree = "<group>"; };
+		99B6AACF4601933F1DC7E923 /* SvxLinkPTYTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SvxLinkPTYTransportTests.swift; sourceTree = "<group>"; };
+		9A365293C9B8CE2A7F3ABF64 /* EchoLinkDTMFToneGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkDTMFToneGeneratorTests.swift; sourceTree = "<group>"; };
+		9B41435EC287F7056247E1CA /* libgsm-COPYRIGHT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "libgsm-COPYRIGHT.txt"; sourceTree = "<group>"; };
+		9C9B9A149D9B1ADA8FC591DD /* SpeexCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeexCodec.swift; sourceTree = "<group>"; };
+		9CF565DD4475E19F4A8C264C /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
+		9DE44705AB6D2A345B0D324B /* EchoLinkAutomaticTransportSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAutomaticTransportSelector.swift; sourceTree = "<group>"; };
+		9E02AD33FF0D7EC7FE72E007 /* QSOActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOActivityController.swift; sourceTree = "<group>"; };
+		9E19CFA9864CE55BB358E5E7 /* CountryFilterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryFilterView.swift; sourceTree = "<group>"; };
+		A1BAC787C17CB31D89E67DFD /* quant_lsp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = quant_lsp.h; sourceTree = "<group>"; };
+		A26BB8ABEF7B95D9E05E2365 /* ltp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ltp.c; sourceTree = "<group>"; };
+		A2F056559D3E04DA72FF6FDA /* EchoLinkProxyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxyClient.swift; sourceTree = "<group>"; };
+		A32444518FE355D2119D6015 /* InboundStationVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboundStationVerifierTests.swift; sourceTree = "<group>"; };
+		A3F9E7DB3830DDC7AD71AF54 /* VoicePipelineSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipelineSmokeTests.swift; sourceTree = "<group>"; };
+		A551210CAF19BE6A4905217B /* EchoLinkParticipantParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkParticipantParserTests.swift; sourceTree = "<group>"; };
+		A5809DBE651C23428FB3F1B6 /* EchoLinkRelayProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayProtocolTests.swift; sourceTree = "<group>"; };
+		A589F5DEFDA7E71736CF95BB /* LocalDemoHostingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoHostingTests.swift; sourceTree = "<group>"; };
+		A5DED06C2E2DB60658CC1AA2 /* SvxLinkPTYTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SvxLinkPTYTransport.swift; sourceTree = "<group>"; };
+		A6CF47E8CFE107FE53C7155A /* sb_celp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sb_celp.h; sourceTree = "<group>"; };
+		A7DCFBAA2398518405D9B3EF /* AudioEngineMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineMeterTests.swift; sourceTree = "<group>"; };
+		A8AB645B1086D55A593508F7 /* BoundUDPSocketTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundUDPSocketTests.swift; sourceTree = "<group>"; };
+		A93EB6FCD315DD0049672237 /* nb_celp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = nb_celp.h; sourceTree = "<group>"; };
+		AA78122D8FC42A65E184D975 /* quant_lsp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = quant_lsp.c; sourceTree = "<group>"; };
+		AA9EEA219647547FFD39FE31 /* ltp_sse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ltp_sse.h; sourceTree = "<group>"; };
+		AAB92D68E6ABFC59CE9AA61D /* add.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = add.c; sourceTree = "<group>"; };
+		AB385351E86AA8C82F00DEB4 /* filters_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = filters_bfin.h; sourceTree = "<group>"; };
+		AD18AEA7984E41E3A9F31558 /* high_lsp_tables.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = high_lsp_tables.c; sourceTree = "<group>"; };
+		AD9C77E7FE189E57217A4471 /* EchoLinkAudioPacketCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAudioPacketCodec.swift; sourceTree = "<group>"; };
+		AEAC2C1D377652D9404CF589 /* ltp_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ltp_arm4.h; sourceTree = "<group>"; };
+		AEDAAD9517A7E5BBFCFEC23A /* EchoLinkRegistrationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRegistrationClient.swift; sourceTree = "<group>"; };
+		AFDD947DEC6E73999CA1947E /* DemoCallCQBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoCallCQBackend.swift; sourceTree = "<group>"; };
+		AFF817B0C6CDCCE5A10777A8 /* PTTButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTTButton.swift; sourceTree = "<group>"; };
+		B06333F5368B070986E69E53 /* stereo.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = stereo.c; sourceTree = "<group>"; };
+		B10B94BB44D80968D929DF15 /* GPL-3.0.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "GPL-3.0.txt"; sourceTree = "<group>"; };
+		B1C38FC54681270081A0DD0F /* ReverbQSOApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReverbQSOApp.swift; sourceTree = "<group>"; };
+		B217C54DAD14A45D9EAD0C4F /* cb_search_sse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search_sse.h; sourceTree = "<group>"; };
+		B30EC7A90D38E9AFB2836182 /* ReverbQSO-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ReverbQSO-Bridging-Header.h"; sourceTree = "<group>"; };
+		B48E211EF2DFE11CB88AB9E4 /* VoicePipelineQualityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipelineQualityTests.swift; sourceTree = "<group>"; };
+		B522515CD21BF1C4241AE397 /* SvxLinkControlProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SvxLinkControlProtocolTests.swift; sourceTree = "<group>"; };
+		B6306012C464603483A40F77 /* quant_lsp_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = quant_lsp_bfin.h; sourceTree = "<group>"; };
+		B6854FEBB9C8E8F8282081A3 /* StationParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationParser.swift; sourceTree = "<group>"; };
+		B75F5C04BC0B9CF5A0A76CE9 /* gsm_option.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_option.c; sourceTree = "<group>"; };
+		B86D4ECD7CF94CE219DA67D5 /* ReverbQSOLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ReverbQSOLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B9CBCF25F4506B892B0BFB6E /* filters_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = filters_arm4.h; sourceTree = "<group>"; };
+		BB8A1DE4FA89DB9DCFC0DF96 /* ConferenceFloorRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceFloorRouterTests.swift; sourceTree = "<group>"; };
+		BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = oe_speex.c; sourceTree = "<group>"; };
+		BDC67AFDF8A99EB55D03939F /* RecordingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsView.swift; sourceTree = "<group>"; };
+		BF2049383B9D05134465FD85 /* lpc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lpc.c; sourceTree = "<group>"; };
+		C0B083C35268C27C15951976 /* QSOSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOSession.swift; sourceTree = "<group>"; };
+		C2E30DB1AAC2A305A3F52652 /* cb_search.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search.h; sourceTree = "<group>"; };
+		C32BF61F3C71F980DACE493D /* AudioRouteControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteControl.swift; sourceTree = "<group>"; };
+		C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMLinearResampler.swift; sourceTree = "<group>"; };
+		C44CD3C28C8255DC249F6ADA /* filters.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = filters.c; sourceTree = "<group>"; };
+		C46FE451B3C6D89DD6CA5AAD /* EchoLinkProxyProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxyProtocolTests.swift; sourceTree = "<group>"; };
+		C588F1C170C18D99070E65C1 /* _kiss_fft_guts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = _kiss_fft_guts.h; sourceTree = "<group>"; };
+		C5B801BC8CE57413932CAA3D /* hexc_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hexc_table.c; sourceTree = "<group>"; };
+		C71DD22FFDFBA509336DBD81 /* modes_wb.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = modes_wb.c; sourceTree = "<group>"; };
+		C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
+		C8B202E231EC5BD0BBA49C12 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		C8E42AD9781FFBA40E131751 /* PTTIntentSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTTIntentSelectionTests.swift; sourceTree = "<group>"; };
+		CB00632BC7FE525A8838DB8C /* ActiveNodeParticipant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveNodeParticipant.swift; sourceTree = "<group>"; };
+		CB2EE327B18F5BB1536DCE6F /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		CB5E241E34C943B235347E15 /* speex_callbacks.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = speex_callbacks.c; sourceTree = "<group>"; };
+		CC13B0201548F1CD64A985FB /* MicrophoneAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneAccess.swift; sourceTree = "<group>"; };
+		CC7319FA73A2AEE0477D89F4 /* EchoLinkAutomaticTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAutomaticTransportTests.swift; sourceTree = "<group>"; };
+		CCA98E7AC3CF9E8BF23C66B4 /* fixed_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fixed_bfin.h; sourceTree = "<group>"; };
+		CCB9B23D4DBAC0A508F74AAF /* SvxLinkControlProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SvxLinkControlProtocol.swift; sourceTree = "<group>"; };
+		CCE1B83C11A08A41F7474DF4 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
+		CD2E5154D0CAC74CE254C46B /* PersonalStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalStationView.swift; sourceTree = "<group>"; };
+		D142541DF2ABEF235E8471FD /* fixed_generic.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fixed_generic.h; sourceTree = "<group>"; };
+		D316A96EFBFAF3D90B8F217E /* DirectoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryViewModel.swift; sourceTree = "<group>"; };
+		D6460D428CB227FDB2B6E02C /* modes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = modes.h; sourceTree = "<group>"; };
+		D67318B23A82D9A4EB9992BB /* vbr.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = vbr.h; sourceTree = "<group>"; };
+		D7377924654671BCB1D441E7 /* BoundUDPSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundUDPSocket.swift; sourceTree = "<group>"; };
+		D790AAEAE5EBAA579958143F /* speex_header.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = speex_header.c; sourceTree = "<group>"; };
+		D8927FD02E392ACA73BD18F2 /* kiss_fftr.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = kiss_fftr.h; sourceTree = "<group>"; };
+		D89EF774CA60188FC6106E2A /* CallCQ.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQ.swift; sourceTree = "<group>"; };
+		DA3E949DBB721E318D1084FB /* SignalMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalMeter.swift; sourceTree = "<group>"; };
+		DAC1A809039A9D6FD61B7D34 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
+		DD81EC90CC1606899AB34C91 /* stack_alloc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = stack_alloc.h; sourceTree = "<group>"; };
+		DDCE5B934899E909C6178B00 /* EchoLinkProxySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxySession.swift; sourceTree = "<group>"; };
+		DE35A47DD3CB006D1844A11F /* WatchViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchViews.swift; sourceTree = "<group>"; };
+		DEF9EC01347B55DF2ED92158 /* QSORecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSORecordingTests.swift; sourceTree = "<group>"; };
+		E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRegistrationClientTests.swift; sourceTree = "<group>"; };
+		E46B3D0B9DD67B5D3E0B1EE5 /* CallCQView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQView.swift; sourceTree = "<group>"; };
+		E4FDCD1D3602EA1229B2E5CB /* EchoTestWelcome.gsm */ = {isa = PBXFileReference; path = EchoTestWelcome.gsm; sourceTree = "<group>"; };
+		E5905F0C404FCEB7D4B845D6 /* ConferenceReceiveAudioCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceReceiveAudioCodec.swift; sourceTree = "<group>"; };
+		E8BC7788B9DCE592355F4DD2 /* gsm_implode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_implode.c; sourceTree = "<group>"; };
+		EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_10_32_table.c; sourceTree = "<group>"; };
+		EA7A3F3EF59B5150450CA40B /* PCMLinearResamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMLinearResamplerTests.swift; sourceTree = "<group>"; };
+		ED1F333CE93C0F75C93740D8 /* exc_5_256_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_5_256_table.c; sourceTree = "<group>"; };
+		ED2D9E8155E35AF335F677E7 /* InboundHostSessionMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboundHostSessionMachineTests.swift; sourceTree = "<group>"; };
+		EE902BACF5D5E9E9421692AA /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
+		EEAA8B5BFC41FA2F5D9B8D76 /* fixed_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fixed_arm4.h; sourceTree = "<group>"; };
+		EEC1CB51BBBAB2A3879362BA /* speex.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = speex.c; sourceTree = "<group>"; };
+		EEF2ED53939418F353B1714C /* EchoLinkConferenceHostServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConferenceHostServiceTests.swift; sourceTree = "<group>"; };
+		F066B9F54ED35CBA89C6C937 /* lsp_tables_nb.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lsp_tables_nb.c; sourceTree = "<group>"; };
+		F117EED259DCA53C15B7A085 /* LocalDemoAnnouncement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAnnouncement.swift; sourceTree = "<group>"; };
+		F1D19C66A8D6697C34C7ABEE /* Upstream-MIT.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Upstream-MIT.txt"; sourceTree = "<group>"; };
+		F349C56B39473A8B9FF00620 /* EchoLinkProxyProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxyProtocol.swift; sourceTree = "<group>"; };
+		F386690E3D817CE2EE709B11 /* DirectoryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryClient.swift; sourceTree = "<group>"; };
+		F3D74DFDDD365B8B32CB0BF1 /* Station.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Station.swift; sourceTree = "<group>"; };
+		F4BA3E849C58E3D22005A41F /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
+		F4DCEF6146DA2810B27C7DD1 /* CallAccessPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAccessPolicy.swift; sourceTree = "<group>"; };
+		F4FA40CA3FB11465D5ECAC9A /* InboundHostSessionMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboundHostSessionMachine.swift; sourceTree = "<group>"; };
+		F58D75CFFD097E5988BF2918 /* QSOActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOActivityAttributes.swift; sourceTree = "<group>"; };
+		F698176A60DD005C9990551C /* LocalDemoAudioBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAudioBufferTests.swift; sourceTree = "<group>"; };
+		F6ECFF995D6ED0366045956C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FBC3E5EBB13F7438A00FE95E /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		FCA661459D8ADD43390C1C81 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FD351DC71F0566322AB6448A /* vbr.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = vbr.c; sourceTree = "<group>"; };
+		FD5302BEBABF06ADEA772F34 /* sb_celp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sb_celp.c; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1DAD5EC960E542EE48CBE825 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F8602C2973C6C9D4F2B33360 /* AVFoundation.framework in Frameworks */,
+				C6ABFC8C479EB005CBD69933 /* Network.framework in Frameworks */,
+				C8BA15F960E39C5FC451BCC6 /* Security.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BBF6EC81F717DACC2EC3A15 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4C555A734F39EAFB9323DE63 /* AVFoundation.framework in Frameworks */,
+				4AFA94078584154DA3874CCC /* Network.framework in Frameworks */,
+				0F8EA8572D793DE17D33E652 /* Security.framework in Frameworks */,
+				B0724361B45D1FF67D1DFA63 /* WatchConnectivity.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		22BB8493866BDA5F7B60D98C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				65ED74C4A4BFBE60B535920A /* AppState.swift */,
+				813D5F261DCB865687D52193 /* MacMenuBarBridge.swift */,
+				4569455FBA9B4F235468EEA9 /* MacMenuBarProtocol.swift */,
+				004D8200E823E3E5861D4CEB /* PermissionOnboardingView.swift */,
+				0C7BB94D5DD2FD18660428C1 /* QSOHub.swift */,
+				B30EC7A90D38E9AFB2836182 /* ReverbQSO-Bridging-Header.h */,
+				B1C38FC54681270081A0DD0F /* ReverbQSOApp.swift */,
+				3C24342507C46DB012DB052C /* Theme.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		3A5B5742674F1BF78E3F06A7 /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				548C83CE5A2D89DD54938BF9 /* ReverbQSOMenuBarApp.swift */,
+			);
+			name = MenuBar;
+			path = Companions/MenuBar;
+			sourceTree = "<group>";
+		};
+		4275DAA4FB780298C66197E1 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				9CF565DD4475E19F4A8C264C /* AudioEngine.swift */,
+				2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */,
+				AFDD947DEC6E73999CA1947E /* DemoCallCQBackend.swift */,
+				9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */,
+				8FC7B0125184C014B0BBB878 /* EchoLinkConnectionService.swift */,
+				29B8CE96F7CB370565984790 /* EchoLinkDirectoryService.swift */,
+				FBC3E5EBB13F7438A00FE95E /* KeychainService.swift */,
+				CC13B0201548F1CD64A985FB /* MicrophoneAccess.swift */,
+				C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */,
+				64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */,
+				2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */,
+				37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */,
+				48073EE255B887359F1EC185 /* WatchPhoneBridge.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		43EC9756962DED3B0FBA7403 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A7DCFBAA2398518405D9B3EF /* AudioEngineMeterTests.swift */,
+				A8AB645B1086D55A593508F7 /* BoundUDPSocketTests.swift */,
+				18704A39DC9EB635C80C43DC /* CallAccessPolicyTests.swift */,
+				0F9B8219BBAAB71988872820 /* CallCQTests.swift */,
+				69BA3B025A12811D1FA4D19B /* CallCQWireTests.swift */,
+				207144B98F24C531C7B55843 /* ChatMessageNotificationCursorTests.swift */,
+				BB8A1DE4FA89DB9DCFC0DF96 /* ConferenceFloorRouterTests.swift */,
+				21CC0DAA4C3D90A827733833 /* ConferenceReceiveAudioCodecTests.swift */,
+				21118117E514A70F447CA1FC /* DirectoryClientTests.swift */,
+				2AD466FE90495150F47D7079 /* DirectorySearchTests.swift */,
+				56915CEFBA0C1EB93D38FE89 /* EchoLinkAudioPacketCodecTests.swift */,
+				85EA15343F2892B2CDF4D408 /* EchoLinkAutomaticDirectoryTests.swift */,
+				CC7319FA73A2AEE0477D89F4 /* EchoLinkAutomaticTransportTests.swift */,
+				EEF2ED53939418F353B1714C /* EchoLinkConferenceHostServiceTests.swift */,
+				9A365293C9B8CE2A7F3ABF64 /* EchoLinkDTMFToneGeneratorTests.swift */,
+				A551210CAF19BE6A4905217B /* EchoLinkParticipantParserTests.swift */,
+				C46FE451B3C6D89DD6CA5AAD /* EchoLinkProxyProtocolTests.swift */,
+				2018F4783A7484CCB5D36ECD /* EchoLinkPTTTransitionTests.swift */,
+				90ABBDD741C05A2804F8184B /* EchoLinkPublicProxyListTests.swift */,
+				E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */,
+				3FCFE0628164575D1111C6CC /* EchoLinkRelayClientTests.swift */,
+				3AD741F40E453F9281698051 /* EchoLinkRelayConnectionTests.swift */,
+				A5809DBE651C23428FB3F1B6 /* EchoLinkRelayProtocolTests.swift */,
+				5BAC19EA88D18BE0291B97B2 /* FavoritesViewModelTests.swift */,
+				7376C2423E9F207C5AA18744 /* GSMCodecStreamingTests.swift */,
+				ED2D9E8155E35AF335F677E7 /* InboundHostSessionMachineTests.swift */,
+				A32444518FE355D2119D6015 /* InboundStationVerifierTests.swift */,
+				0868D0D823C31322A9966D15 /* LiveTransportSmokeTests.swift */,
+				5240BE8F4255098747FDD95C /* LocalDemoAccountTests.swift */,
+				F698176A60DD005C9990551C /* LocalDemoAudioBufferTests.swift */,
+				8F06CE461936AB642879E5B8 /* LocalDemoConnectionTests.swift */,
+				A589F5DEFDA7E71736CF95BB /* LocalDemoHostingTests.swift */,
+				EA7A3F3EF59B5150450CA40B /* PCMLinearResamplerTests.swift */,
+				C8E42AD9781FFBA40E131751 /* PTTIntentSelectionTests.swift */,
+				641E5CA234459D7B966CA2A9 /* QSOHubTests.swift */,
+				DEF9EC01347B55DF2ED92158 /* QSORecordingTests.swift */,
+				31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */,
+				0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */,
+				3ED33A0FCE92FF8ECD1BBBE1 /* StationLocationTests.swift */,
+				6588487C3BF2989B9C82C3F0 /* StationParserTests.swift */,
+				B522515CD21BF1C4241AE397 /* SvxLinkControlProtocolTests.swift */,
+				99B6AACF4601933F1DC7E923 /* SvxLinkPTYTransportTests.swift */,
+				B48E211EF2DFE11CB88AB9E4 /* VoicePipelineQualityTests.swift */,
+				A3F9E7DB3830DDC7AD71AF54 /* VoicePipelineSmokeTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		4FE296A036D1BC17B73328F8 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				CB00632BC7FE525A8838DB8C /* ActiveNodeParticipant.swift */,
+				D89EF774CA60188FC6106E2A /* CallCQ.swift */,
+				C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */,
+				C0B083C35268C27C15951976 /* QSOSession.swift */,
+				2B67CB43BBD0B2ABDC8D144A /* RecentConnection.swift */,
+				F3D74DFDDD365B8B32CB0BF1 /* Station.swift */,
+				16252E19E45B823180D32398 /* Station+Location.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		5A1105A4B162134678DB655D /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				F28055D63FEAA9609C550E34 /* Chat */,
+				E131ED687EE3D5B0A99D033E /* Directory */,
+				E486F8592A50C346CFE74AE0 /* Favorites */,
+				8597C078524FEF8CA617A603 /* Hosting */,
+				8E7B32DEDB97B14523FE2152 /* QSO */,
+				BAC10B4A856F248BBCCFF50C /* Recent */,
+				F747BD7103686E63388A9168 /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		60D5B46189E68FB22285C385 /* Legal */ = {
+			isa = PBXGroup;
+			children = (
+				B10B94BB44D80968D929DF15 /* GPL-3.0.txt */,
+				9B41435EC287F7056247E1CA /* libgsm-COPYRIGHT.txt */,
+				02C75C610A6A12E74CBAFA1E /* libspeex-COPYING.txt */,
+				F1D19C66A8D6697C34C7ABEE /* Upstream-MIT.txt */,
+			);
+			path = Legal;
+			sourceTree = "<group>";
+		};
+		630FB2747F70D0C253E04BC9 /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				75ACD42FABF777BCD5F3E642 /* QSOActivityWidget.swift */,
+			);
+			name = LiveActivity;
+			path = Extensions/LiveActivity;
+			sourceTree = "<group>";
+		};
+		8597C078524FEF8CA617A603 /* Hosting */ = {
+			isa = PBXGroup;
+			children = (
+				94B3D70C1D1DC72D5A640FF6 /* ConferenceHostView.swift */,
+				CD2E5154D0CAC74CE254C46B /* PersonalStationView.swift */,
+			);
+			path = Hosting;
+			sourceTree = "<group>";
+		};
+		86775CEDC73B326FCA695782 = {
+			isa = PBXGroup;
+			children = (
+				630FB2747F70D0C253E04BC9 /* LiveActivity */,
+				3A5B5742674F1BF78E3F06A7 /* MenuBar */,
+				C09B0F322549CD616745EDDF /* ReverbQSO */,
+				A9C4AE22A41F62F66683DA28 /* src */,
+				BBC427164F0442A0C1B0A267 /* src */,
+				43EC9756962DED3B0FBA7403 /* Tests */,
+				C22057BB24EC2A0CD454BEA3 /* Watch */,
+				C53438AB810EE357FD7CCED3 /* Frameworks */,
+				ADCE01EC46FC737CC3C39DB5 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8E7B32DEDB97B14523FE2152 /* QSO */ = {
+			isa = PBXGroup;
+			children = (
+				0CEFCF75CD4167060468E9B1 /* QSOSharedPanels.swift */,
+				53E7C96DEF0AC33E9E3A9708 /* QSOView.swift */,
+				563A30A094C99FE043DBC099 /* QSOViewModel.swift */,
+			);
+			path = QSO;
+			sourceTree = "<group>";
+		};
+		9901FFE1F5CE3E28405BFE27 /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				F58D75CFFD097E5988BF2918 /* QSOActivityAttributes.swift */,
+				9E02AD33FF0D7EC7FE72E007 /* QSOActivityController.swift */,
+			);
+			path = LiveActivity;
+			sourceTree = "<group>";
+		};
+		A9C4AE22A41F62F66683DA28 /* src */ = {
+			isa = PBXGroup;
+			children = (
+				AAB92D68E6ABFC59CE9AA61D /* add.c */,
+				946733CA1FC5012A240792CA /* code.c */,
+				1E104D810A0B3F911DB4AB90 /* debug.c */,
+				8C72D8DEA106DEFAD2868625 /* decode.c */,
+				5A9FEC91B610C26333F3E8E5 /* gsm_create.c */,
+				93304898C5B9D4B78B98237E /* gsm_decode.c */,
+				4D9043D7B8497DCBA7B0A88E /* gsm_destroy.c */,
+				81575DAAD603968D8BDCBA00 /* gsm_encode.c */,
+				74A3C8B5FC58640E614541B3 /* gsm_explode.c */,
+				E8BC7788B9DCE592355F4DD2 /* gsm_implode.c */,
+				B75F5C04BC0B9CF5A0A76CE9 /* gsm_option.c */,
+				4CBA4DF9BC6DFC895B7C358C /* gsm_print.c */,
+				7FE4420220A9AF3ECCD84FDB /* long_term.c */,
+				540BBC2FF76B995FFDDD95D2 /* lpc.c */,
+				8794B05E140F9A7E6B8CAA55 /* preprocess.c */,
+				2E1C870C75EFB0D77AE8F29A /* rpe.c */,
+				4819D3181286272AEE95C4D1 /* short_term.c */,
+				6E255B3BF91775C965FB1FF6 /* table.c */,
+			);
+			name = src;
+			path = ThirdParty/libgsm/src;
+			sourceTree = "<group>";
+		};
+		ACDBEE260FE137FE1501E535 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F6ECFF995D6ED0366045956C /* Assets.xcassets */,
+				FCA661459D8ADD43390C1C81 /* Info.plist */,
+				2A335C8980965D0ED905D32F /* ReverbQSOMac.entitlements */,
+				AD05AACEEC0AF326A9C63A89 /* Audio */,
+				60D5B46189E68FB22285C385 /* Legal */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		AD05AACEEC0AF326A9C63A89 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				E4FDCD1D3602EA1229B2E5CB /* EchoTestWelcome.gsm */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		ADCE01EC46FC737CC3C39DB5 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				47557F6D7931EBD2F3309E6E /* ReverbQSO.app */,
+				B86D4ECD7CF94CE219DA67D5 /* ReverbQSOLiveActivity.appex */,
+				0B93CA5137AEFF7BD423634C /* ReverbQSOMenuBar.app */,
+				0C023F9762DE7E7D40B25C57 /* ReverbQSOTests.xctest */,
+				786A980CCA06660F26018B73 /* ReverbQSOWatch.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BAC10B4A856F248BBCCFF50C /* Recent */ = {
+			isa = PBXGroup;
+			children = (
+				13AECC454C0E3A6C130018BA /* RecentView.swift */,
+				BDC67AFDF8A99EB55D03939F /* RecordingsView.swift */,
+			);
+			path = Recent;
+			sourceTree = "<group>";
+		};
+		BBC427164F0442A0C1B0A267 /* src */ = {
+			isa = PBXGroup;
+			children = (
+				C588F1C170C18D99070E65C1 /* _kiss_fft_guts.h */,
+				054B7BD7041172EBD9AC6D6E /* arch.h */,
+				7B0BD0230A5B299FCB9C2C1C /* bfin.h */,
+				2389A93C460281932BAF12B3 /* bits.c */,
+				8FC50F141ED5191797613ED8 /* cb_search_arm4.h */,
+				3845A3F2B147B6AD5615E387 /* cb_search_bfin.h */,
+				B217C54DAD14A45D9EAD0C4F /* cb_search_sse.h */,
+				6F6B82FDD60798A38F9145E0 /* cb_search.c */,
+				C2E30DB1AAC2A305A3F52652 /* cb_search.h */,
+				3F4AC8ABDC969976817E1E46 /* config.h */,
+				09A2E4FAB66390BE5E9512D2 /* exc_5_64_table.c */,
+				ED1F333CE93C0F75C93740D8 /* exc_5_256_table.c */,
+				850E2724B4EA1B7110B85BCB /* exc_8_128_table.c */,
+				5C89ACCDAF59AD3E0795D757 /* exc_10_16_table.c */,
+				EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */,
+				2058095D6A00537B0BCB311E /* exc_20_32_table.c */,
+				223F4858A0A70CB4ABD9FF22 /* fftwrap.h */,
+				B9CBCF25F4506B892B0BFB6E /* filters_arm4.h */,
+				AB385351E86AA8C82F00DEB4 /* filters_bfin.h */,
+				1772D228B4CB8B1F1BB95A54 /* filters_sse.h */,
+				C44CD3C28C8255DC249F6ADA /* filters.c */,
+				7EDFA4F00E3FB6A811C80199 /* filters.h */,
+				EEAA8B5BFC41FA2F5D9B8D76 /* fixed_arm4.h */,
+				62F0A3C60E85BEE4EDF9C8C5 /* fixed_arm5e.h */,
+				CCA98E7AC3CF9E8BF23C66B4 /* fixed_bfin.h */,
+				0BB3C5176E6E8C112434BA90 /* fixed_debug.h */,
+				D142541DF2ABEF235E8471FD /* fixed_generic.h */,
+				5C994F6CBD263D438531D247 /* gain_table_lbr.c */,
+				18DE9595BD7F0CA4E517E932 /* gain_table.c */,
+				4817DD9C6319A3EA3180EFBE /* hexc_10_32_table.c */,
+				C5B801BC8CE57413932CAA3D /* hexc_table.c */,
+				AD18AEA7984E41E3A9F31558 /* high_lsp_tables.c */,
+				7CC3EB3076AAB4E128370C9C /* kiss_fft.h */,
+				D8927FD02E392ACA73BD18F2 /* kiss_fftr.h */,
+				1C4B5207E290F64A1C3FB971 /* lpc_bfin.h */,
+				BF2049383B9D05134465FD85 /* lpc.c */,
+				0EF259205F25C1F6433FA1F1 /* lpc.h */,
+				62021BBBE6F315E82F4A880D /* lsp_bfin.h */,
+				F066B9F54ED35CBA89C6C937 /* lsp_tables_nb.c */,
+				7F22AA24E3CA040D11C6ABC1 /* lsp.c */,
+				684E37027F559B5EF9AA9458 /* lsp.h */,
+				AEAC2C1D377652D9404CF589 /* ltp_arm4.h */,
+				7E54FFFACEC515B96D307039 /* ltp_bfin.h */,
+				AA9EEA219647547FFD39FE31 /* ltp_sse.h */,
+				A26BB8ABEF7B95D9E05E2365 /* ltp.c */,
+				3622B4A164BD5FF13AAC02C6 /* ltp.h */,
+				19672D87B92EB2DD4C10790C /* math_approx.h */,
+				5A76596A804ABD401B3D7DB4 /* misc_bfin.h */,
+				C71DD22FFDFBA509336DBD81 /* modes_wb.c */,
+				7935FF2131E8B9B7F23AA7AF /* modes.c */,
+				D6460D428CB227FDB2B6E02C /* modes.h */,
+				9438F25F6A48DC6CC461D715 /* nb_celp.c */,
+				A93EB6FCD315DD0049672237 /* nb_celp.h */,
+				BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */,
+				96728BCB91479970431E2705 /* os_support.h */,
+				B6306012C464603483A40F77 /* quant_lsp_bfin.h */,
+				AA78122D8FC42A65E184D975 /* quant_lsp.c */,
+				A1BAC787C17CB31D89E67DFD /* quant_lsp.h */,
+				FD5302BEBABF06ADEA772F34 /* sb_celp.c */,
+				A6CF47E8CFE107FE53C7155A /* sb_celp.h */,
+				2354B7B407A484B664195349 /* smallft.h */,
+				CB5E241E34C943B235347E15 /* speex_callbacks.c */,
+				D790AAEAE5EBAA579958143F /* speex_header.c */,
+				EEC1CB51BBBAB2A3879362BA /* speex.c */,
+				DD81EC90CC1606899AB34C91 /* stack_alloc.h */,
+				B06333F5368B070986E69E53 /* stereo.c */,
+				FD351DC71F0566322AB6448A /* vbr.c */,
+				D67318B23A82D9A4EB9992BB /* vbr.h */,
+				4CC3F3D7AFC4098E4D1B3011 /* vorbis_psy.h */,
+				2CCD391EA2912194E9992E5C /* vq_arm4.h */,
+				46F09EEB9EBD66D0CCB435A5 /* vq_bfin.h */,
+				4F0BC3F26B40B9848A3D6DAA /* vq_sse.h */,
+				8920A84CAF5C5910BE79D7B5 /* vq.c */,
+				707F21B4128615CACF0B7725 /* vq.h */,
+				3B33841C21AE763BB44093FA /* window.c */,
+			);
+			name = src;
+			path = ThirdParty/libspeex/src;
+			sourceTree = "<group>";
+		};
+		C09B0F322549CD616745EDDF /* ReverbQSO */ = {
+			isa = PBXGroup;
+			children = (
+				22BB8493866BDA5F7B60D98C /* App */,
+				CAF8F463865E25A331202BC1 /* Components */,
+				5A1105A4B162134678DB655D /* Features */,
+				C92C7812C8F13CDEA3582713 /* Intents */,
+				9901FFE1F5CE3E28405BFE27 /* LiveActivity */,
+				4FE296A036D1BC17B73328F8 /* Models */,
+				E4572B1BA2AD75AD02261D2A /* Networking */,
+				ACDBEE260FE137FE1501E535 /* Resources */,
+				4275DAA4FB780298C66197E1 /* Services */,
+			);
+			path = ReverbQSO;
+			sourceTree = "<group>";
+		};
+		C22057BB24EC2A0CD454BEA3 /* Watch */ = {
+			isa = PBXGroup;
+			children = (
+				2CF47B30ABAE20BF606F9324 /* WatchApp.swift */,
+				6E44415E3AFF18DB4A066ED0 /* WatchAppModel.swift */,
+				6E357E23B6E8B4CDB554D59F /* WatchPTTIntent.swift */,
+				DE35A47DD3CB006D1844A11F /* WatchViews.swift */,
+			);
+			name = Watch;
+			path = Companions/Watch;
+			sourceTree = "<group>";
+		};
+		C53438AB810EE357FD7CCED3 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */,
+				EE902BACF5D5E9E9421692AA /* Network.framework */,
+				6D0EEB971EC92EB2FE7F099C /* Security.framework */,
+				CCE1B83C11A08A41F7474DF4 /* WatchConnectivity.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		C92C7812C8F13CDEA3582713 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				666F258FA239959760439D55 /* PTTIntent.swift */,
+			);
+			path = Intents;
+			sourceTree = "<group>";
+		};
+		CAF8F463865E25A331202BC1 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				C32BF61F3C71F980DACE493D /* AudioRouteControl.swift */,
+				AFF817B0C6CDCCE5A10777A8 /* PTTButton.swift */,
+				DA3E949DBB721E318D1084FB /* SignalMeter.swift */,
+				DAC1A809039A9D6FD61B7D34 /* StatusBadge.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		E131ED687EE3D5B0A99D033E /* Directory */ = {
+			isa = PBXGroup;
+			children = (
+				E46B3D0B9DD67B5D3E0B1EE5 /* CallCQView.swift */,
+				9E19CFA9864CE55BB358E5E7 /* CountryFilterView.swift */,
+				6190CABA5CE02F9171FB0509 /* DirectoryView.swift */,
+				D316A96EFBFAF3D90B8F217E /* DirectoryViewModel.swift */,
+				43631BB64688D1A3FC8A1AB0 /* StationDetailSheet.swift */,
+				978F78A424A8084D5A4FA09C /* StationRow.swift */,
+			);
+			path = Directory;
+			sourceTree = "<group>";
+		};
+		E4572B1BA2AD75AD02261D2A /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				D7377924654671BCB1D441E7 /* BoundUDPSocket.swift */,
+				F4DCEF6146DA2810B27C7DD1 /* CallAccessPolicy.swift */,
+				60B5F2805612ED351FB9E86D /* CallCQClient.swift */,
+				8F58266ADAC833BA9E40B206 /* ConferenceFloorRouter.swift */,
+				E5905F0C404FCEB7D4B845D6 /* ConferenceReceiveAudioCodec.swift */,
+				8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */,
+				F386690E3D817CE2EE709B11 /* DirectoryClient.swift */,
+				AD9C77E7FE189E57217A4471 /* EchoLinkAudioPacketCodec.swift */,
+				9DE44705AB6D2A345B0D324B /* EchoLinkAutomaticTransportSelector.swift */,
+				2DDD9699C439E9FF767B022C /* EchoLinkDTMFToneGenerator.swift */,
+				1D265BFCB3F8D19817B9DB1F /* EchoLinkParticipantParser.swift */,
+				A2F056559D3E04DA72FF6FDA /* EchoLinkProxyClient.swift */,
+				2D8A245BA2FB55CEB5CB4B7C /* EchoLinkProxyConfiguration.swift */,
+				F349C56B39473A8B9FF00620 /* EchoLinkProxyProtocol.swift */,
+				DDCE5B934899E909C6178B00 /* EchoLinkProxySession.swift */,
+				79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */,
+				AEDAAD9517A7E5BBFCFEC23A /* EchoLinkRegistrationClient.swift */,
+				40B54A4D8D6A20FF5BA944A0 /* EchoLinkRelayClient.swift */,
+				0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */,
+				5D3B239D0A3AB9496A3E191E /* GSMCodec.swift */,
+				F4FA40CA3FB11465D5ECAC9A /* InboundHostSessionMachine.swift */,
+				338AB0FEADA762E13F22D83C /* InboundStationVerifier.swift */,
+				44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */,
+				F117EED259DCA53C15B7A085 /* LocalDemoAnnouncement.swift */,
+				3F58F29DD9D6514550B77B75 /* LocalDemoAudioBuffer.swift */,
+				9C9B9A149D9B1ADA8FC591DD /* SpeexCodec.swift */,
+				B6854FEBB9C8E8F8282081A3 /* StationParser.swift */,
+				CCB9B23D4DBAC0A508F74AAF /* SvxLinkControlProtocol.swift */,
+				A5DED06C2E2DB60658CC1AA2 /* SvxLinkPTYTransport.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		E486F8592A50C346CFE74AE0 /* Favorites */ = {
+			isa = PBXGroup;
+			children = (
+				F4BA3E849C58E3D22005A41F /* FavoritesView.swift */,
+				448A6DBA626F851FDB93E89C /* FavoritesViewModel.swift */,
+			);
+			path = Favorites;
+			sourceTree = "<group>";
+		};
+		F28055D63FEAA9609C550E34 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				C8B202E231EC5BD0BBA49C12 /* ChatView.swift */,
+				CB2EE327B18F5BB1536DCE6F /* ChatViewModel.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+		F747BD7103686E63388A9168 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				4DD9CC149C9EF38AF97567B3 /* CallRestrictionsView.swift */,
+				974F1A659815E325DADC68A2 /* LicensesView.swift */,
+				7A88B9776F4DD27D96376EBF /* SettingsView.swift */,
+				5A522A7344F5E97A24AA170C /* SettingsViewModel.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0963C9641D1783EC17664061 /* ReverbQSO */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E26EBB1E77101EB83F14082 /* Build configuration list for PBXNativeTarget "ReverbQSO" */;
+			buildPhases = (
+				DD5798177F307DABAFAFE427 /* Sources */,
+				CED87D80550558EADA4971DD /* Resources */,
+				1DAD5EC960E542EE48CBE825 /* Frameworks */,
+				E4F79BB1F6DF511A2034DC30 /* Embed Foundation Extensions */,
+				156EBDFB4A40747EF209272F /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3109E218BFE497F6874821C2 /* PBXTargetDependency */,
+				C84F4311C79AC99AA7E31405 /* PBXTargetDependency */,
+			);
+			name = ReverbQSO;
+			packageProductDependencies = (
+			);
+			productName = ReverbQSO;
+			productReference = 47557F6D7931EBD2F3309E6E /* ReverbQSO.app */;
+			productType = "com.apple.product-type.application";
+		};
+		119E4B54D7653CBE63E132E4 /* ReverbQSOLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 11476D0B00FB5DDF321B9B91 /* Build configuration list for PBXNativeTarget "ReverbQSOLiveActivity" */;
+			buildPhases = (
+				16C724878C6D6D4B88F576B9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ReverbQSOLiveActivity;
+			packageProductDependencies = (
+			);
+			productName = ReverbQSOLiveActivity;
+			productReference = B86D4ECD7CF94CE219DA67D5 /* ReverbQSOLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		7A61549B610E492F98EAEAE2 /* ReverbQSOTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 58B5754862189930BEB0D2EC /* Build configuration list for PBXNativeTarget "ReverbQSOTests" */;
+			buildPhases = (
+				1F1493F3D8BEB4AD21AC5A20 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				ECF0B6CF442BE856D504DE18 /* PBXTargetDependency */,
+			);
+			name = ReverbQSOTests;
+			packageProductDependencies = (
+			);
+			productName = ReverbQSOTests;
+			productReference = 0C023F9762DE7E7D40B25C57 /* ReverbQSOTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D2F3F18CE93F183A52F848C0 /* ReverbQSOMenuBar */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1C56431FB4F088FC2C25668A /* Build configuration list for PBXNativeTarget "ReverbQSOMenuBar" */;
+			buildPhases = (
+				48CF1D12B99299D15B5104D8 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ReverbQSOMenuBar;
+			packageProductDependencies = (
+			);
+			productName = ReverbQSOMenuBar;
+			productReference = 0B93CA5137AEFF7BD423634C /* ReverbQSOMenuBar.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E768610831FB4E200906B7BF /* ReverbQSOWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EB3BAC4E19067550BE2DEBB7 /* Build configuration list for PBXNativeTarget "ReverbQSOWatch" */;
+			buildPhases = (
+				1632B3AE2E9B2AAF132D805D /* Sources */,
+				1E4EB3CC1DD6A539D1BC0E1E /* Resources */,
+				7BBF6EC81F717DACC2EC3A15 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ReverbQSOWatch;
+			packageProductDependencies = (
+			);
+			productName = ReverbQSOWatch;
+			productReference = 786A980CCA06660F26018B73 /* ReverbQSOWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E9057CD74AB7C46BE4C5AF14 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0963C9641D1783EC17664061 = {
+						DevelopmentTeam = FRFXFRT624;
+						ProvisioningStyle = Automatic;
+					};
+					D2F3F18CE93F183A52F848C0 = {
+						DevelopmentTeam = FRFXFRT624;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 500B0A1E3D07C4741A8A74D9 /* Build configuration list for PBXProject "ReverbQSO" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 86775CEDC73B326FCA695782;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = ADCE01EC46FC737CC3C39DB5 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0963C9641D1783EC17664061 /* ReverbQSO */,
+				119E4B54D7653CBE63E132E4 /* ReverbQSOLiveActivity */,
+				E768610831FB4E200906B7BF /* ReverbQSOWatch */,
+				7A61549B610E492F98EAEAE2 /* ReverbQSOTests */,
+				D2F3F18CE93F183A52F848C0 /* ReverbQSOMenuBar */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1E4EB3CC1DD6A539D1BC0E1E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2698D150EC9DC2375B4148F7 /* EchoTestWelcome.gsm in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CED87D80550558EADA4971DD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				619C422E5DF5ACDBA71EF626 /* Assets.xcassets in Resources */,
+				298D5E24ED9F44CFC007D8F6 /* EchoTestWelcome.gsm in Resources */,
+				4899E16BDA4121AE091BD007 /* GPL-3.0.txt in Resources */,
+				E44FC2CE71ABBFFB2AAF2D59 /* Upstream-MIT.txt in Resources */,
+				C08F21E39AED98174979350D /* libgsm-COPYRIGHT.txt in Resources */,
+				DA965CCC26750FBFA4FE8D9D /* libspeex-COPYING.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1632B3AE2E9B2AAF132D805D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A16514B7B4F5109F4E234405 /* ActiveNodeParticipant.swift in Sources */,
+				C5E80421B7EB42583CD19CD6 /* AudioEngine.swift in Sources */,
+				9B6711E47793098542E480AB /* BoundUDPSocket.swift in Sources */,
+				800018790496AA13D682A761 /* CallAccessPolicy.swift in Sources */,
+				6D9A9ECB82DFBDBE3F0D3F8C /* CallCQ.swift in Sources */,
+				26C602485E4669A04CD5BDE3 /* CallCQClient.swift in Sources */,
+				D9B0C5FBA9E29A6221DA832A /* CallCQService.swift in Sources */,
+				DBE49AB50EBD26FBD16620CD /* CallRestrictionsView.swift in Sources */,
+				B2C5253C06B8D7BEFB800BFF /* ChatMessage.swift in Sources */,
+				E1A8C3F5C8697B2BBEAA7F47 /* ConferenceFloorRouter.swift in Sources */,
+				E74B32228F3B61D99393033D /* ConferenceReceiveAudioCodec.swift in Sources */,
+				AED126344E843568ECC2775A /* DemoCallCQBackend.swift in Sources */,
+				57D1A67D096202A978EAF481 /* DirectCQSocketPair.swift in Sources */,
+				CA63147E3FA34B747AE3B1F5 /* DirectoryClient.swift in Sources */,
+				71D1EAAA46F51DC9603DB04C /* EchoLinkAudioPacketCodec.swift in Sources */,
+				4B0F81D0401A4559D0BD4259 /* EchoLinkAutomaticTransportSelector.swift in Sources */,
+				FF38F2997CC5CBB8009DCBE0 /* EchoLinkConferenceHostService.swift in Sources */,
+				D491E6BB6104D0784CD4146F /* EchoLinkConnectionService.swift in Sources */,
+				3C28AB947A198413B1B546CF /* EchoLinkDTMFToneGenerator.swift in Sources */,
+				4847C24384D76F03098EC5E3 /* EchoLinkDirectoryService.swift in Sources */,
+				F9AC483535235538BE861ECA /* EchoLinkParticipantParser.swift in Sources */,
+				F93FE3B28F807DF40498D63B /* EchoLinkProxyClient.swift in Sources */,
+				9EEEAB096E466F5A266197FB /* EchoLinkProxyConfiguration.swift in Sources */,
+				95B6744AB09D532C906FAF85 /* EchoLinkProxyProtocol.swift in Sources */,
+				9F7683F6C3D0625106339643 /* EchoLinkProxySession.swift in Sources */,
+				184A5827CA66CC0AC2BCCF01 /* EchoLinkPublicProxyList.swift in Sources */,
+				B53CB55AA1867768F60264DE /* EchoLinkRegistrationClient.swift in Sources */,
+				2028EC8A218C0399BD83FFD3 /* EchoLinkRelayClient.swift in Sources */,
+				18D276EADE0C29BF246B985B /* EchoLinkRelayProtocol.swift in Sources */,
+				627066B30CE5EDE3EA97B5F8 /* GSMCodec.swift in Sources */,
+				8AA96E887B61D0AE2D036852 /* InboundHostSessionMachine.swift in Sources */,
+				F8F9C851BA3574C9D8B97A4C /* InboundStationVerifier.swift in Sources */,
+				5E86CAC7C9FB1A1004C8F4E4 /* KeychainService.swift in Sources */,
+				D3B355EDDE31A6291E19B97B /* LocalDemoAccount.swift in Sources */,
+				6AD1DBF1A7FAB887C490620A /* LocalDemoAnnouncement.swift in Sources */,
+				7A0CE7B8A584C6106159E1E2 /* LocalDemoAudioBuffer.swift in Sources */,
+				084305E82CB9FE2F323033E7 /* MicrophoneAccess.swift in Sources */,
+				77BC96485A0B74950F76B150 /* PCMLinearResampler.swift in Sources */,
+				6E23B4706FE4C0D253EA7B1D /* QSORecordingService.swift in Sources */,
+				964ED6C4B640146A330F8523 /* QSOSession.swift in Sources */,
+				351FB9B783B28806EB7534D9 /* RecordingsView.swift in Sources */,
+				D338C344B04CE7447A030F54 /* SpeexCodec.swift in Sources */,
+				756761DE246C3DF2E3EC52FC /* Station+Location.swift in Sources */,
+				66EEE92D5BD66D38C3D0A7AC /* Station.swift in Sources */,
+				E8E31F95B72FA9F44A81DD9F /* StationParser.swift in Sources */,
+				37A348F9E3A0B98870A72F8D /* SvxLinkControlProtocol.swift in Sources */,
+				8924175E608905519F1E20CB /* SvxLinkPTYTransport.swift in Sources */,
+				04F97B4AB224F050B530B3F9 /* VoiceDiagnosticLog.swift in Sources */,
+				979C0E0B4B9DF55D013B7969 /* WatchApp.swift in Sources */,
+				65B15B3E386F5814466910F1 /* WatchAppModel.swift in Sources */,
+				0D5F495560D7CE7B846D2353 /* WatchPTTIntent.swift in Sources */,
+				FDCF2BD94C2ED4CF90DCB2F8 /* WatchViews.swift in Sources */,
+				191D15BCBB286366E86AF0EC /* add.c in Sources */,
+				D090A7E9ABF3A6D16C1BC19C /* bits.c in Sources */,
+				90053FF31E51AD107054AF7F /* cb_search.c in Sources */,
+				877B72FFC31582F08F74C2DC /* code.c in Sources */,
+				0506B928E6A23A39B4CF0E51 /* debug.c in Sources */,
+				84CB3AB1FFB8C7C29A396FDF /* decode.c in Sources */,
+				3D6E1F300D167144C2FFACE6 /* exc_10_16_table.c in Sources */,
+				10043EEFEB50810C4A9DF4ED /* exc_10_32_table.c in Sources */,
+				73250F646978EA64D4734CFC /* exc_20_32_table.c in Sources */,
+				7E9A8B9F09523B6025EAB818 /* exc_5_256_table.c in Sources */,
+				7114D4AC8A497D2C2F1723F7 /* exc_5_64_table.c in Sources */,
+				1B1AC9B05CF0414322A1FD15 /* exc_8_128_table.c in Sources */,
+				F05B64227F99934D4886FD51 /* filters.c in Sources */,
+				5320F64A4AC3EE0242DBB64D /* gain_table.c in Sources */,
+				2D7CEFB6051D9B1E705B4B0A /* gain_table_lbr.c in Sources */,
+				50C1817EFBB0A19A9D3A49DF /* gsm_create.c in Sources */,
+				C6DD77E5AE4984630CC2B51D /* gsm_decode.c in Sources */,
+				2D7645E0823FA9017E7FC51C /* gsm_destroy.c in Sources */,
+				FBA553C3CDBCB20CD88EA4FC /* gsm_encode.c in Sources */,
+				B0AA6CE5F763E1C262B5C492 /* gsm_explode.c in Sources */,
+				47A9D6E9B988ABC584CED286 /* gsm_implode.c in Sources */,
+				E3122362A6E2E2DE2F2E9520 /* gsm_option.c in Sources */,
+				DB47D17FB205FFE9F6026275 /* gsm_print.c in Sources */,
+				08A39E781D127EBF6F756039 /* hexc_10_32_table.c in Sources */,
+				E649AEFCAD2E0874E16D92BF /* hexc_table.c in Sources */,
+				9DF4B545DBAAB048C3972AC7 /* high_lsp_tables.c in Sources */,
+				7DFE71A35DB6D1FA69060762 /* long_term.c in Sources */,
+				038DDBDFC88237144FE552DD /* lpc.c in Sources */,
+				4DC6DD4D9065A3422F1542D4 /* lpc.c in Sources */,
+				E448A9A60D35F0812700A066 /* lsp.c in Sources */,
+				8444049B055945FAF5D5E9C2 /* lsp_tables_nb.c in Sources */,
+				FAD243184FBAEE5721CE0E8D /* ltp.c in Sources */,
+				7D2E1B5749FB3CD21B7E44E3 /* modes.c in Sources */,
+				5A500FEA2F096E5CEC9FE665 /* modes_wb.c in Sources */,
+				D4A320210325C480446A4ABD /* nb_celp.c in Sources */,
+				29BEA05925DAE8D131603FC5 /* oe_speex.c in Sources */,
+				E334456CD6F9133D78385090 /* preprocess.c in Sources */,
+				55C19C6A16E79549D0600B73 /* quant_lsp.c in Sources */,
+				25CF6607D69F42EDEEBBC361 /* rpe.c in Sources */,
+				EB142C8331261747EC78878E /* sb_celp.c in Sources */,
+				FE457B84921483D3C2355B0B /* short_term.c in Sources */,
+				7226908CF383643DADC7BCE0 /* speex.c in Sources */,
+				C7E34A4B73A27839EAB76562 /* speex_callbacks.c in Sources */,
+				0E73982661C751D0A76E7703 /* speex_header.c in Sources */,
+				DC3A6FDBF08BF30CB5FA45C4 /* stereo.c in Sources */,
+				338F0F6E8D1BFDC1E20E402C /* table.c in Sources */,
+				5C32ED78B092B6625D44F9A0 /* vbr.c in Sources */,
+				21C8247622BC562D8FC64508 /* vq.c in Sources */,
+				D6DCE1805CD24A9BF307C4F4 /* window.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16C724878C6D6D4B88F576B9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E13F323AB9DC447FFEED313 /* QSOActivityAttributes.swift in Sources */,
+				32F2A307A0BE7C5D08605CC4 /* QSOActivityWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1F1493F3D8BEB4AD21AC5A20 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				32CA2D2D3313AAEA9BB0D581 /* AudioEngineMeterTests.swift in Sources */,
+				8F08D59E2CA78A98A0CB1FC0 /* BoundUDPSocketTests.swift in Sources */,
+				A76C47D2BC06F34A0799D067 /* CallAccessPolicyTests.swift in Sources */,
+				A4B31933217A689C62BFC076 /* CallCQTests.swift in Sources */,
+				25DB98D46F3FF6DAC2DDC197 /* CallCQWireTests.swift in Sources */,
+				2059543F4C7C559E7FCD5CDE /* ChatMessageNotificationCursorTests.swift in Sources */,
+				208333EA314B79BF64DD5C37 /* ConferenceFloorRouterTests.swift in Sources */,
+				1D1E7B28ACD451BE674CDDFE /* ConferenceReceiveAudioCodecTests.swift in Sources */,
+				5CA6BDF487EB6E9679B3803D /* DirectoryClientTests.swift in Sources */,
+				793CE5F371DFA0BBCB61D10A /* DirectorySearchTests.swift in Sources */,
+				0B7BD9344CF04E8209EC9A2D /* EchoLinkAudioPacketCodecTests.swift in Sources */,
+				A2D4FCAE1B68702BA5A33F52 /* EchoLinkAutomaticDirectoryTests.swift in Sources */,
+				E70E441F228E14A2DD45FB35 /* EchoLinkAutomaticTransportTests.swift in Sources */,
+				0916AB0746E5E3064A55FBCB /* EchoLinkConferenceHostServiceTests.swift in Sources */,
+				E50F8964FE8149688CE79D9C /* EchoLinkDTMFToneGeneratorTests.swift in Sources */,
+				3FB5A94BC3790CC5427E4EA3 /* EchoLinkPTTTransitionTests.swift in Sources */,
+				EFABEC182E686CF6977500C9 /* EchoLinkParticipantParserTests.swift in Sources */,
+				5988D1BA00954DDC4615D1C5 /* EchoLinkProxyProtocolTests.swift in Sources */,
+				40BFCE014EECF551CED7CC4D /* EchoLinkPublicProxyListTests.swift in Sources */,
+				B6C59E9D05F8742F2242028E /* EchoLinkRegistrationClientTests.swift in Sources */,
+				4E213BDDBEC38BC37D07903D /* EchoLinkRelayClientTests.swift in Sources */,
+				D7A301772D3C88F82035FCA0 /* EchoLinkRelayConnectionTests.swift in Sources */,
+				4E675408DBC15CC6C74EB388 /* EchoLinkRelayProtocolTests.swift in Sources */,
+				08D8075485CB1C0FEFD3CC79 /* FavoritesViewModelTests.swift in Sources */,
+				6C5C6FC2276D6096820D256C /* GSMCodecStreamingTests.swift in Sources */,
+				FAA05E3CBE1EB8F1B7F66EB8 /* InboundHostSessionMachineTests.swift in Sources */,
+				695CFACC6509297EC4D64096 /* InboundStationVerifierTests.swift in Sources */,
+				71891DFCED8E6B3E24F4B26F /* LiveTransportSmokeTests.swift in Sources */,
+				40C636597EF842945683C23C /* LocalDemoAccountTests.swift in Sources */,
+				A2557EB720D58E0E533A3D3B /* LocalDemoAudioBufferTests.swift in Sources */,
+				347AF87AECDB052CAB3BD05E /* LocalDemoConnectionTests.swift in Sources */,
+				4D743BB3690EF1522F7769D0 /* LocalDemoHostingTests.swift in Sources */,
+				B4329F557E48B03236CC1F7A /* PCMLinearResamplerTests.swift in Sources */,
+				97416DBDFC5FA3AB6228B8B7 /* PTTIntentSelectionTests.swift in Sources */,
+				7D394FD29AD0E853B9D1C438 /* QSOHubTests.swift in Sources */,
+				ADBA33E5E994EABA9EEE8032 /* QSORecordingTests.swift in Sources */,
+				BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */,
+				9ABC42B6BD501158C5BF9207 /* SpeexCodecTests.swift in Sources */,
+				7A98D19FE19268F42BC57C38 /* StationLocationTests.swift in Sources */,
+				686E4FD292C9858CDE7A37A5 /* StationParserTests.swift in Sources */,
+				9948946693DC2FCDF73DD80F /* SvxLinkControlProtocolTests.swift in Sources */,
+				578A7E96E0AA0533EAAC20EA /* SvxLinkPTYTransportTests.swift in Sources */,
+				0F707F4FAE23681566E305CC /* VoicePipelineQualityTests.swift in Sources */,
+				686BE471F1CABA08EC7C821D /* VoicePipelineSmokeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		48CF1D12B99299D15B5104D8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5ADBA4AD72ACEB13E0B4284A /* MacMenuBarProtocol.swift in Sources */,
+				67073044CF41728F108E9A3B /* ReverbQSOMenuBarApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD5798177F307DABAFAFE427 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5F3440AFDA1799821BBF3A42 /* ActiveNodeParticipant.swift in Sources */,
+				021019035D62E6A85212386A /* AppState.swift in Sources */,
+				EFB1D0D5EA0728AB17793F16 /* AudioEngine.swift in Sources */,
+				0B5D103D7E69632D55C78CF6 /* AudioRouteControl.swift in Sources */,
+				7E767CE10AE8B406BA0692A5 /* BoundUDPSocket.swift in Sources */,
+				034D5C698299C67A13190185 /* CallAccessPolicy.swift in Sources */,
+				4F11705217DFEF9695077D48 /* CallCQ.swift in Sources */,
+				9638E3C7916D3E5E369D55D8 /* CallCQClient.swift in Sources */,
+				8FF100F43D8401823EEBB2A3 /* CallCQService.swift in Sources */,
+				90A1A652861E35A9BB2674A7 /* CallCQView.swift in Sources */,
+				CE660C4BA8192D706E37A667 /* CallRestrictionsView.swift in Sources */,
+				16DC37A10F8FDA218C1B2D62 /* ChatMessage.swift in Sources */,
+				F6A8EF258F54DA4ECDE8AC97 /* ChatView.swift in Sources */,
+				E88254BFFAEFFD3D3757F979 /* ChatViewModel.swift in Sources */,
+				076678571E383A20B8EDD79D /* ConferenceFloorRouter.swift in Sources */,
+				D3F358E5FC6724C23FD6DA1C /* ConferenceHostView.swift in Sources */,
+				30157DE6EC53AF3B7A5CF8F9 /* ConferenceReceiveAudioCodec.swift in Sources */,
+				FA5064DEEAC522E34334FF68 /* CountryFilterView.swift in Sources */,
+				F212550C88F1C3BC34A17611 /* DemoCallCQBackend.swift in Sources */,
+				4C92B055EFCC52B7E4F057BF /* DirectCQSocketPair.swift in Sources */,
+				9442B2A6A3AB309FA32C3B53 /* DirectoryClient.swift in Sources */,
+				9332E43BFAB873AB64A6573E /* DirectoryView.swift in Sources */,
+				0B47D13DCD497D5497506E7A /* DirectoryViewModel.swift in Sources */,
+				D5B6057F855E93BC29452054 /* EchoLinkAudioPacketCodec.swift in Sources */,
+				E50BAA77BABF6AD040645D31 /* EchoLinkAutomaticTransportSelector.swift in Sources */,
+				AF422DF83AFF4F73C13E9F2B /* EchoLinkConferenceHostService.swift in Sources */,
+				9944E84DEF246D3BDD525C8D /* EchoLinkConnectionService.swift in Sources */,
+				DA0EBF6389ED83D7DDA9B083 /* EchoLinkDTMFToneGenerator.swift in Sources */,
+				95D350E3F5679477818A7C97 /* EchoLinkDirectoryService.swift in Sources */,
+				5C382F32CD0FF6FE793ED6E6 /* EchoLinkParticipantParser.swift in Sources */,
+				88D3077F693C42A43BD5C244 /* EchoLinkProxyClient.swift in Sources */,
+				4FB96A59D4BBEC1029C27317 /* EchoLinkProxyConfiguration.swift in Sources */,
+				76DEAADC0DC96FE7A7CEFB1C /* EchoLinkProxyProtocol.swift in Sources */,
+				39C15709E060E9672A17E0CE /* EchoLinkProxySession.swift in Sources */,
+				DFF95137FC59E841C68737C0 /* EchoLinkPublicProxyList.swift in Sources */,
+				49FD46CB8069D57F33FD88FA /* EchoLinkRegistrationClient.swift in Sources */,
+				5340BD8AAE8F997C6FA50902 /* EchoLinkRelayClient.swift in Sources */,
+				715B4301C91EDC7B4610F12F /* EchoLinkRelayProtocol.swift in Sources */,
+				39FFA601BC066B520C16ACC7 /* FavoritesView.swift in Sources */,
+				B5FAFBA6E2ACDC727720E475 /* FavoritesViewModel.swift in Sources */,
+				62E1E8C1FAF5951FB5001488 /* GSMCodec.swift in Sources */,
+				C02230AAF3750891766654C5 /* InboundHostSessionMachine.swift in Sources */,
+				9CCEA08E8CE05EFABCACB3D6 /* InboundStationVerifier.swift in Sources */,
+				0F6C1CD9C602E0B8E09F48A2 /* KeychainService.swift in Sources */,
+				36DE69DE126CCD0AAC21B0C4 /* LicensesView.swift in Sources */,
+				B94FBDF96B0B8A4B94EAC061 /* LocalDemoAccount.swift in Sources */,
+				F542E433FF361780C8343B26 /* LocalDemoAnnouncement.swift in Sources */,
+				B331EDD994D2792DB6C0EC31 /* LocalDemoAudioBuffer.swift in Sources */,
+				EF587A881B3A96A15FADC450 /* MacMenuBarBridge.swift in Sources */,
+				2741AFAB11A43B290158332F /* MacMenuBarProtocol.swift in Sources */,
+				1A7162F8E63DFAF1D469A47F /* MicrophoneAccess.swift in Sources */,
+				F5FDDE175F912C0DEDA7B213 /* PCMLinearResampler.swift in Sources */,
+				FA7C8E01F5C7B5FAB9F38C7E /* PTTButton.swift in Sources */,
+				4121A4910B383516F9049880 /* PTTIntent.swift in Sources */,
+				F3EDF6C71ECEDC5C596AB0EE /* PermissionOnboardingView.swift in Sources */,
+				B54E8E96A9C3DAF0A9A2DFD5 /* PersonalStationView.swift in Sources */,
+				033EC3ACFE2AC2C36CB42D0F /* QSOActivityAttributes.swift in Sources */,
+				73F0F50A3EA272CD87E3255E /* QSOActivityController.swift in Sources */,
+				D70F8F05F92EC9F779B04AEA /* QSOHub.swift in Sources */,
+				C2CA22193ECBDFB9BC8ABE5A /* QSORecordingService.swift in Sources */,
+				53CF091FACA3C57AD7AFB2D8 /* QSOSession.swift in Sources */,
+				969EA72E52B7723F16B67150 /* QSOSharedPanels.swift in Sources */,
+				297D9E1442AF9FFEAF811AA3 /* QSOView.swift in Sources */,
+				5250DD74CA8893F08B30A4F0 /* QSOViewModel.swift in Sources */,
+				C239F7A64A0060C733F54887 /* RecentConnection.swift in Sources */,
+				C03632AC19A627B7CD4EDCCB /* RecentConnectionsService.swift in Sources */,
+				1A8D4FAB222FCEF64A269E5D /* RecentView.swift in Sources */,
+				C94AB257995CCD2E953202C7 /* RecordingsView.swift in Sources */,
+				C82AD6645A5EB0147870744C /* ReverbQSOApp.swift in Sources */,
+				AFACD13DAD8583A5F3A4A719 /* SettingsView.swift in Sources */,
+				7AEC38711B265F6749B2F286 /* SettingsViewModel.swift in Sources */,
+				08E74CEFFBC91BDA1659BB82 /* SignalMeter.swift in Sources */,
+				F021D91D685C83A04068DABF /* SpeexCodec.swift in Sources */,
+				D779D1CAC42370718379092D /* Station+Location.swift in Sources */,
+				49172B48CDCC57C0395C3C9C /* Station.swift in Sources */,
+				A249A59197CC1395C8A1CD18 /* StationDetailSheet.swift in Sources */,
+				CB4D868D2073505AC70B7287 /* StationParser.swift in Sources */,
+				D2B6E6B5322408D2B41EA69B /* StationRow.swift in Sources */,
+				FA5B3B1C1B2880DD6682E2DC /* StatusBadge.swift in Sources */,
+				FD814250832A9BF6533E37A1 /* SvxLinkControlProtocol.swift in Sources */,
+				DF0CA91EBFF1804635F74AB5 /* SvxLinkPTYTransport.swift in Sources */,
+				5E2DB4802FA29D7E973307B3 /* Theme.swift in Sources */,
+				475A2F56BFED26C94B3E8FA0 /* VoiceDiagnosticLog.swift in Sources */,
+				032ECA4C560AE008A7FAA909 /* WatchPhoneBridge.swift in Sources */,
+				DDB74CD033E92065A76BE254 /* add.c in Sources */,
+				36AC9B6FB8B22CC91C6C646F /* bits.c in Sources */,
+				FEF9695AB272C78EE6F31D4C /* cb_search.c in Sources */,
+				ACD83EE9294A87E65F722D1C /* code.c in Sources */,
+				AC71A364B592C9C9C1C22256 /* debug.c in Sources */,
+				F8D1508BC5BA5771011B7865 /* decode.c in Sources */,
+				A879B4C4107D3EFB9F13A0F5 /* exc_10_16_table.c in Sources */,
+				38FC08E4AF82B6C2F9DF25FC /* exc_10_32_table.c in Sources */,
+				DB825C1D3F9E847FF6B11C6B /* exc_20_32_table.c in Sources */,
+				7B0BED77A2FAF34BF201A85A /* exc_5_256_table.c in Sources */,
+				20348FDE5461EDB554E4612D /* exc_5_64_table.c in Sources */,
+				6CC2DDE13F3E24FB40C6A8F4 /* exc_8_128_table.c in Sources */,
+				1C4B95601C5E8A753FA7B4C1 /* filters.c in Sources */,
+				FCE4311C8A97BF3D698AA7EF /* gain_table.c in Sources */,
+				0235868D948F2D051CC98264 /* gain_table_lbr.c in Sources */,
+				76DFFE0CB6E660E39AC753A5 /* gsm_create.c in Sources */,
+				94475626AF23EA0A04ADA252 /* gsm_decode.c in Sources */,
+				3CDE95296E662CF19D59BCBF /* gsm_destroy.c in Sources */,
+				CF3455D43AD11C094A873E4C /* gsm_encode.c in Sources */,
+				7C946AA507A6FEBFE50E8952 /* gsm_explode.c in Sources */,
+				BEB354C07BFC852E32F9FFF2 /* gsm_implode.c in Sources */,
+				3E5A8695414DD4A348E51C78 /* gsm_option.c in Sources */,
+				21997753A7650BFBE1EE9C11 /* gsm_print.c in Sources */,
+				414A29735503DFE5E725E8FC /* hexc_10_32_table.c in Sources */,
+				0C00649D1CB43E2F6BDCEB1C /* hexc_table.c in Sources */,
+				0792E613226E414FA0339129 /* high_lsp_tables.c in Sources */,
+				6E87B621682DE1896EB42C79 /* long_term.c in Sources */,
+				B0AA5120ED2DBA39C473D53A /* lpc.c in Sources */,
+				F031320341C277C9E119DA21 /* lpc.c in Sources */,
+				579609EA2A9632802988D24F /* lsp.c in Sources */,
+				9049CA223D3D254C8C756125 /* lsp_tables_nb.c in Sources */,
+				84E9021F9F07B0AC62BFDC62 /* ltp.c in Sources */,
+				93DAE693A7119F922144BAD9 /* modes.c in Sources */,
+				201EA7D4242405F1E3930CD0 /* modes_wb.c in Sources */,
+				1D86EA79E588DCB5F1BEB123 /* nb_celp.c in Sources */,
+				5094BB0A0DF800E4CFCD81AC /* oe_speex.c in Sources */,
+				72941FCC04E2F94081439A0D /* preprocess.c in Sources */,
+				424ADD1D2E000DF51E23889D /* quant_lsp.c in Sources */,
+				85B8BF98DA518BE9AB788C4E /* rpe.c in Sources */,
+				FC418E1729779C61928F53DE /* sb_celp.c in Sources */,
+				FCC1213CEBB82588A71FC217 /* short_term.c in Sources */,
+				BD8163EC6791FD3B8FCEA70B /* speex.c in Sources */,
+				9946697E0BF0066E36B31874 /* speex_callbacks.c in Sources */,
+				44103B205D857EDC4EB2870B /* speex_header.c in Sources */,
+				B25567AA490EC9BBCD3DD5D2 /* stereo.c in Sources */,
+				C3D2C10880DD8023F2157575 /* table.c in Sources */,
+				4199C91AB5D3787EAB050C76 /* vbr.c in Sources */,
+				44C9C4C99A7B6299D00F3A84 /* vq.c in Sources */,
+				9A71926034EED8D3EBA9F24F /* window.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3109E218BFE497F6874821C2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = 119E4B54D7653CBE63E132E4 /* ReverbQSOLiveActivity */;
+			targetProxy = EBBFB912EC9E34540210FEC1 /* PBXContainerItemProxy */;
+		};
+		C84F4311C79AC99AA7E31405 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = E768610831FB4E200906B7BF /* ReverbQSOWatch */;
+			targetProxy = 7B334319B179D5016FBF2B19 /* PBXContainerItemProxy */;
+		};
+		ECF0B6CF442BE856D504DE18 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0963C9641D1783EC17664061 /* ReverbQSO */;
+			targetProxy = 69DC81CA102F99E873E16C01 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		03EED2DF921473FB80AB2DA8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = ReverbQSO/Resources/ReverbQSOMac.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = FRFXFRT624;
+				INFOPLIST_FILE = ReverbQSO/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		140F4235651AA3FF76D1CBB6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = FRFXFRT624;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				INFOPLIST_KEY_CFBundleDisplayName = "ReverbQSO Menu Bar";
+				INFOPLIST_KEY_LSUIElement = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink.menubar;
+				PRODUCT_MODULE_NAME = ReverbQSOMenuBar;
+				PRODUCT_NAME = ReverbQSOMenuBar;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		193D06B916017091B533A1BB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = Companions/Watch/WatchInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink.watchkitapp;
+				PRODUCT_MODULE_NAME = ReverbQSOWatch;
+				PRODUCT_NAME = ReverbQSOWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "ReverbQSO/App/ReverbQSO-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		3D4EE511021834724FA9141C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLinkTests;
+				PRODUCT_MODULE_NAME = ReverbQSOTests;
+				PRODUCT_NAME = ReverbQSOTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ReverbQSO.app/ReverbQSO";
+			};
+			name = Debug;
+		};
+		68C1666585AB7C844317258E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"NeedFunctionPrototypes=1",
+					SASR,
+					"HAVE_CONFIG_H=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/ThirdParty/libgsm/inc",
+					"$(SRCROOT)/ThirdParty/libspeex/include",
+					"$(SRCROOT)/ThirdParty/libspeex/src",
+				);
+				INFOPLIST_FILE = ReverbQSO/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_MODULE_NAME = ReverbQSO;
+				PRODUCT_NAME = ReverbQSO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "ReverbQSO/App/ReverbQSO-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6D23581D3C09564D31142F1F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = FRFXFRT624;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				INFOPLIST_KEY_CFBundleDisplayName = "ReverbQSO Menu Bar";
+				INFOPLIST_KEY_LSUIElement = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink.menubar;
+				PRODUCT_MODULE_NAME = ReverbQSOMenuBar;
+				PRODUCT_NAME = ReverbQSOMenuBar;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		7766DEB3F3CC9A5E278574DD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Extensions/LiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink.liveactivity;
+				PRODUCT_MODULE_NAME = ReverbQSOLiveActivity;
+				PRODUCT_NAME = ReverbQSOLiveActivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7C32D874597306D776A3D716 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"NeedFunctionPrototypes=1",
+					SASR,
+					"HAVE_CONFIG_H=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/ThirdParty/libgsm/inc",
+					"$(SRCROOT)/ThirdParty/libspeex/include",
+					"$(SRCROOT)/ThirdParty/libspeex/src",
+				);
+				INFOPLIST_FILE = ReverbQSO/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_MODULE_NAME = ReverbQSO;
+				PRODUCT_NAME = ReverbQSO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OBJC_BRIDGING_HEADER = "ReverbQSO/App/ReverbQSO-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C5F546C9DC484ADF712D2C86 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLinkTests;
+				PRODUCT_MODULE_NAME = ReverbQSOTests;
+				PRODUCT_NAME = ReverbQSOTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ReverbQSO.app/ReverbQSO";
+			};
+			name = Release;
+		};
+		CBFA54144AED387D2BF1EFCD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Extensions/LiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink.liveactivity;
+				PRODUCT_MODULE_NAME = ReverbQSOLiveActivity;
+				PRODUCT_NAME = ReverbQSOLiveActivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D780158095EF267374C487CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = ReverbQSO/Resources/ReverbQSOMac.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = FRFXFRT624;
+				INFOPLIST_FILE = ReverbQSO/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DCF5B9BD1E67855632615E91 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = Companions/Watch/WatchInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminfaershtein.OpenEchoLink.watchkitapp;
+				PRODUCT_MODULE_NAME = ReverbQSOWatch;
+				PRODUCT_NAME = ReverbQSOWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "ReverbQSO/App/ReverbQSO-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		11476D0B00FB5DDF321B9B91 /* Build configuration list for PBXNativeTarget "ReverbQSOLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7766DEB3F3CC9A5E278574DD /* Debug */,
+				CBFA54144AED387D2BF1EFCD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		1C56431FB4F088FC2C25668A /* Build configuration list for PBXNativeTarget "ReverbQSOMenuBar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6D23581D3C09564D31142F1F /* Debug */,
+				140F4235651AA3FF76D1CBB6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		500B0A1E3D07C4741A8A74D9 /* Build configuration list for PBXProject "ReverbQSO" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				68C1666585AB7C844317258E /* Debug */,
+				7C32D874597306D776A3D716 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		58B5754862189930BEB0D2EC /* Build configuration list for PBXNativeTarget "ReverbQSOTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3D4EE511021834724FA9141C /* Debug */,
+				C5F546C9DC484ADF712D2C86 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7E26EBB1E77101EB83F14082 /* Build configuration list for PBXNativeTarget "ReverbQSO" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D780158095EF267374C487CE /* Debug */,
+				03EED2DF921473FB80AB2DA8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EB3BAC4E19067550BE2DEBB7 /* Build configuration list for PBXNativeTarget "ReverbQSOWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				193D06B916017091B533A1BB /* Debug */,
+				DCF5B9BD1E67855632615E91 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E9057CD74AB7C46BE4C5AF14 /* Project object */;
+}

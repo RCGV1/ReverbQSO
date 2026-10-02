@@ -1,0 +1,164 @@
+name: ReverbQSO
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    PRODUCT_NAME: ReverbQSO
+    PRODUCT_MODULE_NAME: ReverbQSO
+    SWIFT_VERSION: 6.0
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "3"
+    INFOPLIST_FILE: ReverbQSO/Resources/Info.plist
+    SWIFT_OBJC_BRIDGING_HEADER: ReverbQSO/App/ReverbQSO-Bridging-Header.h
+    HEADER_SEARCH_PATHS:
+      - $(SRCROOT)/ThirdParty/libgsm/inc
+      - $(SRCROOT)/ThirdParty/libspeex/include
+      - $(SRCROOT)/ThirdParty/libspeex/src
+    GCC_PREPROCESSOR_DEFINITIONS:
+      - $(inherited)
+      - NeedFunctionPrototypes=1
+      - SASR
+      - HAVE_CONFIG_H=1
+targets:
+  ReverbQSO:
+    type: application
+    platform: iOS
+    supportedDestinations: [iOS, macCatalyst]
+    deploymentTarget: "17.0"
+    sources:
+      - path: ReverbQSO
+      - path: ThirdParty/libgsm/src
+        excludes:
+          - toast.c
+          - toast_alaw.c
+          - toast_audio.c
+          - toast_lin.c
+          - toast_ulaw.c
+      - path: ThirdParty/libspeex/src
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: FRFXFRT624
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": ReverbQSO/Resources/ReverbQSOMac.entitlements
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: Network.framework
+      - sdk: Security.framework
+      - target: ReverbQSOLiveActivity
+        platformFilter: iOS
+      - target: ReverbQSOWatch
+        platformFilter: iOS
+  ReverbQSOLiveActivity:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: ReverbQSO/LiveActivity/QSOActivityAttributes.swift
+      - path: Extensions/LiveActivity
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: ReverbQSOLiveActivity
+        PRODUCT_MODULE_NAME: ReverbQSOLiveActivity
+        PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink.liveactivity
+        INFOPLIST_FILE: Extensions/LiveActivity/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+  ReverbQSOWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: ReverbQSO/Features/Recent/RecordingsView.swift
+      - path: ReverbQSO/Features/Settings/CallRestrictionsView.swift
+      - path: Companions/Watch
+        excludes:
+          - WatchInfo.plist
+      - path: ReverbQSO/Resources/Audio
+      - path: ReverbQSO/Models
+        excludes:
+          - RecentConnection.swift
+      - path: ReverbQSO/Networking
+      - path: ReverbQSO/Services
+        excludes:
+          - RecentConnectionsService.swift
+          - WatchPhoneBridge.swift
+      - path: ThirdParty/libgsm/src
+        excludes:
+          - toast.c
+          - toast_alaw.c
+          - toast_audio.c
+          - toast_lin.c
+          - toast_ulaw.c
+      - path: ThirdParty/libspeex/src
+    settings:
+      base:
+        PRODUCT_NAME: ReverbQSOWatch
+        PRODUCT_MODULE_NAME: ReverbQSOWatch
+        PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink.watchkitapp
+        INFOPLIST_FILE: Companions/Watch/WatchInfo.plist
+        SWIFT_OBJC_BRIDGING_HEADER: ReverbQSO/App/ReverbQSO-Bridging-Header.h
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: Network.framework
+      - sdk: Security.framework
+      - sdk: WatchConnectivity.framework
+  ReverbQSOTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests
+        excludes:
+          - Native
+    settings:
+      base:
+        PRODUCT_NAME: ReverbQSOTests
+        PRODUCT_MODULE_NAME: ReverbQSOTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLinkTests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/ReverbQSO.app/ReverbQSO
+        BUNDLE_LOADER: $(TEST_HOST)
+    dependencies:
+      - target: ReverbQSO
+  ReverbQSOMenuBar:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Companions/MenuBar
+      - path: ReverbQSO/App/MacMenuBarProtocol.swift
+    settings:
+      base:
+        PRODUCT_NAME: ReverbQSOMenuBar
+        PRODUCT_MODULE_NAME: ReverbQSOMenuBar
+        PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink.menubar
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ReverbQSO Menu Bar
+        INFOPLIST_KEY_LSUIElement: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: FRFXFRT624
+schemes:
+  ReverbQSO:
+    build:
+      targets:
+        ReverbQSO: all
+        ReverbQSOTests: [test]
+    test:
+      targets:
+        - ReverbQSOTests
+  ReverbQSOWatch:
+    build:
+      targets:
+        ReverbQSOWatch: all
+  ReverbQSOMenuBar:
+    build:
+      targets:
+        ReverbQSOMenuBar: all
