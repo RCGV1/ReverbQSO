@@ -20,7 +20,12 @@ struct ReceivePlaybackQueue {
     private(set) var queuedSamples = 0
     private(set) var generation: UInt64 = 0
     let maximumSamples = 1_936 // 242 ms (includes up to 0.5% clock correction) at 8 kHz
-    func needsReset(adding count: Int) -> Bool { queuedSamples + count > maximumSamples }
+    /// Completion callbacks can arrive after the player has rendered their audio.
+    /// Use the render timeline when available so delayed callbacks cannot stop
+    /// healthy playback and discard speech that is still scheduled.
+    func needsReset(adding count: Int, remainingSamples: Int? = nil) -> Bool {
+        max(0, remainingSamples ?? queuedSamples) + count > maximumSamples
+    }
     mutating func reserve(_ count: Int) -> UInt64 {
         queuedSamples += count
         return generation

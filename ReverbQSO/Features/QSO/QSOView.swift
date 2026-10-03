@@ -26,6 +26,8 @@ struct QSOView: View {
     @FocusState private var isRadioFocused: Bool
     @FocusState private var isParticipantSearchFocused: Bool
     @State private var isSpacePTTActive = false
+    @State private var spacePTTOwner = UUID()
+    @State private var isSpacePTTVisible = false
     #endif
 
     init(connectionService: EchoLinkConnectionService) {
@@ -461,8 +463,8 @@ struct QSOView: View {
                   !press.modifiers.contains(.option) else { return .ignored }
             switch press.phase {
             case .down:
-                guard !isSpacePTTActive, !viewModel.isPTTActive,
-                      viewModel.canTransmit else { return .handled }
+                guard !isSpacePTTActive, canStartSpacePTT else { return .handled }
+                guard SpacePTTReleaseMonitor.shared.claim(spacePTTOwner) else { return .handled }
                 isSpacePTTActive = true
                 viewModel.togglePTT(active: true)
             case .repeat:
@@ -472,8 +474,23 @@ struct QSOView: View {
             }
             return .handled
         }
+        .background(SpacePTTKeyboardHandler {
+            let eligible = canStartSpacePTT
+            SpacePTTReleaseMonitor.shared.logEligibility("qso", eligible: eligible, focused: isRadioFocused)
+            guard eligible, !isSpacePTTActive,
+                  SpacePTTReleaseMonitor.shared.claim(spacePTTOwner) else { return }
+            isSpacePTTActive = true
+            viewModel.togglePTT(active: true)
+        })
         .onReceive(SpacePTTReleaseMonitor.shared.releases) { releaseSpacePTT() }
-        .onAppear { isRadioFocused = true }
+        .onAppear {
+            isSpacePTTVisible = true
+            isRadioFocused = true
+        }
+        .onDisappear {
+            isSpacePTTVisible = false
+            releaseSpacePTT()
+        }
         .onChange(of: viewModel.isConnected) { _, connected in
             if connected && !isChatFocused && !isParticipantSearchFocused {
                 isRadioFocused = true
@@ -492,9 +509,6 @@ struct QSOView: View {
             } else {
                 isRadioFocused = true
             }
-        }
-        .onChange(of: isRadioFocused) { _, focused in
-            if !focused { releaseSpacePTT() }
         }
     }
 
@@ -1001,8 +1015,17 @@ struct QSOView: View {
     }
 
     #if targetEnvironment(macCatalyst)
+    private var canStartSpacePTT: Bool {
+        isSpacePTTVisible && scenePhase == .active && !showChat && !showAudioRoutes
+            && !showDTMF && !showStationActivity && !showParticipants
+            && !showDisconnectConfirmation && viewModel.errorMessage == nil
+            && !isChatFocused && !isParticipantSearchFocused
+            && !viewModel.isPTTActive && viewModel.canTransmit
+    }
+
     private func releaseSpacePTT() {
         guard isSpacePTTActive else { return }
+        SpacePTTReleaseMonitor.shared.release(spacePTTOwner)
         isSpacePTTActive = false
         viewModel.togglePTT(active: false)
     }

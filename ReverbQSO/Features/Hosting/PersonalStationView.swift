@@ -17,6 +17,8 @@ struct PersonalStationView: View {
     @FocusState private var isRadioFocused: Bool
     @FocusState private var isChatFocused: Bool
     @State private var isSpacePTTActive = false
+    @State private var spacePTTOwner = UUID()
+    @State private var isSpacePTTVisible = false
     #endif
 
     private var activeCall: InboundHostSession? {
@@ -256,8 +258,8 @@ struct PersonalStationView: View {
                   !press.modifiers.contains(.option) else { return .ignored }
             switch press.phase {
             case .down:
-                guard !isSpacePTTActive, !host.isTransmitting,
-                      host.talkerCallsign == nil else { return .handled }
+                guard !isSpacePTTActive, canStartSpacePTT else { return .handled }
+                guard SpacePTTReleaseMonitor.shared.claim(spacePTTOwner) else { return .handled }
                 isSpacePTTActive = true
                 pttPressed = true
                 host.setPTT(active: true)
@@ -268,20 +270,33 @@ struct PersonalStationView: View {
             }
             return .handled
         }
+        .background(SpacePTTKeyboardHandler {
+            let eligible = canStartSpacePTT
+            SpacePTTReleaseMonitor.shared.logEligibility("personal", eligible: eligible, focused: isRadioFocused)
+            guard eligible, !isSpacePTTActive,
+                  SpacePTTReleaseMonitor.shared.claim(spacePTTOwner) else { return }
+            isSpacePTTActive = true
+            pttPressed = true
+            host.setPTT(active: true)
+        })
         .onReceive(SpacePTTReleaseMonitor.shared.releases) {
             guard isSpacePTTActive else { return }
             releasePTT()
         }
-        .onAppear { isRadioFocused = true }
+        .onAppear {
+            isSpacePTTVisible = true
+            isRadioFocused = true
+        }
+        .onDisappear {
+            isSpacePTTVisible = false
+            releasePTT()
+        }
         .onChange(of: isChatFocused) { _, focused in
             if focused {
                 releasePTT()
             } else {
                 isRadioFocused = true
             }
-        }
-        .onChange(of: isRadioFocused) { _, focused in
-            if !focused { releasePTT() }
         }
     }
 
@@ -421,10 +436,20 @@ struct PersonalStationView: View {
         }
     }
 
+    #if targetEnvironment(macCatalyst)
+    private var canStartSpacePTT: Bool {
+        isSpacePTTVisible && scenePhase == .active && !confirmsEndCall
+            && !confirmsStopListening && !isChatFocused && activeCall != nil
+            && !host.isTransmitting && host.talkerCallsign == nil
+    }
+
+    #endif
+
     private func releasePTT() {
         pttPressed = false
         host.setPTT(active: false)
         #if targetEnvironment(macCatalyst)
+        SpacePTTReleaseMonitor.shared.release(spacePTTOwner)
         isSpacePTTActive = false
         #endif
     }

@@ -44,4 +44,30 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
         queue.complete(640, generation: generation)
         XCTAssertFalse(queue.needsReset(adding: queue.maximumSamples))
     }
+    func testDelayedCompletionsDoNotTrimHealthyRenderedPlayback() {
+        var queue = ReceivePlaybackQueue()
+        var end = 0
+        var completions: [(time: Double, count: Int, generation: UInt64)] = []
+        for index in 0..<100 {
+            let now = Double(index) * 0.08
+            let rendered = max(0, Int((now - 0.04) * 8_000))
+            for completion in completions where completion.time <= now {
+                queue.complete(completion.count, generation: completion.generation)
+            }
+            completions.removeAll { $0.time <= now }
+            let remaining = max(0, end - rendered)
+            XCTAssertFalse(queue.needsReset(adding: 640, remainingSamples: remaining))
+            end = max(end, rendered) + 640
+            let generation = queue.reserve(640)
+            completions.append((Double(end) / 8_000 + 0.04 + 0.16, 640, generation))
+        }
+    }
+
+    func testActualRenderedBacklogStillRequiresTrim() {
+        var queue = ReceivePlaybackQueue()
+        _ = queue.reserve(640)
+        XCTAssertTrue(queue.needsReset(adding: 640, remainingSamples: 1_920))
+        XCTAssertFalse(queue.needsReset(adding: 640, remainingSamples: 320))
+    }
+
 }

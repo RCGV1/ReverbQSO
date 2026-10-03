@@ -28,4 +28,48 @@ final class SpacePTTReleaseMonitorTests: XCTestCase {
         XCTAssertTrue(transmitting)
         withExtendedLifetime(subscription) {}
     }
+    func testPhysicalHoldStartsAndEndsWithoutSwiftUIFocusCallbacks() {
+        let monitor = SpacePTTReleaseMonitor.shared
+        monitor.spaceChanged(isPressed: false, canStart: false)
+        var transmitting = false
+        var starts = 0
+        let down = monitor.presses.sink { transmitting = true; starts += 1 }
+        let up = monitor.releases.sink { transmitting = false }
+        monitor.spaceChanged(isPressed: true, canStart: true)
+        XCTAssertTrue(transmitting)
+        monitor.spaceChanged(isPressed: true, canStart: true)
+        XCTAssertEqual(starts, 1)
+        monitor.spaceChanged(isPressed: false, canStart: false)
+        XCTAssertFalse(transmitting)
+        withExtendedLifetime((down, up)) {}
+    }
+
+    func testSpaceStartedInTextInputCannotStartPTTUntilReleased() {
+        let monitor = SpacePTTReleaseMonitor.shared
+        monitor.spaceChanged(isPressed: false, canStart: false)
+        var starts = 0
+        let down = monitor.presses.sink { starts += 1 }
+        monitor.spaceChanged(isPressed: true, canStart: false)
+        monitor.spaceChanged(isPressed: true, canStart: true)
+        XCTAssertEqual(starts, 0)
+        monitor.spaceChanged(isPressed: false, canStart: false)
+        monitor.spaceChanged(isPressed: true, canStart: true)
+        XCTAssertEqual(starts, 1)
+        monitor.spaceChanged(isPressed: false, canStart: false)
+        withExtendedLifetime(down) {}
+    }
+
+    func testOnlyOneRadioCanOwnPhysicalSpaceHold() {
+        let monitor = SpacePTTReleaseMonitor.shared
+        let first = UUID()
+        let second = UUID()
+        XCTAssertTrue(monitor.claim(first))
+        XCTAssertFalse(monitor.claim(second))
+        monitor.release(second)
+        XCTAssertFalse(monitor.claim(second))
+        monitor.release(first)
+        XCTAssertTrue(monitor.claim(second))
+        monitor.release(second)
+    }
+
 }

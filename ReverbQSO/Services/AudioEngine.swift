@@ -171,49 +171,6 @@ enum MicrophoneGainSettings {
     }
 }
 
-private final class CaptureBufferProcessingBarrier: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pendingCount = 0
-    private var isSealed = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func enter() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !isSealed, LiveCaptureBacklogPolicy.canAccept(pending: pendingCount) else { return false }
-        pendingCount += 1
-        return true
-    }
-
-    func leave() {
-        lock.lock()
-        precondition(pendingCount > 0)
-        pendingCount -= 1
-        guard pendingCount == 0, isSealed else {
-            lock.unlock()
-            return
-        }
-        let continuations = waiters
-        waiters.removeAll(keepingCapacity: false)
-        lock.unlock()
-        continuations.forEach { $0.resume() }
-    }
-
-    func sealAndWait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            isSealed = true
-            if pendingCount == 0 {
-                lock.unlock()
-                continuation.resume()
-            } else {
-                waiters.append(continuation)
-                lock.unlock()
-            }
-        }
-    }
-}
-
 /// The tap stays installed for the QSO. Only callbacks admitted while PTT is
 /// down may enter the encoder; sealing the gate makes release deterministic.
 private final class CaptureTapGate: @unchecked Sendable {
@@ -711,6 +668,7 @@ final class AudioEngine: ObservableObject {
 #endif
 
         await barrier.sealAndWait()
+        VoiceDiagnosticLog.record("capture admission rejected=\(barrier.snapshot.rejectedBuffers)")
         guard captureGeneration == generation,
               captureDrainGeneration == generation else { return Data() }
 
@@ -1081,7 +1039,7 @@ final class AudioEngine: ObservableObject {
 
     private func schedulePlaybackBuffer(_ buffer: AVAudioPCMBuffer) {
         let count = Int(buffer.frameLength)
-        if playbackQueue.needsReset(adding: count) {
+        if playbackQueue.needsReset(adding: count, remainingSamples: remainingPlaybackSamples) {
             // A stalled route must not turn into seconds of old speech.
             trimPlaybackTimeline()
             logger.debug("Trimmed receive playback backlog to current speech")
@@ -1320,10 +1278,11 @@ final class AudioEngine: ObservableObject {
         return { [weak engine, gate, processor] buffer, _ in
             if buffer.frameLength > 0 && gate.markFirstBuffer() {
                 let firstBufferRate = buffer.format.sampleRate
+                let firstBufferFrames = buffer.frameLength
                 Task { @MainActor [weak engine] in
                     guard engine?.tapInstalled == true, engine?.tapVersion == tapVersion else { return }
                     engine?.isCaptureReady = true
-                    VoiceDiagnosticLog.record("input graph ready first callback rate=\(firstBufferRate)")
+                    VoiceDiagnosticLog.record("input graph ready first callback rate=\(firstBufferRate) frames=\(firstBufferFrames) durationMs=\(1000 * Double(firstBufferFrames) / firstBufferRate)")
                 }
             }
             guard let ticket = gate.admitBuffer() else { return }
@@ -1335,6 +1294,7 @@ final class AudioEngine: ObservableObject {
             let sampleRate = buffer.format.sampleRate
             processor.submit(normalizedSamples: samples, sampleRate: sampleRate, generation: ticket.generation,
                              capturedAt: capturedAt, configuration: ticket.configuration) { [weak engine] result in
+                ticket.barrier.finishDSP()
                 Task { @MainActor [weak engine, barrier = ticket.barrier] in
                     defer { barrier.leave() }
                     guard let result else { return }

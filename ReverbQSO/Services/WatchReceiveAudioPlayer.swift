@@ -124,7 +124,9 @@ final class WatchReceiveAudioPlayer {
                 let corrected = self.receiveClock.process(packet, queuedSamples: self.remainingPlaybackSamples,
                     targetQueuedSamples: Int(self.receivePlayout.targetDelay * 8000))
                 guard let buffer = self.makeBuffer(corrected) else { continue }
-                if self.queuedSampleCount + corrected.count > Self.maximumQueuedSamples {
+                // Played-buffer callbacks can lag behind rendered audio.
+                // Bound the live render lead so delayed callbacks cannot trim speech.
+                if self.remainingPlaybackSamples + corrected.count > Self.maximumQueuedSamples {
                     self.playbackGeneration &+= 1
                     self.playerNode.stop()
                     self.queuedSampleCount = 0

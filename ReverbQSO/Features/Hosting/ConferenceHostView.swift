@@ -23,6 +23,8 @@ struct ConferenceHostView: View {
     @AppStorage("conferenceHostBlockedCallsigns") private var blockedCallsigns = ""
     @State private var pttPressed = false
     @State private var isSpacePTTActive = false
+    @State private var spacePTTOwner = UUID()
+    @State private var isSpacePTTVisible = false
     @State private var chatDraft = ""
     @FocusState private var focusedTextField: TextFieldFocus?
     @FocusState private var isRadioFocused: Bool
@@ -219,8 +221,8 @@ struct ConferenceHostView: View {
                   !press.modifiers.contains(.option) else { return .ignored }
             switch press.phase {
             case .down:
-                guard !isSpacePTTActive, host.isRunning, !host.isTransmitting,
-                      host.talkerCallsign == nil else { return .handled }
+                guard !isSpacePTTActive, canStartSpacePTT else { return .handled }
+                guard SpacePTTReleaseMonitor.shared.claim(spacePTTOwner) else { return .handled }
                 isSpacePTTActive = true
                 host.setPTT(active: true)
             case .repeat:
@@ -230,9 +232,23 @@ struct ConferenceHostView: View {
             }
             return .handled
         }
+        .background(SpacePTTKeyboardHandler {
+            let eligible = canStartSpacePTT
+            SpacePTTReleaseMonitor.shared.logEligibility("conference", eligible: eligible, focused: isRadioFocused)
+            guard eligible, !isSpacePTTActive,
+                  SpacePTTReleaseMonitor.shared.claim(spacePTTOwner) else { return }
+            isSpacePTTActive = true
+            host.setPTT(active: true)
+        })
         .onReceive(SpacePTTReleaseMonitor.shared.releases) { releaseSpacePTT() }
-        .onAppear { isRadioFocused = true }
-        .onDisappear { releaseSpacePTT() }
+        .onAppear {
+            isSpacePTTVisible = true
+            isRadioFocused = true
+        }
+        .onDisappear {
+            isSpacePTTVisible = false
+            releaseSpacePTT()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { releaseSpacePTT() }
         }
@@ -242,9 +258,6 @@ struct ConferenceHostView: View {
             } else {
                 isRadioFocused = true
             }
-        }
-        .onChange(of: isRadioFocused) { _, focused in
-            if !focused { releaseSpacePTT() }
         }
         .onChange(of: allowConferenceServers) { _, allowed in
             if !allowed { allowMultiConferencing = false }
@@ -271,8 +284,14 @@ struct ConferenceHostView: View {
         }
     }
 
+    private var canStartSpacePTT: Bool {
+        isSpacePTTVisible && scenePhase == .active && focusedTextField == nil
+            && host.isRunning && !host.isTransmitting && host.talkerCallsign == nil
+    }
+
     private func releaseSpacePTT() {
         guard isSpacePTTActive else { return }
+        SpacePTTReleaseMonitor.shared.release(spacePTTOwner)
         isSpacePTTActive = false
         host.setPTT(active: false)
     }
