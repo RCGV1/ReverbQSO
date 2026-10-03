@@ -8,8 +8,20 @@ enum MicrophoneAuthorizationState: Equatable {
     case denied
 }
 
+enum MicrophonePermissionRequestReason: Equatable {
+    case userInitiated
+    case automaticPreparation
+}
+
 @MainActor
 enum MicrophoneAccess {
+    static func shouldRequest(
+        status: MicrophoneAuthorizationState,
+        reason: MicrophonePermissionRequestReason
+    ) -> Bool {
+        status == .notDetermined && reason == .userInitiated
+    }
+
     static var status: MicrophoneAuthorizationState {
         if #available(iOS 17.0, watchOS 10.0, *) {
             switch AVAudioApplication.shared.recordPermission {
@@ -28,11 +40,12 @@ enum MicrophoneAccess {
         }
     }
 
-    static func request() async -> Bool {
+    static func request(reason: MicrophonePermissionRequestReason = .userInitiated) async -> Bool {
         switch status {
         case .granted: return true
         case .denied: return false
-        case .notDetermined: break
+        case .notDetermined:
+            guard shouldRequest(status: status, reason: reason) else { return false }
         }
 
         if #available(iOS 17.0, watchOS 10.0, *) {

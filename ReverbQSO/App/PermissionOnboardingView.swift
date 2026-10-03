@@ -132,9 +132,11 @@ struct PermissionOnboardingView: View {
 
 struct MicrophonePermissionControl: View {
     var isEmbeddedInSettings = false
+    var onGranted: (() -> Void)?
     @Environment(\.scenePhase) private var scenePhase
     @State private var status: MicrophoneAuthorizationState = .notDetermined
     @State private var isRequesting = false
+    @State private var hasReportedGranted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -148,7 +150,10 @@ struct MicrophonePermissionControl: View {
                 Text("Microphone")
                     .font(.headline)
                 Spacer(minLength: 8)
-                PermissionStatusBadge(title: status.title, isAllowed: status == .granted)
+                PermissionStatusBadge(
+                    title: isRequesting ? "Requesting…" : status.title,
+                    isAllowed: status == .granted
+                )
             }
 
             Text("Used only while you hold push to talk.")
@@ -157,17 +162,25 @@ struct MicrophonePermissionControl: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if status == .notDetermined {
-                Button("Enable Microphone") {
+                Button {
                     isRequesting = true
                     Task {
                         _ = await MicrophoneAccess.request()
-                        status = MicrophoneAccess.status
+                        refreshStatus()
                         isRequesting = false
+                    }
+                } label: {
+                    if isRequesting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Enable Microphone")
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .disabled(isRequesting)
+                .accessibilityHint("Allows audio only when you transmit.")
             } else if status == .denied {
                 Text("Transmitting requires microphone access.")
                     .font(.footnote)
@@ -183,10 +196,17 @@ struct MicrophonePermissionControl: View {
                     .fill(Color(uiColor: .secondarySystemGroupedBackground))
             }
         }
-        .task { status = MicrophoneAccess.status }
+        .task { refreshStatus() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { status = MicrophoneAccess.status }
+            if phase == .active { refreshStatus() }
         }
+    }
+
+    private func refreshStatus() {
+        status = MicrophoneAccess.status
+        guard status == .granted, !hasReportedGranted else { return }
+        hasReportedGranted = true
+        onGranted?()
     }
 }
 
@@ -227,6 +247,7 @@ struct MacMessagePermissionControl: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var status: UNAuthorizationStatus = .notDetermined
     @State private var isRequesting = false
+    @State private var refreshGeneration = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -241,7 +262,7 @@ struct MacMessagePermissionControl: View {
                     .font(.headline)
                 Spacer(minLength: 8)
                 PermissionStatusBadge(
-                    title: status == .authorized || status == .provisional ? "Allowed" : status == .denied ? "Off" : "Not asked",
+                    title: isRequesting ? "Requesting…" : status == .authorized || status == .provisional ? "Allowed" : status == .denied ? "Off" : "Not asked",
                     isAllowed: status == .authorized || status == .provisional
                 )
             }
@@ -254,7 +275,7 @@ struct MacMessagePermissionControl: View {
             }
 
             if status == .notDetermined {
-                Button("Allow Message Alerts") {
+                Button {
                     isRequesting = true
                     Task {
                         let granted = (try? await UNUserNotificationCenter.current()
@@ -264,6 +285,13 @@ struct MacMessagePermissionControl: View {
                         MacMessageNotifier.refreshAuthorizationStatus()
                         isRequesting = false
                     }
+                } label: {
+                    if isRequesting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Allow Message Alerts")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .disabled(isRequesting)
@@ -271,6 +299,10 @@ struct MacMessagePermissionControl: View {
                 Text("Turn on notifications in System Settings.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Button("Open System Settings") {
+                    guard let url = URL(string: UIApplication.openNotificationSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
             }
         }
         .padding(isEmbeddedInSettings ? 0 : 18)
@@ -281,14 +313,18 @@ struct MacMessagePermissionControl: View {
                     .fill(Color(uiColor: .secondarySystemGroupedBackground))
             }
         }
-        .task { await refresh() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await refresh() } }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await refresh()
         }
     }
 
     private func refresh() async {
-        status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        let refreshedStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        guard !Task.isCancelled, generation == refreshGeneration else { return }
+        status = refreshedStatus
     }
 }
 #endif

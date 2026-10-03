@@ -22,7 +22,7 @@ final class QSORecordingCoordinator: ObservableObject {
     private var lastAutomaticPreference = false
 
     init(folder: URL? = nil, demo: Bool = false, defaults: UserDefaults = .standard) {
-        automaticRecorder = QSORecordingService(folder: folder, demo: demo)
+        automaticRecorder = QSORecordingService(folder: folder, demo: demo, rotatesAtLimit: true)
         clipRecorder = QSORecordingService(folder: folder, demo: demo)
         self.defaults = defaults
         preferenceKey = RecordingPreferences.alwaysRecordKey(demo: demo)

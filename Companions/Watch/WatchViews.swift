@@ -98,6 +98,7 @@ struct WatchRootView: View {
 
 private struct WatchMicrophoneOnboarding: View {
     let onContinue: () -> Void
+    @Environment(\.scenePhase) private var scenePhase
     @State private var microphoneStatus: MicrophoneAuthorizationState = .notDetermined
 
     var body: some View {
@@ -143,7 +144,10 @@ private struct WatchMicrophoneOnboarding: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 8)
-        .task { microphoneStatus = MicrophoneAccess.status }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            microphoneStatus = MicrophoneAccess.status
+        }
     }
 }
 
@@ -482,9 +486,9 @@ private struct WatchSettingsView: View {
         #else
         .listStyle(.plain)
         #endif
-        .task { microphoneStatus = MicrophoneAccess.status }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { microphoneStatus = MicrophoneAccess.status }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            microphoneStatus = MicrophoneAccess.status
         }
     }
 }

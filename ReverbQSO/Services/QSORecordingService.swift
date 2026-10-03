@@ -7,31 +7,37 @@ import Combine
 final class QSOAudioFileWriter {
     private var handle: FileHandle?
     private let maximumSamples: Int
+    private let writeSamples: (FileHandle, Data) throws -> Void
     private(set) var sampleCount = 0
     var isAtLimit: Bool { sampleCount >= maximumSamples }
-    init(url: URL, maximumSamples: Int = 8_000 * 3_600) throws {
+    var remainingCapacity: Int { maximumSamples - sampleCount }
+    init(url: URL, maximumSamples: Int = 8_000 * 3_600,
+         writeSamples: @escaping (FileHandle, Data) throws -> Void = { try $0.write(contentsOf: $1) }) throws {
         guard maximumSamples > 0, maximumSamples <= (Int(UInt32.max) - 36) / 2 else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
         self.maximumSamples = maximumSamples
+        self.writeSamples = writeSamples
         guard FileManager.default.createFile(atPath: url.path, contents: Self.header(samples: 0)) else {
             throw CocoaError(.fileWriteUnknown)
         }
         handle = try FileHandle(forWritingTo: url)
         try handle?.seekToEnd()
     }
-    func append(_ samples: [Int16]) throws {
+    @discardableResult
+    func append(_ samples: [Int16]) throws -> Int {
         guard let handle else { throw CocoaError(.fileWriteUnknown) }
-        let count = min(samples.count, maximumSamples - sampleCount)
-        guard count > 0 else { return }
+        let count = min(samples.count, remainingCapacity)
+        guard count > 0 else { return 0 }
         var data = Data(capacity: count * 2)
         for sample in samples.prefix(count) {
             let bits = UInt16(bitPattern: sample)
             data.append(UInt8(truncatingIfNeeded: bits))
             data.append(UInt8(truncatingIfNeeded: bits >> 8))
         }
-        try handle.write(contentsOf: data)
+        try writeSamples(handle, data)
         sampleCount += count
+        return count
     }
     func finish() throws {
         guard let file = handle else { return }
@@ -98,17 +104,33 @@ struct QSORecording: Identifiable, Codable, Equatable {
 
 @MainActor
 final class QSORecordingService: ObservableObject {
+    private static let recordingsChanged = Notification.Name("QSORecordingService.recordingsChanged")
     @Published private(set) var isRecording = false
     @Published private(set) var recordings: [QSORecording] = []
     @Published private(set) var errorMessage: String?
     private let folder: URL
+    private let maximumSamples: Int
+    private let rotatesAtLimit: Bool
+    private let writeSamples: (FileHandle, Data) throws -> Void
     private var writer: QSOAudioFileWriter?
     private var current: QSORecording?
     private var temporaryURL: URL?
+    private var recordingsChangedObserver: AnyCancellable?
 
-    init(folder: URL? = nil, demo: Bool = false) {
+    init(folder: URL? = nil, demo: Bool = false,
+         maximumSamples: Int = 8_000 * 3_600, rotatesAtLimit: Bool = false,
+         writeSamples: @escaping (FileHandle, Data) throws -> Void = { try $0.write(contentsOf: $1) }) {
         self.folder = folder ?? Self.storageFolder(demo: demo)
+        self.maximumSamples = maximumSamples
+        self.rotatesAtLimit = rotatesAtLimit
+        self.writeSamples = writeSamples
         reload()
+        recordingsChangedObserver = NotificationCenter.default.publisher(for: Self.recordingsChanged)
+            .sink { [weak self] notification in
+                guard let self,
+                      notification.object as? String == self.folder.standardizedFileURL.path else { return }
+                self.reload()
+            }
     }
     static func storageFolder(demo: Bool = false) -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -121,35 +143,90 @@ final class QSORecordingService: ObservableObject {
         let id = UUID()
         let fileURL = folder.appendingPathComponent(id.uuidString + ".wav")
         let partial = folder.appendingPathComponent(id.uuidString + ".partial")
-        writer = try QSOAudioFileWriter(url: partial)
+        do {
+            writer = try QSOAudioFileWriter(url: partial, maximumSamples: maximumSamples, writeSamples: writeSamples)
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            throw error
+        }
         current = QSORecording(id: id, callsign: callsign, startedAt: Date(), duration: 0,
                                url: fileURL, kind: kind)
         temporaryURL = partial
         isRecording = true
     }
     func append(_ samples: [Int16]) {
-        guard let writer else { return }
-        do {
-            try writer.append(samples)
-            if writer.isAtLimit { errorMessage = "Recording stopped after one hour of audio."; stop() }
-        } catch {
-            errorMessage = "Could not write the recording: \(error.localizedDescription)"
-            stop()
+        var offset = 0
+        while offset < samples.count, let writer {
+            do {
+                offset += try writer.append(Array(samples[offset...]))
+                guard writer.isAtLimit else { return }
+                guard rotatesAtLimit, let recording = current else {
+                    errorMessage = "Recording stopped after one hour of audio."
+                    stop()
+                    return
+                }
+                let callsign = recording.callsign
+                let kind = recording.kind
+                try finishCurrentRecording()
+                try start(callsign: callsign, kind: kind)
+            } catch {
+                errorMessage = "Could not write the recording: \(error.localizedDescription)"
+                if self.writer === writer {
+                    // A failed callback may have written only part of its
+                    // bytes. Finish truncates to the confirmed sample count,
+                    // preserving earlier speech while stopping further writes.
+                    stop()
+                } else {
+                    discardCurrentRecording()
+                }
+                return
+            }
         }
     }
     func stop() {
-        guard let writer, var recording = current, let partial = temporaryURL else { return }
-        self.writer = nil; current = nil; temporaryURL = nil; isRecording = false
+        guard writer != nil else { return }
         do {
-            try writer.finish()
-            if writer.sampleCount == 0 { try FileManager.default.removeItem(at: partial); return }
-            recording.duration = Double(writer.sampleCount) / 8_000
-            try FileManager.default.moveItem(at: partial, to: recording.url)
-            try JSONEncoder().encode(recording).write(to: recording.url.deletingPathExtension().appendingPathExtension("json"), options: .atomic)
-            reload()
+            try finishCurrentRecording()
         } catch {
             errorMessage = "Could not save the recording: \(error.localizedDescription)"
+            discardCurrentRecording()
         }
+    }
+
+    private func finishCurrentRecording() throws {
+        guard let writer, var recording = current, let partial = temporaryURL else { return }
+        self.writer = nil; current = nil; temporaryURL = nil; isRecording = false
+        let metadataURL = recording.url.deletingPathExtension().appendingPathExtension("json")
+        let temporaryMetadataURL = metadataURL.appendingPathExtension("partial")
+        do {
+            try writer.finish()
+            guard writer.sampleCount > 0 else {
+                try FileManager.default.removeItem(at: partial)
+                return
+            }
+            recording.duration = Double(writer.sampleCount) / 8_000
+            try JSONEncoder().encode(recording).write(to: temporaryMetadataURL, options: .atomic)
+            try FileManager.default.moveItem(at: partial, to: recording.url)
+            try FileManager.default.moveItem(at: temporaryMetadataURL, to: metadataURL)
+            notifyRecordingsChanged()
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            try? FileManager.default.removeItem(at: temporaryMetadataURL)
+            try? FileManager.default.removeItem(at: recording.url)
+            try? FileManager.default.removeItem(at: metadataURL)
+            throw error
+        }
+    }
+
+    private func discardCurrentRecording() {
+        let partial = temporaryURL
+        writer = nil; current = nil; temporaryURL = nil; isRecording = false
+        if let partial { try? FileManager.default.removeItem(at: partial) }
+    }
+
+    private func notifyRecordingsChanged() {
+        NotificationCenter.default.post(name: Self.recordingsChanged,
+                                        object: folder.standardizedFileURL.path)
     }
     func reload() {
         recordings = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
@@ -167,8 +244,11 @@ final class QSORecordingService: ObservableObject {
         guard recordings.contains(where: { $0.id == recording.id }) else { return }
         // IDs, rather than caller-provided paths, determine which files can be deleted.
         let url = folder.appendingPathComponent(recording.id.uuidString + ".wav")
-        try FileManager.default.removeItem(at: url)
-        try? FileManager.default.removeItem(at: url.deletingPathExtension().appendingPathExtension("json"))
-        reload()
+        do { try FileManager.default.removeItem(at: url) }
+        catch CocoaError.fileNoSuchFile { /* Audio was already removed. */ }
+        let metadata = url.deletingPathExtension().appendingPathExtension("json")
+        do { try FileManager.default.removeItem(at: metadata) }
+        catch CocoaError.fileNoSuchFile { /* Metadata was already removed. */ }
+        notifyRecordingsChanged()
     }
 }

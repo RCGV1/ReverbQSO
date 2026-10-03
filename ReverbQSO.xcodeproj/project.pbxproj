@@ -32,6 +32,7 @@
 		0F707F4FAE23681566E305CC /* VoicePipelineQualityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48E211EF2DFE11CB88AB9E4 /* VoicePipelineQualityTests.swift */; };
 		0F8EA8572D793DE17D33E652 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6D0EEB971EC92EB2FE7F099C /* Security.framework */; };
 		10043EEFEB50810C4A9DF4ED /* exc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */; };
+		154FA1EE4C149AB0A3C62332 /* RecordingAudioSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4166481B17EC882D85F2518E /* RecordingAudioSessionTests.swift */; };
 		16DC37A10F8FDA218C1B2D62 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */; };
 		184A5827CA66CC0AC2BCCF01 /* EchoLinkPublicProxyList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */; };
 		18D276EADE0C29BF246B985B /* EchoLinkRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */; };
@@ -215,6 +216,7 @@
 		AED126344E843568ECC2775A /* DemoCallCQBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFDD947DEC6E73999CA1947E /* DemoCallCQBackend.swift */; };
 		AF422DF83AFF4F73C13E9F2B /* EchoLinkConferenceHostService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */; };
 		AFACD13DAD8583A5F3A4A719 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A88B9776F4DD27D96376EBF /* SettingsView.swift */; };
+		B06E42E15E182CE28E666803 /* RecordingAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34684FA5CF6EA5E42FA11F3 /* RecordingAudioSession.swift */; };
 		B0724361B45D1FF67D1DFA63 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CCE1B83C11A08A41F7474DF4 /* WatchConnectivity.framework */; };
 		B0AA5120ED2DBA39C473D53A /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = 540BBC2FF76B995FFDDD95D2 /* lpc.c */; };
 		B0AA6CE5F763E1C262B5C492 /* gsm_explode.c in Sources */ = {isa = PBXBuildFile; fileRef = 74A3C8B5FC58640E614541B3 /* gsm_explode.c */; };
@@ -228,6 +230,7 @@
 		B6C59E9D05F8742F2242028E /* EchoLinkRegistrationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */; };
 		B94FBDF96B0B8A4B94EAC061 /* LocalDemoAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */; };
 		BD8163EC6791FD3B8FCEA70B /* speex.c in Sources */ = {isa = PBXBuildFile; fileRef = EEC1CB51BBBAB2A3879362BA /* speex.c */; };
+		BE0CB0CDBCD83397CAC0BAC7 /* RecordingAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34684FA5CF6EA5E42FA11F3 /* RecordingAudioSession.swift */; };
 		BEB354C07BFC852E32F9FFF2 /* gsm_implode.c in Sources */ = {isa = PBXBuildFile; fileRef = E8BC7788B9DCE592355F4DD2 /* gsm_implode.c */; };
 		BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */; };
 		C02230AAF3750891766654C5 /* InboundHostSessionMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FA40CA3FB11465D5ECAC9A /* InboundHostSessionMachine.swift */; };
@@ -272,6 +275,7 @@
 		DFF95137FC59E841C68737C0 /* EchoLinkPublicProxyList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */; };
 		E12460092F486AD9FFECFAB9 /* DirectoryFiltersMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E1A329C72E99352D276BDA /* DirectoryFiltersMenu.swift */; };
 		E1A8C3F5C8697B2BBEAA7F47 /* ConferenceFloorRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F58266ADAC833BA9E40B206 /* ConferenceFloorRouter.swift */; };
+		E1DABECEE3DE9AEB5D64AFAA /* MicrophoneAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C454E26DD02A89E57521450C /* MicrophoneAccessTests.swift */; };
 		E3122362A6E2E2DE2F2E9520 /* gsm_option.c in Sources */ = {isa = PBXBuildFile; fileRef = B75F5C04BC0B9CF5A0A76CE9 /* gsm_option.c */; };
 		E334456CD6F9133D78385090 /* preprocess.c in Sources */ = {isa = PBXBuildFile; fileRef = 8794B05E140F9A7E6B8CAA55 /* preprocess.c */; };
 		E448A9A60D35F0812700A066 /* lsp.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F22AA24E3CA040D11C6ABC1 /* lsp.c */; };
@@ -425,6 +429,7 @@
 		3F58F29DD9D6514550B77B75 /* LocalDemoAudioBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAudioBuffer.swift; sourceTree = "<group>"; };
 		3FCFE0628164575D1111C6CC /* EchoLinkRelayClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayClientTests.swift; sourceTree = "<group>"; };
 		40B54A4D8D6A20FF5BA944A0 /* EchoLinkRelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayClient.swift; sourceTree = "<group>"; };
+		4166481B17EC882D85F2518E /* RecordingAudioSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingAudioSessionTests.swift; sourceTree = "<group>"; };
 		43631BB64688D1A3FC8A1AB0 /* StationDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationDetailSheet.swift; sourceTree = "<group>"; };
 		448A6DBA626F851FDB93E89C /* FavoritesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModel.swift; sourceTree = "<group>"; };
 		44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoAccount.swift; sourceTree = "<group>"; };
@@ -560,6 +565,7 @@
 		C32BF61F3C71F980DACE493D /* AudioRouteControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteControl.swift; sourceTree = "<group>"; };
 		C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMLinearResampler.swift; sourceTree = "<group>"; };
 		C44CD3C28C8255DC249F6ADA /* filters.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = filters.c; sourceTree = "<group>"; };
+		C454E26DD02A89E57521450C /* MicrophoneAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneAccessTests.swift; sourceTree = "<group>"; };
 		C46FE451B3C6D89DD6CA5AAD /* EchoLinkProxyProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxyProtocolTests.swift; sourceTree = "<group>"; };
 		C588F1C170C18D99070E65C1 /* _kiss_fft_guts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = _kiss_fft_guts.h; sourceTree = "<group>"; };
 		C5B801BC8CE57413932CAA3D /* hexc_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hexc_table.c; sourceTree = "<group>"; };
@@ -593,6 +599,7 @@
 		DE35A47DD3CB006D1844A11F /* WatchViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchViews.swift; sourceTree = "<group>"; };
 		DEF9EC01347B55DF2ED92158 /* QSORecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSORecordingTests.swift; sourceTree = "<group>"; };
 		E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRegistrationClientTests.swift; sourceTree = "<group>"; };
+		E34684FA5CF6EA5E42FA11F3 /* RecordingAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingAudioSession.swift; sourceTree = "<group>"; };
 		E46B3D0B9DD67B5D3E0B1EE5 /* CallCQView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQView.swift; sourceTree = "<group>"; };
 		E4FDCD1D3602EA1229B2E5CB /* EchoTestWelcome.gsm */ = {isa = PBXFileReference; path = EchoTestWelcome.gsm; sourceTree = "<group>"; };
 		E5905F0C404FCEB7D4B845D6 /* ConferenceReceiveAudioCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceReceiveAudioCodec.swift; sourceTree = "<group>"; };
@@ -687,6 +694,7 @@
 				BDFB7C338CBA54A29D2B513F /* QSORecordingCoordinator.swift */,
 				64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */,
 				2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */,
+				E34684FA5CF6EA5E42FA11F3 /* RecordingAudioSession.swift */,
 				37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */,
 				48073EE255B887359F1EC185 /* WatchPhoneBridge.swift */,
 			);
@@ -728,11 +736,13 @@
 				F698176A60DD005C9990551C /* LocalDemoAudioBufferTests.swift */,
 				8F06CE461936AB642879E5B8 /* LocalDemoConnectionTests.swift */,
 				A589F5DEFDA7E71736CF95BB /* LocalDemoHostingTests.swift */,
+				C454E26DD02A89E57521450C /* MicrophoneAccessTests.swift */,
 				EA7A3F3EF59B5150450CA40B /* PCMLinearResamplerTests.swift */,
 				9A7D96170CA498CC1F3616DA /* ProxyDirectoryRefreshTests.swift */,
 				C8E42AD9781FFBA40E131751 /* PTTIntentSelectionTests.swift */,
 				641E5CA234459D7B966CA2A9 /* QSOHubTests.swift */,
 				DEF9EC01347B55DF2ED92158 /* QSORecordingTests.swift */,
+				4166481B17EC882D85F2518E /* RecordingAudioSessionTests.swift */,
 				31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */,
 				C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */,
 				0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */,
@@ -1338,6 +1348,7 @@
 				2EEDA4577EB79A64D0560186 /* QSORecordingCoordinator.swift in Sources */,
 				6E23B4706FE4C0D253EA7B1D /* QSORecordingService.swift in Sources */,
 				964ED6C4B640146A330F8523 /* QSOSession.swift in Sources */,
+				BE0CB0CDBCD83397CAC0BAC7 /* RecordingAudioSession.swift in Sources */,
 				3653CABEFBAB6A5286539DE1 /* RecordingSettingsRows.swift in Sources */,
 				351FB9B783B28806EB7534D9 /* RecordingsView.swift in Sources */,
 				D338C344B04CE7447A030F54 /* SpeexCodec.swift in Sources */,
@@ -1448,11 +1459,13 @@
 				A2557EB720D58E0E533A3D3B /* LocalDemoAudioBufferTests.swift in Sources */,
 				347AF87AECDB052CAB3BD05E /* LocalDemoConnectionTests.swift in Sources */,
 				4D743BB3690EF1522F7769D0 /* LocalDemoHostingTests.swift in Sources */,
+				E1DABECEE3DE9AEB5D64AFAA /* MicrophoneAccessTests.swift in Sources */,
 				B4329F557E48B03236CC1F7A /* PCMLinearResamplerTests.swift in Sources */,
 				97416DBDFC5FA3AB6228B8B7 /* PTTIntentSelectionTests.swift in Sources */,
 				AE47111C0C0ABD363A582088 /* ProxyDirectoryRefreshTests.swift in Sources */,
 				7D394FD29AD0E853B9D1C438 /* QSOHubTests.swift in Sources */,
 				ADBA33E5E994EABA9EEE8032 /* QSORecordingTests.swift in Sources */,
+				154FA1EE4C149AB0A3C62332 /* RecordingAudioSessionTests.swift in Sources */,
 				BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */,
 				6DCC6ADD211C255BC7D63752 /* SessionRecordingTests.swift in Sources */,
 				9ABC42B6BD501158C5BF9207 /* SpeexCodecTests.swift in Sources */,
@@ -1550,6 +1563,7 @@
 				C239F7A64A0060C733F54887 /* RecentConnection.swift in Sources */,
 				C03632AC19A627B7CD4EDCCB /* RecentConnectionsService.swift in Sources */,
 				1A8D4FAB222FCEF64A269E5D /* RecentView.swift in Sources */,
+				B06E42E15E182CE28E666803 /* RecordingAudioSession.swift in Sources */,
 				C7CDA512BC745375966639BD /* RecordingSettingsRows.swift in Sources */,
 				C94AB257995CCD2E953202C7 /* RecordingsView.swift in Sources */,
 				C82AD6645A5EB0147870744C /* ReverbQSOApp.swift in Sources */,

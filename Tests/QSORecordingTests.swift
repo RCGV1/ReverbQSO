@@ -60,6 +60,101 @@ final class QSORecordingTests: XCTestCase {
         XCTAssertTrue(recorder.recordings.isEmpty)
     }
 
+    @MainActor func testDeletionCleansMetadataWhenAudioWasAlreadyRemoved() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let recorder = QSORecordingService(folder: folder)
+        try recorder.start(callsign: "K6MISSING")
+        recorder.append([1])
+        recorder.stop()
+        let item = try XCTUnwrap(recorder.recordings.first)
+        try FileManager.default.removeItem(at: item.url)
+        XCTAssertNoThrow(try recorder.delete(item))
+        XCTAssertTrue(recorder.recordings.isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).isEmpty)
+    }
+
+    @MainActor func testAutomaticModeRotatesWithoutDroppingCallbackSamples() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let recorder = QSORecordingService(folder: folder, maximumSamples: 3, rotatesAtLimit: true)
+        try recorder.start(callsign: "K6ROTATE")
+
+        recorder.append([1, 2, 3, 4, 5, 6, 7])
+        recorder.stop()
+
+        let recordings = recorder.recordings.sorted { $0.startedAt < $1.startedAt }
+        XCTAssertEqual(recordings.map(\.duration), [3.0 / 8_000, 3.0 / 8_000, 1.0 / 8_000])
+        let samples = try recordings.flatMap { recording -> [Int16] in
+            let data = try Data(contentsOf: recording.url).dropFirst(44)
+            return stride(from: 0, to: data.count, by: 2).map { offset in
+                Int16(bitPattern: UInt16(data[data.startIndex + offset]) |
+                    UInt16(data[data.startIndex + offset + 1]) << 8)
+            }
+        }
+        XCTAssertEqual(samples, [1, 2, 3, 4, 5, 6, 7])
+    }
+
+    @MainActor func testFinishedRecordingRefreshesOtherServiceInstances() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let list = QSORecordingService(folder: folder)
+        let recorder = QSORecordingService(folder: folder)
+
+        try recorder.start(callsign: "K6LIST")
+        recorder.append([1])
+        recorder.stop()
+
+        XCTAssertEqual(list.recordings.count, 1)
+        try recorder.delete(try XCTUnwrap(recorder.recordings.first))
+        XCTAssertTrue(list.recordings.isEmpty)
+    }
+
+    @MainActor func testFailedSaveCleansUpTemporaryAndOrphanedFiles() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let recorder = QSORecordingService(folder: folder)
+        try recorder.start(callsign: "K6FAIL")
+        recorder.append([1])
+        let partial = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .first(where: { $0.pathExtension == "partial" }))
+        let metadataTemporary = folder.appendingPathComponent(partial.deletingPathExtension().lastPathComponent + ".json.partial")
+        try FileManager.default.createDirectory(at: metadataTemporary, withIntermediateDirectories: true)
+
+        recorder.stop()
+
+        XCTAssertNotNil(recorder.errorMessage)
+        XCTAssertFalse(recorder.isRecording)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).isEmpty)
+    }
+
+    @MainActor func testPartialWriteFailureSavesConfirmedAudioAndStopsRetrying() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var writes = 0
+        let recorder = QSORecordingService(folder: folder, rotatesAtLimit: true) { handle, data in
+            writes += 1
+            if writes == 2 {
+                try handle.write(contentsOf: data.prefix(1))
+                throw CocoaError(.fileWriteOutOfSpace)
+            }
+            try handle.write(contentsOf: data)
+        }
+        try recorder.start(callsign: "K6DISK")
+        recorder.append([0x1234, -2])
+        recorder.append([99, 100])
+        recorder.append([101])
+        XCTAssertFalse(recorder.isRecording)
+        XCTAssertNotNil(recorder.errorMessage)
+        XCTAssertEqual(writes, 2)
+        let saved = try XCTUnwrap(recorder.recordings.first)
+        XCTAssertEqual(saved.duration, 2.0 / 8_000)
+        let bytes = try Data(contentsOf: saved.url)
+        XCTAssertEqual(bytes.count, 48)
+        XCTAssertEqual(Array(bytes.suffix(4)), [0x34, 0x12, 0xfe, 0xff])
+        XCTAssertEqual(Array(bytes[40..<44]), [4, 0, 0, 0])
+    }
+
     @MainActor func testAutomaticRecordingDefaultsOffAndDemoPreferenceIsIsolated() {
         let folder = temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }

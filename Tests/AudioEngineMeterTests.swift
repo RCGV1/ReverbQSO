@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class AudioEngineMeterTests: XCTestCase {
+    func testReceivedPCMReachesRecordingBeforeSpeakerStartup() {
+        let engine = AudioEngine()
+        var received: [Int16] = []
+        var outputWasRunning: Bool?
+        engine.onRecordingPCM = { samples in
+            received = samples
+            outputWasRunning = engine.isRunning
+        }
+        engine.playReceivedPCM([7, -8, 9])
+        defer { engine.stopAll() }
+        XCTAssertEqual(received, [7, -8, 9])
+        XCTAssertEqual(outputWasRunning, false)
+    }
+
     func testReceivedAudioLevelReturnsToZeroAfterPlaybackActivityEnds() async {
         let engine = AudioEngine()
 

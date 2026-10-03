@@ -786,6 +786,15 @@ final class EchoLinkConnectionService: ObservableObject {
         audioEngine.setOutputPreference(preference)
     }
 
+    func prepareMicrophoneAfterPermissionGrant() {
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        guard MicrophoneAccess.status == .granted else { return }
+        // Reuse session-bound preparation so disconnect cancels the work and
+        // an old permission response cannot update a subsequent QSO.
+        beginCapturePreparationIfNeeded()
+#endif
+    }
+
     func setBackgroundMuted(_ muted: Bool) {
         if muted && session?.isPTTActive == true { sendPTT(active: false) }
         guard isBackgroundMuted != muted else { return }
@@ -1019,7 +1028,7 @@ final class EchoLinkConnectionService: ObservableObject {
         audioStatusMessage = "Preparing microphone for PTT. Receive audio is available."
         capturePreparationTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let ready = await self.audioEngine.prepareCaptureInput()
+            let ready = await self.audioEngine.prepareCaptureInput(requestPermission: false)
             guard !Task.isCancelled,
                   !self.isBackgroundMuted,
                   self.session?.id == currentSessionID else { return }

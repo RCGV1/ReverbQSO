@@ -1260,12 +1260,22 @@ struct QSOView: View {
     }
 
     private func audioStatus(_ message: String) -> some View {
-        Label(message, systemImage: "exclamationmark.triangle")
-            .font(.footnote)
-            .foregroundStyle(.orange)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 6)
-            .accessibilityAddTraits(.updatesFrequently)
+        VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(.orange)
+                .accessibilityAddTraits(.updatesFrequently)
+
+            #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+            if MicrophoneAccess.status != .granted {
+                MicrophonePermissionControl(isEmbeddedInSettings: true) {
+                    connectionService.prepareMicrophoneAfterPermissionGrant()
+                }
+            }
+            #endif
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
     }
 
     private var connectionStateText: String {

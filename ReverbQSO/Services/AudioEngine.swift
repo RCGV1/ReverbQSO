@@ -373,6 +373,7 @@ final class AudioEngine: ObservableObject {
     func startPlayback() {
         guard !isRunning else { return }
 
+        RecordingAudioSession.shared.beginLiveAudio(owner: self)
         do {
             installAudioSessionObserversIfNeeded()
             try configureAudioSession()
@@ -397,16 +398,19 @@ final class AudioEngine: ObservableObject {
             logger.error("Failed to start playback error='\(error.localizedDescription, privacy: .public)'")
             resetEngineGraph()
             isRunning = false
+            RecordingAudioSession.shared.endLiveAudio(owner: self)
         }
     }
 
     /// Prepare the microphone while the station is connected, before a PTT
-    /// gesture. RX remains available if permission or the input route fails.
-    func prepareCaptureInput() async -> Bool {
+    /// gesture. Automatic preparation never presents a permission prompt.
+    /// RX remains available if permission or the input route fails.
+    func prepareCaptureInput(requestPermission: Bool = true) async -> Bool {
 #if targetEnvironment(simulator)
         return false
 #else
         guard !isCaptureReady else { return true }
+        guard requestPermission || MicrophoneAccess.status == .granted else { return false }
         guard !isPreparingCapture else { return false }
         isPreparingCapture = true
         capturePreparationFailed = false
@@ -415,7 +419,7 @@ final class AudioEngine: ObservableObject {
         for attempt in 0..<3 {
             guard !Task.isCancelled else { return false }
             if tapInstalled { stopCaptureTap(preservingIntent: false) }
-            let installed = await startCapture()
+            let installed = await startCapture(requestPermission: requestPermission)
             captureRequested = false
             if installed {
                 for _ in 0..<20 {
@@ -435,7 +439,7 @@ final class AudioEngine: ObservableObject {
     }
 
     /// Start capturing audio from the microphone (PTT pressed).
-    func startCapture() async -> Bool {
+    func startCapture(requestPermission: Bool = true) async -> Bool {
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         if tapInstalled && isCaptureReady && !isPreparingCapture {
             guard !captureRequested else { return true }
@@ -485,7 +489,7 @@ final class AudioEngine: ObservableObject {
         logger.info("PTT capture disabled on Simulator (no reliable mic input chain)")
         return false
 #else
-        let hasPermission = await ensureRecordPermission()
+        let hasPermission = await ensureRecordPermission(requestPermission: requestPermission)
         VoiceDiagnosticLog.record("microphone permission granted=\(hasPermission)")
         guard isCaptureRequestCurrent(generation) else { return false }
         guard hasPermission else {
@@ -642,6 +646,7 @@ final class AudioEngine: ObservableObject {
 
     /// Fully stop audio playback + capture for session teardown.
     func stopAll() {
+        RecordingAudioSession.shared.endLiveAudio(owner: self)
         rxWindowActive = false
         prepareCaptureTask?.cancel()
         prepareCaptureTask = nil
@@ -680,14 +685,14 @@ final class AudioEngine: ObservableObject {
     /// `decodePacket()` which discards any stale partial-frame bytes from
     /// prior packets. This prevents audio corruption after packet loss.
     func playReceivedAudio(_ data: Data, diagnoseFirstRXAfterPTT: Bool = false) {
+        let pcmSamples = codec.decodePacket(data)
+        guard !pcmSamples.isEmpty else { return }
+        onRecordingPCM?(pcmSamples)
         if !isRunning {
             startPlayback()
         }
         guard isRunning else { return }
 
-        let pcmSamples = codec.decodePacket(data)
-        guard !pcmSamples.isEmpty else { return }
-        onRecordingPCM?(pcmSamples)
         accumulateRXWindow(samples: pcmSamples)
 
         guard let format = captureFormat,
@@ -713,12 +718,12 @@ final class AudioEngine: ObservableObject {
 
     /// Play decoded PCM audio samples directly.
     func playReceivedPCM(_ samples: [Int16], diagnoseFirstRXAfterPTT: Bool = false) {
+        guard !samples.isEmpty else { return }
+        onRecordingPCM?(samples)
         if !isRunning {
             startPlayback()
         }
         guard isRunning else { return }
-        guard !samples.isEmpty else { return }
-        onRecordingPCM?(samples)
         accumulateRXWindow(samples: samples)
 
         guard let format = captureFormat,
@@ -983,8 +988,8 @@ final class AudioEngine: ObservableObject {
         rxWindowPeak = max(rxWindowPeak, samples.reduce(0) { max($0, abs(Int($1))) })
     }
 
-    private func ensureRecordPermission() async -> Bool {
-        await MicrophoneAccess.request()
+    private func ensureRecordPermission(requestPermission: Bool) async -> Bool {
+        await MicrophoneAccess.request(reason: requestPermission ? .userInitiated : .automaticPreparation)
     }
 
     private func selectTapFormat(outputFormat: AVAudioFormat, inputFormat: AVAudioFormat) -> AVAudioFormat? {
@@ -1561,7 +1566,7 @@ final class AudioEngine: ObservableObject {
         guard prepareCaptureTask == nil else { return }
         prepareCaptureTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            _ = await self.prepareCaptureInput()
+            _ = await self.prepareCaptureInput(requestPermission: false)
             self.prepareCaptureTask = nil
         }
 #endif
