@@ -34,6 +34,7 @@
 		0F8EA8572D793DE17D33E652 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6D0EEB971EC92EB2FE7F099C /* Security.framework */; };
 		10043EEFEB50810C4A9DF4ED /* exc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */; };
 		154FA1EE4C149AB0A3C62332 /* RecordingAudioSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4166481B17EC882D85F2518E /* RecordingAudioSessionTests.swift */; };
+		161E94B5ACFC8057D74FC851 /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9307CF5CCE7FB54E600A241B /* GameController.framework */; };
 		16DC37A10F8FDA218C1B2D62 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */; };
 		184A5827CA66CC0AC2BCCF01 /* EchoLinkPublicProxyList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79B5E5D287DF8F47F1453FBC /* EchoLinkPublicProxyList.swift */; };
 		18D276EADE0C29BF246B985B /* EchoLinkRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */; };
@@ -52,6 +53,7 @@
 		20682782C8141A490AD130BE /* SpeexReceiveStreamDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5FB5D83D2A8C3449D1FF155 /* SpeexReceiveStreamDecoder.swift */; };
 		206C88B49762733FA0B036BB /* ReceiveAdaptivePlayoutBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCAE2D00D5F915C22B7D4577 /* ReceiveAdaptivePlayoutBuffer.swift */; };
 		208333EA314B79BF64DD5C37 /* ConferenceFloorRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8A1DE4FA89DB9DCFC0DF96 /* ConferenceFloorRouterTests.swift */; };
+		20DED4401162005E9FC013AA /* SpacePTTReleaseMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7A61A8E383D5B1A70D8208 /* SpacePTTReleaseMonitor.swift */; };
 		21997753A7650BFBE1EE9C11 /* gsm_print.c in Sources */ = {isa = PBXBuildFile; fileRef = 4CBA4DF9BC6DFC895B7C358C /* gsm_print.c */; };
 		21C8247622BC562D8FC64508 /* vq.c in Sources */ = {isa = PBXBuildFile; fileRef = 8920A84CAF5C5910BE79D7B5 /* vq.c */; };
 		2536655E568D9356C59DA28F /* EchoLinkVoiceCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3CEF860F8FCE18E3DCB8866 /* EchoLinkVoiceCodec.swift */; };
@@ -95,6 +97,7 @@
 		414A29735503DFE5E725E8FC /* hexc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 4817DD9C6319A3EA3180EFBE /* hexc_10_32_table.c */; };
 		4199C91AB5D3787EAB050C76 /* vbr.c in Sources */ = {isa = PBXBuildFile; fileRef = FD351DC71F0566322AB6448A /* vbr.c */; };
 		424ADD1D2E000DF51E23889D /* quant_lsp.c in Sources */ = {isa = PBXBuildFile; fileRef = AA78122D8FC42A65E184D975 /* quant_lsp.c */; };
+		4276527E9336D73D05B68C8F /* SpacePTTReleaseMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7A61A8E383D5B1A70D8208 /* SpacePTTReleaseMonitor.swift */; };
 		44103B205D857EDC4EB2870B /* speex_header.c in Sources */ = {isa = PBXBuildFile; fileRef = D790AAEAE5EBAA579958143F /* speex_header.c */; };
 		44AB3F65122999E723DFD4AC /* SpeexReceiveStreamDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31BDE607C823AD1DDADDC9E1 /* SpeexReceiveStreamDecoderTests.swift */; };
 		44C9C4C99A7B6299D00F3A84 /* vq.c in Sources */ = {isa = PBXBuildFile; fileRef = 8920A84CAF5C5910BE79D7B5 /* vq.c */; };
@@ -271,6 +274,7 @@
 		C08F21E39AED98174979350D /* libgsm-COPYRIGHT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 9B41435EC287F7056247E1CA /* libgsm-COPYRIGHT.txt */; };
 		C239F7A64A0060C733F54887 /* RecentConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B67CB43BBD0B2ABDC8D144A /* RecentConnection.swift */; };
 		C2CA22193ECBDFB9BC8ABE5A /* QSORecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */; };
+		C39BE7B1ABE0AF5A5CB12796 /* SpacePTTReleaseMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1884ADE0E3D3974D89C41CF9 /* SpacePTTReleaseMonitorTests.swift */; };
 		C3D2C10880DD8023F2157575 /* table.c in Sources */ = {isa = PBXBuildFile; fileRef = 6E255B3BF91775C965FB1FF6 /* table.c */; };
 		C58493160550FD7310D10BE3 /* LiveTransportMessageBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F143843AE5C06DD70FBE60E8 /* LiveTransportMessageBuffer.swift */; };
 		C5E80421B7EB42583CD19CD6 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF565DD4475E19F4A8C264C /* AudioEngine.swift */; };
@@ -443,6 +447,7 @@
 		1772D228B4CB8B1F1BB95A54 /* filters_sse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = filters_sse.h; sourceTree = "<group>"; };
 		17B4BCA1BC6FDFFA893EA6C5 /* WatchAudioRoutingConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAudioRoutingConnectionTests.swift; sourceTree = "<group>"; };
 		18704A39DC9EB635C80C43DC /* CallAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAccessPolicyTests.swift; sourceTree = "<group>"; };
+		1884ADE0E3D3974D89C41CF9 /* SpacePTTReleaseMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacePTTReleaseMonitorTests.swift; sourceTree = "<group>"; };
 		18DE9595BD7F0CA4E517E932 /* gain_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gain_table.c; sourceTree = "<group>"; };
 		19672D87B92EB2DD4C10790C /* math_approx.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = math_approx.h; sourceTree = "<group>"; };
 		1C4B5207E290F64A1C3FB971 /* lpc_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lpc_bfin.h; sourceTree = "<group>"; };
@@ -513,6 +518,7 @@
 		5A76596A804ABD401B3D7DB4 /* misc_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = misc_bfin.h; sourceTree = "<group>"; };
 		5A9FEC91B610C26333F3E8E5 /* gsm_create.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_create.c; sourceTree = "<group>"; };
 		5BAC19EA88D18BE0291B97B2 /* FavoritesViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModelTests.swift; sourceTree = "<group>"; };
+		5C7A61A8E383D5B1A70D8208 /* SpacePTTReleaseMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacePTTReleaseMonitor.swift; sourceTree = "<group>"; };
 		5C89ACCDAF59AD3E0795D757 /* exc_10_16_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = exc_10_16_table.c; sourceTree = "<group>"; };
 		5C994F6CBD263D438531D247 /* gain_table_lbr.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gain_table_lbr.c; sourceTree = "<group>"; };
 		5CA9FBADECA8A8AA0B4C9AC7 /* PhoneSessionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneSessionSnapshot.swift; sourceTree = "<group>"; };
@@ -568,6 +574,7 @@
 		8FC50F141ED5191797613ED8 /* cb_search_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search_arm4.h; sourceTree = "<group>"; };
 		8FC7B0125184C014B0BBB878 /* EchoLinkConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConnectionService.swift; sourceTree = "<group>"; };
 		90ABBDD741C05A2804F8184B /* EchoLinkPublicProxyListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkPublicProxyListTests.swift; sourceTree = "<group>"; };
+		9307CF5CCE7FB54E600A241B /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		93304898C5B9D4B78B98237E /* gsm_decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_decode.c; sourceTree = "<group>"; };
 		9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConferenceHostService.swift; sourceTree = "<group>"; };
 		9438F25F6A48DC6CC461D715 /* nb_celp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = nb_celp.c; sourceTree = "<group>"; };
@@ -720,6 +727,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F8602C2973C6C9D4F2B33360 /* AVFoundation.framework in Frameworks */,
+				161E94B5ACFC8057D74FC851 /* GameController.framework in Frameworks */,
 				C6ABFC8C479EB005CBD69933 /* Network.framework in Frameworks */,
 				C8BA15F960E39C5FC451BCC6 /* Security.framework in Frameworks */,
 			);
@@ -788,6 +796,7 @@
 				A2CE4E6D31FAFDC6A4A99536 /* ReceiveSpeechSmoother.swift */,
 				2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */,
 				E34684FA5CF6EA5E42FA11F3 /* RecordingAudioSession.swift */,
+				5C7A61A8E383D5B1A70D8208 /* SpacePTTReleaseMonitor.swift */,
 				37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */,
 				48073EE255B887359F1EC185 /* WatchPhoneBridge.swift */,
 				E5F65424AF8BAD72F97BCE9E /* WatchReceiveAudioPlayer.swift */,
@@ -853,6 +862,7 @@
 				4166481B17EC882D85F2518E /* RecordingAudioSessionTests.swift */,
 				31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */,
 				C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */,
+				1884ADE0E3D3974D89C41CF9 /* SpacePTTReleaseMonitorTests.swift */,
 				0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */,
 				31BDE607C823AD1DDADDC9E1 /* SpeexReceiveStreamDecoderTests.swift */,
 				3AE78B9A116D6DBE0F596A80 /* SpeexTransmitConnectionTests.swift */,
@@ -1144,6 +1154,7 @@
 			isa = PBXGroup;
 			children = (
 				0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */,
+				9307CF5CCE7FB54E600A241B /* GameController.framework */,
 				EE902BACF5D5E9E9421692AA /* Network.framework */,
 				6D0EEB971EC92EB2FE7F099C /* Security.framework */,
 				CCE1B83C11A08A41F7474DF4 /* WatchConnectivity.framework */,
@@ -1481,6 +1492,7 @@
 				BE0CB0CDBCD83397CAC0BAC7 /* RecordingAudioSession.swift in Sources */,
 				3653CABEFBAB6A5286539DE1 /* RecordingSettingsRows.swift in Sources */,
 				351FB9B783B28806EB7534D9 /* RecordingsView.swift in Sources */,
+				20DED4401162005E9FC013AA /* SpacePTTReleaseMonitor.swift in Sources */,
 				D338C344B04CE7447A030F54 /* SpeexCodec.swift in Sources */,
 				98A7BE92CBB6FCC19F9EF17C /* SpeexReceiveStreamDecoder.swift in Sources */,
 				756761DE246C3DF2E3EC52FC /* Station+Location.swift in Sources */,
@@ -1616,6 +1628,7 @@
 				154FA1EE4C149AB0A3C62332 /* RecordingAudioSessionTests.swift in Sources */,
 				BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */,
 				6DCC6ADD211C255BC7D63752 /* SessionRecordingTests.swift in Sources */,
+				C39BE7B1ABE0AF5A5CB12796 /* SpacePTTReleaseMonitorTests.swift in Sources */,
 				9ABC42B6BD501158C5BF9207 /* SpeexCodecTests.swift in Sources */,
 				44AB3F65122999E723DFD4AC /* SpeexReceiveStreamDecoderTests.swift in Sources */,
 				67E687059396415808259B74 /* SpeexTransmitConnectionTests.swift in Sources */,
@@ -1734,6 +1747,7 @@
 				AFACD13DAD8583A5F3A4A719 /* SettingsView.swift in Sources */,
 				7AEC38711B265F6749B2F286 /* SettingsViewModel.swift in Sources */,
 				08E74CEFFBC91BDA1659BB82 /* SignalMeter.swift in Sources */,
+				4276527E9336D73D05B68C8F /* SpacePTTReleaseMonitor.swift in Sources */,
 				F021D91D685C83A04068DABF /* SpeexCodec.swift in Sources */,
 				20682782C8141A490AD130BE /* SpeexReceiveStreamDecoder.swift in Sources */,
 				D779D1CAC42370718379092D /* Station+Location.swift in Sources */,

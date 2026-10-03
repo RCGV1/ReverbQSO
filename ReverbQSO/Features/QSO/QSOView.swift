@@ -472,6 +472,7 @@ struct QSOView: View {
             }
             return .handled
         }
+        .onReceive(SpacePTTReleaseMonitor.shared.releases) { releaseSpacePTT() }
         .onAppear { isRadioFocused = true }
         .onChange(of: viewModel.isConnected) { _, connected in
             if connected && !isChatFocused && !isParticipantSearchFocused {

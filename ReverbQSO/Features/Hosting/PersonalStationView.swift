@@ -268,6 +268,10 @@ struct PersonalStationView: View {
             }
             return .handled
         }
+        .onReceive(SpacePTTReleaseMonitor.shared.releases) {
+            guard isSpacePTTActive else { return }
+            releasePTT()
+        }
         .onAppear { isRadioFocused = true }
         .onChange(of: isChatFocused) { _, focused in
             if focused {

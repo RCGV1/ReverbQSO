@@ -46,6 +46,7 @@ targets:
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": ReverbQSO/Resources/ReverbQSOMac.entitlements
     dependencies:
       - sdk: AVFoundation.framework
+      - sdk: GameController.framework
       - sdk: Network.framework
       - sdk: Security.framework
       - target: ReverbQSOLiveActivity

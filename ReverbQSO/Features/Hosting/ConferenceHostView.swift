@@ -230,6 +230,7 @@ struct ConferenceHostView: View {
             }
             return .handled
         }
+        .onReceive(SpacePTTReleaseMonitor.shared.releases) { releaseSpacePTT() }
         .onAppear { isRadioFocused = true }
         .onDisappear { releaseSpacePTT() }
         .onChange(of: scenePhase) { _, phase in
