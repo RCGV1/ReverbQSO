@@ -22,6 +22,10 @@ final class QSOViewModel: ObservableObject {
     @Published var outputLevel: Double = 0.0
     @Published var audioOutputRouteName = "System Audio"
     @Published var audioOutputPreference: AudioOutputPreference = .speaker
+    @Published var audioInputDevices: [AudioInputDevice] = []
+    @Published var selectedAudioInputDeviceID: String?
+    @Published var watchAudioOutputAvailable = false
+    @Published var usesWatchAudioOutput = false
     @Published var isRemoteTransmitting = false
     @Published var remotePadAllowed = false
     @Published var isSendingDTMF = false
@@ -65,6 +69,9 @@ final class QSOViewModel: ObservableObject {
     func setAudioOutputPreference(_ preference: AudioOutputPreference) {
         connectionService.setAudioOutputPreference(preference)
     }
+
+    func setAudioInputDevice(id: String?) { connectionService.setAudioInputDevice(id: id) }
+    func setWatchAudioOutput(_ selected: Bool) { connectionService.setWatchAudioOutput(selected) }
 
     func sendRemoteDTMF(_ digits: String) {
         connectionService.sendRemoteDTMF(digits)
@@ -161,6 +168,10 @@ final class QSOViewModel: ObservableObject {
         connectionService.$audioOutputPreference
             .receive(on: DispatchQueue.main)
             .assign(to: &$audioOutputPreference)
+        connectionService.$audioInputDevices.assign(to: &$audioInputDevices)
+        connectionService.$selectedAudioInputDeviceID.assign(to: &$selectedAudioInputDeviceID)
+        connectionService.$watchAudioOutputAvailable.assign(to: &$watchAudioOutputAvailable)
+        connectionService.$usesWatchAudioOutput.assign(to: &$usesWatchAudioOutput)
 
         connectionService.$isRemoteTransmitting
             .receive(on: DispatchQueue.main)

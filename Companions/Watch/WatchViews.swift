@@ -365,13 +365,16 @@ private struct WatchPhoneQSOView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(!model.companionStatus.connected ? "iPhone QSO ended"
-                     : model.companionStatus.isRemoteTransmitting ? "Receiving — wait to transmit"
+                     : model.companionStatus.isRemoteTransmitting ? "Receiving on iPhone"
                      : model.companionStatus.isTransmitting ? "Transmitting" : "Connected on iPhone")
                     .font(.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .frame(height: 18)
                     .foregroundStyle(model.companionStatus.isRemoteTransmitting ? .orange : .secondary)
 
                 if !model.isCompanionReachable {
-                    Label("iPhone unavailable", systemImage: "iphone.slash")
+                    Label("Controls temporarily unavailable", systemImage: "iphone.slash")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }

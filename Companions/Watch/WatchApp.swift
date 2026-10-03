@@ -17,9 +17,9 @@ struct ReverbQSOWatchApp: App {
     var body: some Scene {
         WindowGroup {
             WatchRootView(model: model)
+                .onAppear { model.setForeground(scenePhase == .active) }
                 .onChange(of: scenePhase) { _, phase in
-                    guard phase != .active else { return }
-                    model.endPTT()
+                    model.setForeground(phase == .active)
                 }
         }
     }

@@ -23,6 +23,10 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
     private var pttTimeoutTask: Task<Void, Never>?
     private weak var pttService: EchoLinkConnectionService?
     private var pttSessionID: UUID?
+    private var watchAudioReady = false
+    private lazy var audioForwarder = WatchAudioForwarder { data, reply, error in
+        WCSession.default.sendMessageData(data, replyHandler: reply, errorHandler: error)
+    }
 
     private var activeService: EchoLinkConnectionService {
         appState?.qsoHub.activeService ?? primaryConnectionService
@@ -37,6 +41,12 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         }
         self.simulatorDemoCredentials = demoCredentials
         super.init()
+        audioForwarder.onFailure = { [weak self] in
+            guard let self else { return }
+            self.activeService.setWatchAudioOutput(false)
+            self.refreshWatchAudioAvailability()
+            self.publishStatus()
+        }
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
@@ -80,6 +90,9 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
     private func observeActiveService() {
         let service = activeService
         guard observedService !== service else { return }
+        observedService?.onReceivedVoicePacket = nil
+        observedService?.setWatchAudioAvailability(false)
+        audioForwarder.stop()
         if let pttService, pttService !== service {
             if pttService.session?.id == pttSessionID {
                 pttService.sendPTT(active: false)
@@ -87,11 +100,18 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
             clearPTTLatch()
         }
         observedService = service
+        service.onReceivedVoicePacket = { [weak self, weak service] data in
+            guard let self, let service, let streamID = service.session?.id,
+                  self.observedService === service else { return }
+            self.audioForwarder.forward(data, streamID: streamID)
+        }
+        refreshWatchAudioAvailability()
         activeServiceCancellables.removeAll()
         service.$session
-            .combineLatest(service.$isRemoteTransmitting)
+            .combineLatest(service.$isRemoteTransmitting, service.$usesWatchAudioOutput)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] _, _, selected in
+                if !selected { self?.audioForwarder.stop() }
                 Task { @MainActor [weak self] in self?.publishStatus() }
             }
             .store(in: &activeServiceCancellables)
@@ -120,7 +140,9 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                 "recents": Array(recents),
                 "connected": connected,
                 "isTransmitting": connected && (session?.isPTTActive ?? false),
-                "isRemoteTransmitting": connected && service.isRemoteTransmitting
+                "isRemoteTransmitting": connected && service.isRemoteTransmitting,
+                "sessionID": session?.id.uuidString ?? "",
+                "watchAudioOutputEnabled": service.usesWatchAudioOutput
             ]
         }
         #if DEBUG
@@ -142,8 +164,26 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
             "recents": recents,
             "connected": connected,
             "isTransmitting": connected && (session?.isPTTActive ?? false),
-            "isRemoteTransmitting": connected && service.isRemoteTransmitting
+            "isRemoteTransmitting": connected && service.isRemoteTransmitting,
+            "sessionID": session?.id.uuidString ?? "",
+            "watchAudioOutputEnabled": service.usesWatchAudioOutput
         ]
+    }
+
+    private func refreshWatchAudioAvailability() {
+        let session = WCSession.default
+        observedService?.setWatchAudioAvailability(watchAudioReady && session.isReachable
+                                                  && session.activationState == .activated)
+    }
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !reachable { self.watchAudioReady = false; self.audioForwarder.stop() }
+            self.refreshWatchAudioAvailability()
+            self.publishStatus()
+        }
     }
 
     private func publishStatus() {
@@ -185,6 +225,12 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                 return
             }
             switch command {
+            case "watchAudioReady":
+                self.watchAudioReady = active == true
+                if !self.watchAudioReady { self.audioForwarder.stop() }
+                self.refreshWatchAudioAvailability()
+                self.publishStatus()
+                reply.call(self.status().merging(["ok": true]) { _, new in new })
             case "ptt":
                 guard let active else {
                     reply.call(["ok": false, "error": "Transmitting is unavailable."])

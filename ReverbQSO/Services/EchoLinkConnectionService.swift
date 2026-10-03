@@ -589,6 +589,11 @@ final class EchoLinkConnectionService: ObservableObject {
     @Published private(set) var isSendingDTMF = false
     @Published private(set) var audioOutputRouteName = "System Audio"
     @Published private(set) var audioOutputPreference: AudioOutputPreference = .speaker
+    @Published private(set) var audioInputDevices: [AudioInputDevice] = []
+    @Published private(set) var selectedAudioInputDeviceID: String?
+    @Published private(set) var watchAudioOutputAvailable = false
+    @Published private(set) var usesWatchAudioOutput = false
+    var onReceivedVoicePacket: (@MainActor (Data) -> Void)?
     @Published private(set) var isCaptureReady = false
     @Published private(set) var isLocalDemoMode = false
 
@@ -750,6 +755,8 @@ final class EchoLinkConnectionService: ObservableObject {
         audioEngine.$outputPreference
             .receive(on: DispatchQueue.main)
             .assign(to: &$audioOutputPreference)
+        audioEngine.$availableInputDevices.assign(to: &$audioInputDevices)
+        audioEngine.$selectedInputDeviceID.assign(to: &$selectedAudioInputDeviceID)
         audioEngine.$isCaptureReady
             .combineLatest(audioEngine.$isPreparingCapture)
             .receive(on: DispatchQueue.main)
@@ -783,7 +790,27 @@ final class EchoLinkConnectionService: ObservableObject {
     }
 
     func setAudioOutputPreference(_ preference: AudioOutputPreference) {
+        setWatchAudioOutput(false)
         audioEngine.setOutputPreference(preference)
+    }
+
+    func setAudioInputDevice(id: String?) { audioEngine.setInputDevice(id: id) }
+
+    func setWatchAudioAvailability(_ available: Bool) {
+        watchAudioOutputAvailable = available
+        if !available { setWatchAudioOutput(false) }
+    }
+
+    func setWatchAudioOutput(_ selected: Bool) {
+        usesWatchAudioOutput = selected && watchAudioOutputAvailable && onReceivedVoicePacket != nil
+        audioEngine.setReceiveOutputMuted(usesWatchAudioOutput)
+    }
+
+    private func forwardReceiveToWatch(_ data: Data, session: QSOSession) -> Bool {
+        guard usesWatchAudioOutput, watchAudioOutputAvailable, !session.isMuted,
+              !isBackgroundMuted, let onReceivedVoicePacket else { return false }
+        onReceivedVoicePacket(data)
+        return true
     }
 
     func prepareMicrophoneAfterPermissionGrant() {
@@ -1475,8 +1502,12 @@ final class EchoLinkConnectionService: ObservableObject {
                 guard !Task.isCancelled, self.localDemoGeneration == generation,
                       self.session?.id == sessionID, self.session?.state == .connected,
                       self.hasTransmitPermission else { return }
-                if self.session?.isMuted != true {
-                    if let playback = self.localDemoPlayback { playback(packet) }
+                if let current = self.session, !current.isMuted {
+                    if self.forwardReceiveToWatch(packet, session: current) {
+                        let samples = self.mutedActivityCodec.decodePacket(packet)
+                        self.appendRecordingPCM(samples)
+                        self.audioEngine.recordOutputLevel(from: samples)
+                    } else if let playback = self.localDemoPlayback { playback(packet) }
                     else { self.audioEngine.playReceivedAudio(packet) }
                 }
                 do { try await clock.sleep(until: started.advanced(by: .milliseconds((index + 1) * 80))) }
@@ -2342,9 +2373,11 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
-            guard !currentSession.isMuted && !isBackgroundMuted else {
+            let forwarded = forwardReceiveToWatch(data, session: currentSession)
+            guard !currentSession.isMuted && !isBackgroundMuted && !forwarded else {
                 let samples = mutedActivityCodec.decodePacket(payload)
                 appendRecordingPCM(samples)
+                if forwarded { audioEngine.recordOutputLevel(from: samples) }
                 if Self.hasVoiceEnergy(samples) { noteIncomingAudioActivity() }
                 return
             }
@@ -2363,8 +2396,10 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
-            guard !currentSession.isMuted && !isBackgroundMuted else {
+            let forwarded = forwardReceiveToWatch(data, session: currentSession)
+            guard !currentSession.isMuted && !isBackgroundMuted && !forwarded else {
                 appendRecordingPCM(samples)
+                if forwarded { audioEngine.recordOutputLevel(from: samples) }
                 if Self.hasVoiceEnergy(samples) { noteIncomingAudioActivity() }
                 return
             }
@@ -2387,8 +2422,10 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
-            guard !currentSession.isMuted && !isBackgroundMuted else {
+            let forwarded = forwardReceiveToWatch(data, session: currentSession)
+            guard !currentSession.isMuted && !isBackgroundMuted && !forwarded else {
                 appendRecordingPCM(samples)
+                if forwarded { audioEngine.recordOutputLevel(from: samples) }
                 if Self.hasVoiceEnergy(samples) { noteIncomingAudioActivity() }
                 return
             }
@@ -2465,6 +2502,7 @@ final class EchoLinkConnectionService: ObservableObject {
         if let expectedSessionID, session?.id != expectedSessionID {
             return
         }
+        setWatchAudioOutput(false)
         cancelLocalDemoPlayback()
         localDemoAudio.clear()
 

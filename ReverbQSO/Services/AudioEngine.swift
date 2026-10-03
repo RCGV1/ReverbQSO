@@ -11,6 +11,38 @@ enum AudioOutputPreference: String, CaseIterable {
     case system
 }
 
+struct AudioInputDevice: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let portType: String
+}
+
+enum AudioRoutePreferences {
+    static let didChange = Notification.Name("ReverbQSO.audioRoutePreferencesChanged")
+    static let outputKey = "audio.outputPreference"
+    static let inputKey = "audio.inputDeviceUID"
+
+    static func output(defaultValue: AudioOutputPreference,
+                       defaults: UserDefaults = .standard) -> AudioOutputPreference {
+        AudioOutputPreference(rawValue: defaults.string(forKey: outputKey) ?? "") ?? defaultValue
+    }
+
+    static func inputUID(defaults: UserDefaults = .standard) -> String? {
+        defaults.string(forKey: inputKey)
+    }
+
+    static func save(output: AudioOutputPreference, defaults: UserDefaults = .standard) {
+        defaults.set(output.rawValue, forKey: outputKey)
+        if defaults === UserDefaults.standard { NotificationCenter.default.post(name: didChange, object: nil) }
+    }
+
+    static func save(inputUID: String?, defaults: UserDefaults = .standard) {
+        if let inputUID { defaults.set(inputUID, forKey: inputKey) }
+        else { defaults.removeObject(forKey: inputKey) }
+        if defaults === UserDefaults.standard { NotificationCenter.default.post(name: didChange, object: nil) }
+    }
+}
+
 struct AudioCaptureFlushPlan: Equatable {
     let partialFrameSamplePadding: Int
     let silentFramePadding: Int
@@ -241,10 +273,17 @@ final class AudioEngine: ObservableObject {
     @Published var inputLevel: Double = 0.0
     @Published var outputLevel: Double = 0.0
     @Published private(set) var outputRouteName = "System Audio"
+    @Published private(set) var availableInputDevices: [AudioInputDevice] = []
+    @Published private(set) var selectedInputDeviceID: String? = AudioRoutePreferences.inputUID()
 #if os(iOS) && !targetEnvironment(macCatalyst)
-    @Published private(set) var outputPreference: AudioOutputPreference = .system
+    @Published private(set) var outputPreference: AudioOutputPreference =
+        AudioRoutePreferences.output(defaultValue: .system)
+#elseif targetEnvironment(macCatalyst)
+    @Published private(set) var outputPreference: AudioOutputPreference =
+        AudioRoutePreferences.output(defaultValue: .system)
 #else
-    @Published private(set) var outputPreference: AudioOutputPreference = .speaker
+    @Published private(set) var outputPreference: AudioOutputPreference =
+        AudioRoutePreferences.output(defaultValue: .speaker)
 #endif
 
     // MARK: - Audio Components
@@ -266,6 +305,12 @@ final class AudioEngine: ObservableObject {
         return true
     }
     var onRecordingPCM: (@MainActor ([Int16]) -> Void)?
+    private var receiveOutputMuted = false
+
+    func setReceiveOutputMuted(_ muted: Bool) {
+        receiveOutputMuted = muted
+        playerNode.volume = muted ? 0 : 1
+    }
     private let playerNode = AVAudioPlayerNode()
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "AudioEngine")
     private var isConfigured = false
@@ -305,6 +350,22 @@ final class AudioEngine: ObservableObject {
     private var rxWindowPeak = 0
     private var sessionObservers: [SessionObserverToken] = []
     private var hasInstalledSessionObservers = false
+    private var routePreferenceSubscription: AnyCancellable?
+
+    init() {
+        routePreferenceSubscription = NotificationCenter.default.publisher(for: AudioRoutePreferences.didChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reloadRoutePreferences() }
+    }
+
+    private func reloadRoutePreferences() {
+        selectedInputDeviceID = AudioRoutePreferences.inputUID()
+#if os(watchOS)
+        outputPreference = AudioRoutePreferences.output(defaultValue: .speaker)
+#else
+        outputPreference = AudioRoutePreferences.output(defaultValue: .system)
+#endif
+    }
 
     private func replaceEngineAfterSessionActivation() {
         // An input node created while its hardware route was disabled can keep
@@ -384,7 +445,7 @@ final class AudioEngine: ObservableObject {
             replaceEngineAfterSessionActivation()
 #endif
             try setupEngineIfNeeded()
-            playerNode.volume = 1.0
+            playerNode.volume = receiveOutputMuted ? 0 : 1
             engine.mainMixerNode.outputVolume = 1.0
             try engine.start()
             isRunning = true
@@ -764,6 +825,7 @@ final class AudioEngine: ObservableObject {
     // MARK: - Private Setup
 
     private func configureAudioSession() throws {
+        reloadRoutePreferences()
         let session = AVAudioSession.sharedInstance()
 #if os(watchOS)
         // watchOS owns route selection and does not expose iOS route preferences.
@@ -803,7 +865,9 @@ final class AudioEngine: ObservableObject {
 #endif
         try session.setActive(true)
         logRouteDiagnostics(context: "session-activated")
+        refreshAvailableInputDevices(session: session)
         ensurePlaybackOutputRoute(session: session)
+        applyPreferredInput(session: session)
         updateOutputRouteName(session: session)
     }
 
@@ -827,28 +891,68 @@ final class AudioEngine: ObservableObject {
 
     func setOutputPreference(_ preference: AudioOutputPreference) {
         outputPreference = preference
+        AudioRoutePreferences.save(output: preference)
 #if !os(watchOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         let session = AVAudioSession.sharedInstance()
         guard session.category == .playAndRecord else { return }
         do {
             switch preference {
             case .speaker, .receiver:
-                // Select the built-in input as well so a Bluetooth HFP route
-                // cannot keep the handset or speaker choice on the headset.
-                if let builtInMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-                    try session.setPreferredInput(builtInMic)
-                }
                 try session.overrideOutputAudioPort(preference == .speaker ? .speaker : .none)
             case .system:
-                try session.setPreferredInput(nil)
                 try session.overrideOutputAudioPort(.none)
             }
+            applyPreferredInput(session: session)
         } catch {
             logger.error("Could not select audio output: \(error.localizedDescription, privacy: .public)")
         }
         updateOutputRouteName(session: session)
         let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
         VoiceDiagnosticLog.record("audio route selected preference=\(preference.rawValue) outputs=[\(outputs)]")
+#endif
+    }
+
+    func setInputDevice(id: String?) {
+        selectedInputDeviceID = id
+        AudioRoutePreferences.save(inputUID: id)
+#if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
+        let session = AVAudioSession.sharedInstance()
+        refreshAvailableInputDevices(session: session)
+        applyPreferredInput(session: session)
+        updateOutputRouteName(session: session)
+#endif
+    }
+
+    private func refreshAvailableInputDevices(session: AVAudioSession = .sharedInstance()) {
+#if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
+        availableInputDevices = (session.availableInputs ?? []).map {
+            AudioInputDevice(id: $0.uid, name: $0.portName, portType: $0.portType.rawValue)
+        }.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+#else
+        availableInputDevices = []
+#endif
+    }
+
+    private func applyPreferredInput(session: AVAudioSession) {
+#if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
+        do {
+            guard let selectedInputDeviceID else {
+                guard session.preferredInput != nil else { return }
+                try session.setPreferredInput(nil)
+                return
+            }
+            // Keep the saved choice if it is temporarily disconnected. A later
+            // available-inputs notification restores it when the device returns.
+            guard let input = session.availableInputs?.first(where: { $0.uid == selectedInputDeviceID }) else {
+                return
+            }
+            guard session.preferredInput?.uid != input.uid else { return }
+            try session.setPreferredInput(input)
+        } catch {
+            logger.error("Could not select audio input: \(error.localizedDescription, privacy: .public)")
+        }
 #endif
     }
 
@@ -1277,8 +1381,12 @@ final class AudioEngine: ObservableObject {
     }
 
     private func normalizePreferredInputIfNeeded(session: AVAudioSession) {
-#if !os(watchOS) && !targetEnvironment(macCatalyst)
+#if !os(watchOS) && !targetEnvironment(simulator)
         guard session.isInputAvailable else { return }
+        if selectedInputDeviceID != nil {
+            applyPreferredInput(session: session)
+            return
+        }
         guard outputPreference != .system else { return }
         // Keep the microphone paired with a user-selected headset or USB route.
         let externalOutputTypes: Set<AVAudioSession.Port> = [.bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .usbAudio, .headphones]
@@ -1373,6 +1481,7 @@ final class AudioEngine: ObservableObject {
             logRouteDiagnostics(context: "full-reset-session-activated")
             normalizePreferredInputIfNeeded(session: session)
             ensurePlaybackOutputRoute(session: session)
+            applyPreferredInput(session: session)
 
             replaceEngineAfterSessionActivation()
 
@@ -1625,10 +1734,29 @@ final class AudioEngine: ObservableObject {
             SessionObserverToken(rawValue: mediaResetObserver),
             SessionObserverToken(rawValue: engineConfigObserver),
         ]
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        if #available(iOS 26.0, *) {
+            let availableInputsObserver = center.addObserver(
+            forName: AVAudioSession.availableInputsChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let session = AVAudioSession.sharedInstance()
+                self.refreshAvailableInputDevices(session: session)
+                self.applyPreferredInput(session: session)
+            }
+        }
+            sessionObservers.append(SessionObserverToken(rawValue: availableInputsObserver))
+        }
+#endif
         hasInstalledSessionObservers = true
     }
 
     private func handleRouteChange(reasonValue: UInt) {
+        refreshAvailableInputDevices()
+        applyPreferredInput(session: AVAudioSession.sharedInstance())
         guard captureRequested || isRunning else { return }
         let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
 
@@ -1668,6 +1796,7 @@ final class AudioEngine: ObservableObject {
 
         logger.info("Audio route changed reason=\(reasonValue)")
         ensurePlaybackOutputRoute()
+        applyPreferredInput(session: AVAudioSession.sharedInstance())
         updateOutputRouteName()
 
         let shouldTriggerRecovery: Bool
@@ -1833,9 +1962,7 @@ final class AudioEngine: ObservableObject {
         return
 #else
         guard session.category == .playAndRecord else { return }
-#if !targetEnvironment(macCatalyst)
         guard outputPreference == .speaker else { return }
-#endif
 
         let outputs = session.currentRoute.outputs
         let hasBluetoothOutput = outputs.contains {

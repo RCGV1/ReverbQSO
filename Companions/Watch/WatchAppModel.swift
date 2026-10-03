@@ -54,6 +54,11 @@ final class WatchAppModel: NSObject, ObservableObject {
     private var authenticationGeneration = 0
     private var isDemoLogin = false
     private var didRunDemoReconnectProbe = false
+    private let phoneAudioPlayer = WatchReceiveAudioPlayer()
+    private var phoneAudioSequence = WatchAudioReceiveSequence()
+    private var isForeground = false
+    private var phoneAudioStopTask: Task<Void, Never>?
+    private var audioSessionSubscription: AnyCancellable?
 
     override init() {
         let savedDemoCallsign = UserDefaults.standard.string(forKey: Self.localDemoCallsignKey)
@@ -73,6 +78,11 @@ final class WatchAppModel: NSObject, ObservableObject {
         phoneFavorites = Self.loadStations(forKey: Self.phoneFavoritesKey)
         phoneRecents = Self.loadStations(forKey: Self.phoneRecentsKey)
         super.init()
+        audioSessionSubscription = connectionService.$session.sink { [weak self] session in
+            guard let self else { return }
+            if session != nil { self.stopPhoneReceiveAudio() }
+            self.reportWatchAudioAvailability(canReceive: session == nil)
+        }
         saveNetworkMode()
 
         connectionService.onSessionEnded = { [weak self] station, _ in
@@ -643,21 +653,27 @@ final class WatchAppModel: NSObject, ObservableObject {
     private func applyCompanionReachability(_ reachable: Bool) {
         isCompanionReachable = reachable
         if reachable {
+            reportWatchAudioAvailability()
+            if companionStatus.connected {
+                companionMessage = nil
+            }
             requestPhoneCredentials()
             return
         }
         clearFailedPhonePTTStart()
-        companionStatus.isTransmitting = false
-        companionStatus.isRemoteTransmitting = false
+        companionStatus = companionStatus.applyingCompanionReachability(false)
     }
 
     private func apply(_ snapshot: PhoneSessionSnapshot) {
+        if companionStatus.sessionID != snapshot.sessionID || !snapshot.connected
+            || !snapshot.watchAudioOutputEnabled {
+            stopPhoneReceiveAudio()
+        }
         companionStatus = snapshot
         isCompanionReachable = WCSession.default.isReachable
         if !isCompanionReachable {
             clearFailedPhonePTTStart()
-            companionStatus.isTransmitting = false
-            companionStatus.isRemoteTransmitting = false
+            companionStatus = companionStatus.applyingCompanionReachability(false)
         }
         if snapshot.connected {
             companionMessage = nil
@@ -665,23 +681,43 @@ final class WatchAppModel: NSObject, ObservableObject {
             releasePTT(cancelTimeout: true)
         }
     }
-}
 
-struct PhoneSessionSnapshot: Sendable {
-    var callsign = ""
-    var connected = false
-    var isTransmitting = false
-    var isRemoteTransmitting = false
-    var isDemo = false
+    func setForeground(_ active: Bool) {
+        isForeground = active
+        if !active { stopPhoneReceiveAudio(); endPTT() }
+        reportWatchAudioAvailability()
+    }
 
-    init() {}
+    private func reportWatchAudioAvailability(canReceive: Bool? = nil) {
+        guard WCSession.default.activationState == .activated, WCSession.default.isReachable else { return }
+        WCSession.default.sendMessage([
+            "command": "watchAudioReady",
+            "active": isForeground && (canReceive ?? (connectionService.session == nil))
+        ], replyHandler: { [weak self] reply in
+            let snapshot = PhoneSessionSnapshot(dictionary: reply)
+            Task { @MainActor [weak self] in self?.apply(snapshot) }
+        }, errorHandler: nil)
+    }
 
-    init(dictionary: [String: Any]) {
-        callsign = dictionary["callsign"] as? String ?? ""
-        connected = dictionary["connected"] as? Bool ?? false
-        isTransmitting = dictionary["isTransmitting"] as? Bool ?? false
-        isRemoteTransmitting = dictionary["isRemoteTransmitting"] as? Bool ?? false
-        isDemo = dictionary["demo"] as? Bool ?? false
+    private func stopPhoneReceiveAudio() {
+        phoneAudioStopTask?.cancel()
+        phoneAudioStopTask = nil
+        phoneAudioPlayer.stop()
+        phoneAudioSequence = WatchAudioReceiveSequence()
+    }
+
+    private func receivePhoneAudio(_ data: Data) -> Bool {
+        guard isForeground, connectionService.session == nil, companionStatus.connected,
+              let frame = WatchAudioFrame.decode(data),
+              phoneAudioSequence.accept(frame, expectedStreamID: companionStatus.sessionID),
+              phoneAudioPlayer.play(frame.datagram) else { return false }
+        phoneAudioStopTask?.cancel()
+        phoneAudioStopTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            self?.phoneAudioPlayer.stop()
+            self?.phoneAudioStopTask = nil
+        }
+        return true
     }
 }
 
@@ -720,6 +756,13 @@ struct WatchStationSnapshot: Sendable {
 }
 
 extension WatchAppModel: WCSessionDelegate {
+    nonisolated func session(_ session: WCSession, didReceiveMessageData messageData: Data,
+                             replyHandler: @escaping (Data) -> Void) {
+        let reply = WatchAudioReply(handler: replyHandler)
+        Task { @MainActor [weak self] in
+            reply.handler(Data([self?.receivePhoneAudio(messageData) == true ? 1 : 0]))
+        }
+    }
     nonisolated func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
@@ -773,4 +816,8 @@ extension WatchAppModel: WCSessionDelegate {
             self?.applyCompanionReachability(reachable)
         }
     }
+}
+
+private struct WatchAudioReply: @unchecked Sendable {
+    let handler: (Data) -> Void
 }

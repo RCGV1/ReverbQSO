@@ -876,28 +876,50 @@ struct QSOView: View {
     }
 
     private var participantSummary: some View {
-        Button { showParticipants = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "person.2")
-                    .foregroundStyle(.secondary)
-                Text("\(viewModel.activeNodeParticipants.count) on node")
-                    .font(.subheadline.weight(.medium))
-                if let talking = viewModel.activeNodeParticipants.first, talking.isTransmitting {
-                    Text("· \(talking.callsign) talking")
-                        .font(.caption)
+        VStack(alignment: .leading, spacing: 8) {
+            Button { showParticipants = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.2")
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Text("\(viewModel.activeNodeParticipants.count) on node")
+                        .font(.subheadline.weight(.medium))
+                    if let talking = viewModel.activeNodeParticipants.first, talking.isTransmitting {
+                        Text("· \(talking.callsign) talking")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityHint("Show all participants on this node")
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(viewModel.activeNodeParticipants) { participant in
+                    HStack(spacing: 8) {
+                        Image(systemName: participant.isTransmitting ? "waveform" : "person")
+                            .foregroundStyle(participant.isTransmitting ? .green : .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(participant.callsign)
+                                .font(.caption.monospaced().weight(.semibold))
+                            if let name = participant.displayName, name != participant.callsign {
+                                Text(name)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityHint("Show all participants on this node")
+        .padding(.vertical, 6)
     }
 
     private var levelMeters: some View {
@@ -918,7 +940,7 @@ struct QSOView: View {
             Button {
                 showAudioRoutes = true
             } label: {
-                Label("Audio: \(viewModel.audioOutputRouteName)", systemImage: "speaker.wave.2")
+                Label("Audio: \(viewModel.usesWatchAudioOutput ? "Apple Watch" : viewModel.audioOutputRouteName)", systemImage: "speaker.wave.2")
                     .font(.caption.weight(.medium))
                     .frame(maxWidth: .infinity)
                     .lineLimit(1)
@@ -938,16 +960,12 @@ struct QSOView: View {
                 viewModel.togglePTT(active: active)
             }
 
-            if viewModel.isRemoteTransmitting {
-                Label("Receiving — wait to transmit", systemImage: "waveform")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            if viewModel.isSendingDTMF {
-                Label("Sending DTMF tones", systemImage: "circle.grid.3x3.fill")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
+            Text(viewModel.isSendingDTMF ? "Sending DTMF" : viewModel.isPTTActive ? "Transmitting"
+                 : viewModel.isRemoteTransmitting ? "Receiving · wait to talk" : "Hold to talk")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(height: 18)
 
 #if targetEnvironment(macCatalyst)
             chatComposer
@@ -1072,14 +1090,36 @@ struct QSOView: View {
     private var audioRouteSheet: some View {
         NavigationStack {
             Form {
-                Section("Current Output") {
-                    Label(viewModel.audioOutputRouteName, systemImage: "speaker.wave.2")
+                Section("Receive Audio") {
+                    Label(viewModel.usesWatchAudioOutput ? "Apple Watch" : viewModel.audioOutputRouteName,
+                          systemImage: viewModel.usesWatchAudioOutput ? "applewatch" : "speaker.wave.2")
+                }
+
+                Section("Transmit Audio") {
+                    if MicrophoneAccess.status != .granted {
+                        MicrophonePermissionControl(isEmbeddedInSettings: true) {
+                            connectionService.prepareMicrophoneAfterPermissionGrant()
+                        }
+                    }
+                    Picker("Microphone", selection: Binding(
+                        get: { viewModel.selectedAudioInputDeviceID ?? "" },
+                        set: { viewModel.setAudioInputDevice(id: $0.isEmpty ? nil : $0) }
+                    )) {
+                        Text("System Automatic").tag("")
+                        ForEach(viewModel.audioInputDevices) { device in Text(device.name).tag(device.id) }
+                        if let selected = viewModel.selectedAudioInputDeviceID,
+                           !viewModel.audioInputDevices.contains(where: { $0.id == selected }) {
+                            Text("Saved microphone — disconnected").tag(selected)
+                        }
+                    }
                 }
 
 #if targetEnvironment(macCatalyst)
                 Section {
-                    Text("Choose the output and microphone in macOS Sound settings.")
-                        .foregroundStyle(.secondary)
+                    Button("Open Sound Settings") {
+                        guard let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") else { return }
+                        UIApplication.shared.open(url)
+                    }
                 }
 #else
                 Section("Built-in Audio") {
@@ -1099,9 +1139,21 @@ struct QSOView: View {
                             .accessibilityLabel("Choose audio device")
                     }
                 }
+                if viewModel.watchAudioOutputAvailable || viewModel.usesWatchAudioOutput {
+                    Section {
+                        Button { viewModel.setWatchAudioOutput(true) } label: {
+                            HStack {
+                                Label("Apple Watch", systemImage: "applewatch")
+                                Spacer()
+                                if viewModel.usesWatchAudioOutput { Image(systemName: "checkmark") }
+                            }
+                        }
+                        .disabled(!viewModel.watchAudioOutputAvailable)
+                    }
+                }
 #endif
             }
-            .navigationTitle("Audio Output")
+            .navigationTitle("Audio Devices")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1223,7 +1275,7 @@ struct QSOView: View {
             HStack {
                 Label(title, systemImage: icon)
                 Spacer()
-                if viewModel.audioOutputPreference == preference {
+                if viewModel.audioOutputPreference == preference && !viewModel.usesWatchAudioOutput {
                     Image(systemName: "checkmark")
                 }
             }

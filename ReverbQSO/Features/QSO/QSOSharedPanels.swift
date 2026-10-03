@@ -205,16 +205,14 @@ struct QSODesktopAudioPanel<Actions: View>: View {
                           size: 112,
                           onStateChange: onPTTChange)
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Hold Space or PTT to talk")
+                    Text(isReceiving ? "Wait for the other station to finish" : "Hold Space or PTT to talk")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(height: 18, alignment: .leading)
                     QSOMeters(txLevel: txLevel, rxLevel: rxLevel,
                               isTransmitting: isTransmitting, isMuted: isMuted)
-                    if isReceiving {
-                        Text("Wait for the other station to finish")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
