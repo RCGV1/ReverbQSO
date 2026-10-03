@@ -936,22 +936,6 @@ struct QSOView: View {
             levelMeters
                 .padding(.horizontal, 20)
 
-#if os(iOS) && !targetEnvironment(macCatalyst)
-            Button {
-                showAudioRoutes = true
-            } label: {
-                Label("Audio: \(viewModel.usesWatchAudioOutput ? "Apple Watch" : viewModel.audioOutputRouteName)", systemImage: "speaker.wave.2")
-                    .font(.caption.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityHint("Choose speaker, handset, or another audio device")
-
-#endif
-
             PTTButton(
                 isActive: $viewModel.isPTTActive,
                 isEnabled: viewModel.canTransmit || viewModel.isPTTActive,
@@ -1068,11 +1052,9 @@ struct QSOView: View {
                 showChat = true
             }
 
-#if targetEnvironment(macCatalyst)
             controlButton(icon: "airplayaudio", label: "Audio", tint: .primary) {
                 showAudioRoutes = true
             }
-#endif
 
             if supportsRemotePad {
                 controlButton(icon: "circle.grid.3x3.fill", label: "DTMF", tint: .primary) {

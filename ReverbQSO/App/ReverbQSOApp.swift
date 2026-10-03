@@ -373,14 +373,31 @@ private struct QSONavigationTab<Content: View>: View {
                 .safeAreaInset(edge: .top) {
                     if path.isEmpty, let id = qsoHub.activeID,
                        let active = qsoHub.entry(for: id) {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 0) {
                             Button(action: onReturn) {
-                                Label(active.station?.callsign ?? "Connecting…", systemImage: "waveform")
-                                    .lineLimit(1)
+                                HStack(spacing: 10) {
+                                    Image(systemName: "waveform")
+                                        .foregroundStyle(.tint)
+                                    Text(active.station?.callsign ?? "Connecting…")
+                                        .fontWeight(.semibold)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text(active.service.session?.state == .connected ? "In QSO" : "Connecting")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            Spacer(minLength: 0)
+                            .accessibilityLabel("Return to QSO with \(active.station?.callsign ?? "connecting station")")
+                            .accessibilityIdentifier("return-to-qso")
                             if qsoHub.entries.count > 1 {
+                                Divider().frame(height: 20)
                                 Menu {
                                     ForEach(qsoHub.entries) { entry in
                                         Button(entry.station?.callsign ?? "Connecting…") {
@@ -389,18 +406,17 @@ private struct QSONavigationTab<Content: View>: View {
                                         }
                                     }
                                 } label: {
-                                    Text("\(qsoHub.entries.count) QSOs")
-                                        .font(.caption.weight(.semibold))
+                                    Label("\(qsoHub.entries.count)", systemImage: "phone.connection")
+                                        .font(.subheadline)
+                                        .padding(.horizontal, 16)
+                                        .frame(minHeight: 44)
                                 }
+                                .accessibilityLabel("Switch between \(qsoHub.entries.count) QSOs")
                             }
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
                         }
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(.regularMaterial)
-                        .accessibilityLabel("Return to QSO with \(active.station?.callsign ?? "connecting station")")
+                        .font(.subheadline)
+                        .background(.bar)
+                        .overlay(alignment: .bottom) { Divider() }
                     }
                 }
                 .navigationDestination(for: QSORoute.self) { route in
