@@ -77,6 +77,30 @@ final class AudioEngineMeterTests: XCTestCase {
         XCTAssertGreaterThan(quietAfterReset.appliedGain, 1)
     }
 
+    func testAutomaticGainHasNoAbruptJumpAtNoiseFloor() {
+        var prior = 1.0
+        for level in 50...120 {
+            var gain = AdaptiveMicrophoneGain()
+            let value = Int16(level)
+            let applied = gain.process([value, -value]).appliedGain
+            XCTAssertLessThan(abs(applied - prior), 0.3, "Gain jump near RMS \(level)")
+            prior = applied
+        }
+    }
+
+    func testAutomaticGainRecoveryDependsOnAudioTimeInsteadOfCallbackSize() {
+        var whole = AdaptiveMicrophoneGain()
+        var chunked = AdaptiveMicrophoneGain()
+        _ = whole.process([Int16](repeating: 400, count: 640))
+        _ = chunked.process([Int16](repeating: 400, count: 640))
+        let expected = whole.process([Int16](repeating: 200, count: 640)).appliedGain
+        var actual = 0.0
+        for _ in 0..<4 {
+            actual = chunked.process([Int16](repeating: 200, count: 160)).appliedGain
+        }
+        XCTAssertEqual(actual, expected, accuracy: 0.000001)
+    }
+
     func testManualMicrophoneGainAdjustsEncodedSamples() {
         XCTAssertEqual(MicrophoneGainSettings.apply([1_000, -1_000], multiplier: 0.5),
                        [500, -500])

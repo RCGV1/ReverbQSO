@@ -5,6 +5,19 @@ import XCTest
 
 final class PCMLinearResamplerTests: XCTestCase {
 
+    private func rms(_ samples: [Int16], droppingPrefix count: Int = 0) -> Double {
+        let measured = samples.dropFirst(min(count, samples.count))
+        guard !measured.isEmpty else { return 0 }
+        return sqrt(measured.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(measured.count))
+    }
+
+    private func sine(frequency: Double, sampleRate: Double, duration: Double,
+                      amplitude: Double = 12_000) -> [Int16] {
+        (0..<Int(sampleRate * duration)).map { index in
+            Int16((amplitude * sin(2 * .pi * frequency * Double(index) / sampleRate)).rounded())
+        }
+    }
+
     func testResampleEmptyInputReturnsEmpty() {
         var state = PCMLinearResamplerState()
         let output = PCMLinearResampler.resample(
@@ -119,6 +132,7 @@ final class PCMLinearResamplerTests: XCTestCase {
         )
 
         XCTAssertEqual(output.count, 80)
+        XCTAssertEqual(Set(output), [300], "The prior rate's filter history must not leak into the new stream")
     }
 
     func testInvalidSourceRateReturnsOriginalSamples() {
@@ -183,5 +197,80 @@ final class PCMLinearResamplerTests: XCTestCase {
         }
 
         XCTAssertEqual(totalOutputCount, 800)
+    }
+
+    func testDownsamplingPreservesSpeechBandAndRejectsOutOfBandAlias() {
+        for sourceRate in [44_100.0, 48_000.0, 96_000.0] {
+            var passbandState = PCMLinearResamplerState()
+            let passband = PCMLinearResampler.resample(
+                sine(frequency: 1_000, sampleRate: sourceRate, duration: 0.25),
+                sourceSampleRate: sourceRate,
+                targetSampleRate: 8_000,
+                state: &passbandState
+            )
+
+            var stopbandState = PCMLinearResamplerState()
+            let aliased = PCMLinearResampler.resample(
+                sine(frequency: 6_000, sampleRate: sourceRate, duration: 0.25),
+                sourceSampleRate: sourceRate,
+                targetSampleRate: 8_000,
+                state: &stopbandState
+            )
+
+            let passbandRMS = rms(passband, droppingPrefix: 32)
+            let aliasRMS = rms(aliased, droppingPrefix: 32)
+            XCTAssertGreaterThan(passbandRMS, 7_000, "1 kHz passband loss at \(sourceRate) Hz")
+            XCTAssertLessThan(aliasRMS, passbandRMS * 0.03,
+                              "6 kHz alias insufficiently suppressed at \(sourceRate) Hz")
+        }
+    }
+
+    func testDownsamplingPreservesUpperSpeechBand() {
+        let unfilteredRMS = 12_000 / sqrt(2.0)
+        for sourceRate in [44_100.0, 48_000.0, 96_000.0] {
+            var state = PCMLinearResamplerState()
+            let output = PCMLinearResampler.resample(
+                sine(frequency: 3_000, sampleRate: sourceRate, duration: 0.25),
+                sourceSampleRate: sourceRate,
+                targetSampleRate: 8_000,
+                state: &state
+            )
+
+            XCTAssertGreaterThan(
+                rms(output, droppingPrefix: 32) / unfilteredRMS,
+                0.93,
+                "3 kHz speech-band loss at \(sourceRate) Hz"
+            )
+        }
+    }
+
+    func testFilteredDownsamplingIsStableAcrossArbitraryChunkBoundaries() {
+        for sourceRate in [44_100.0, 48_000.0, 96_000.0] {
+            let input = sine(frequency: 1_000, sampleRate: sourceRate, duration: 0.25)
+            var oneShotState = PCMLinearResamplerState()
+            let oneShot = PCMLinearResampler.resample(
+                input, sourceSampleRate: sourceRate, targetSampleRate: 8_000, state: &oneShotState)
+
+            var chunkedState = PCMLinearResamplerState()
+            var chunked: [Int16] = []
+            var offset = 0
+            let sizes = [37, 211, 19, 480, 73, 1024, 61]
+            var index = 0
+            while offset < input.count {
+                let end = min(input.count, offset + sizes[index % sizes.count])
+                chunked += PCMLinearResampler.resample(
+                    Array(input[offset..<end]), sourceSampleRate: sourceRate,
+                    targetSampleRate: 8_000, state: &chunkedState)
+                offset = end
+                index += 1
+            }
+
+            XCTAssertEqual(chunked.count, oneShot.count)
+            XCTAssertLessThanOrEqual(
+                zip(chunked, oneShot).map { abs(Int($0) - Int($1)) }.max() ?? 0,
+                256,
+                "Chunk boundary discontinuity at \(sourceRate) Hz"
+            )
+        }
     }
 }

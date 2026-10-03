@@ -28,6 +28,7 @@ final class WatchReceiveAudioPlayer {
     private var ownsPlaybackSession = false
     private var queuedSampleCount = 0
     private var playbackGeneration: UInt64 = 0
+    private var playbackGain = ReceivePlaybackGain()
 
     /// Parses and plays one complete EchoLink/RTP voice datagram.
     @discardableResult
@@ -72,6 +73,7 @@ final class WatchReceiveAudioPlayer {
         RecordingAudioSession.shared.endLiveAudio(owner: self)
         playbackGeneration &+= 1
         queuedSampleCount = 0
+        playbackGain.reset()
         if isConfigured { playerNode.stop() }
         engine.stop()
         gsmCodec.resetAll()
@@ -117,9 +119,8 @@ final class WatchReceiveAudioPlayer {
         ), let channel = buffer.floatChannelData?[0] else { return nil }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
-        for index in samples.indices {
-            channel[index] = max(-1, min(1, Float(samples[index]) / Float(Int16.max) * 2.5))
-        }
+        let amplified = playbackGain.process(samples)
+        for index in samples.indices { channel[index] = amplified[index] }
         return buffer
     }
 }

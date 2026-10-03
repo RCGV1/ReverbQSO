@@ -30,7 +30,7 @@ actor EchoLinkProxySession {
 
     private let client: EchoLinkProxyClient
     private var receiveTask: Task<Void, Never>?
-    private var udpContinuation: AsyncThrowingStream<EchoLinkProxyMessage, Error>.Continuation?
+    private var udpBuffer: LiveTransportMessageBuffer<EchoLinkProxyMessage>?
     private var statusWaiter: (UUID, CheckedContinuation<Void, Error>)?
     private var responseWaiter: (UUID, ResponseBoundary, Data, CheckedContinuation<Data, Error>)?
     private var isDirectoryTransactionActive = false
@@ -62,13 +62,14 @@ actor EchoLinkProxySession {
     }
 
     func udpMessages() -> AsyncThrowingStream<EchoLinkProxyMessage, Error> {
-        AsyncThrowingStream { continuation in
-            if let terminalError {
-                continuation.finish(throwing: terminalError)
-                return
-            }
-            udpContinuation = continuation
+        udpBuffer?.finish(throwing: CancellationError())
+        let buffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>()
+        buffer.setOnConsumerCancellation { [weak buffer] in
+            buffer?.finish(throwing: CancellationError())
         }
+        udpBuffer = buffer
+        if let terminalError { buffer.finish(throwing: terminalError) }
+        return AsyncThrowingStream(unfolding: { try await buffer.next() })
     }
 
     func isUsable() -> Bool {
@@ -223,7 +224,18 @@ actor EchoLinkProxySession {
                 continuation.resume(returning: buffer)
             }
         case .udpData, .udpControl, .system:
-            udpContinuation?.yield(message)
+            let kind: LiveTransportMessageBuffer<EchoLinkProxyMessage>.MessageKind
+            if message.type == .udpData {
+                guard let payloadKind = LiveTransportAudioPortPayloadKind.classify(message.payload)
+                else { return }
+                kind = payloadKind == .voice ? .voice : .control
+            } else {
+                kind = .control
+            }
+            if let udpBuffer, !udpBuffer.yield(message, kind: kind),
+               udpBuffer.hasControlOverflowed {
+                close()
+            }
         case .tcpOpen:
             break
         }
@@ -288,6 +300,7 @@ actor EchoLinkProxySession {
     }
 
     private func failAll(_ error: Error) {
+        guard terminalError == nil else { return }
         terminalError = error
         let waiting = directoryTurnWaiters
         directoryTurnWaiters.removeAll()
@@ -296,8 +309,8 @@ actor EchoLinkProxySession {
         statusWaiter = nil
         if let (_, _, _, continuation) = responseWaiter { continuation.resume(throwing: error) }
         responseWaiter = nil
-        udpContinuation?.finish(throwing: error)
-        udpContinuation = nil
+        udpBuffer?.finish(throwing: error)
+        udpBuffer = nil
     }
 
     private static func resolveIPv4(_ host: String) throws -> String {

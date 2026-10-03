@@ -648,12 +648,17 @@ final class EchoLinkConnectionService: ObservableObject {
     private var incomingAudioDatagrams = 0
     private var incomingVoicePackets = 0
     private var logNextVoiceAfterPTT = false
-    private var queuedOutgoingAudioPackets: [OutgoingAudioPacket] = []
+    private var queuedOutgoingAudioPackets = VoiceTransmitQueue<OutgoingAudioPacket>()
     private var hasLoggedUnsupportedSpeex = false
     private var loggedUnsupportedPayloadTypes: Set<UInt8> = []
     private var participantsByCallsign: [String: ActiveNodeParticipant] = [:]
     private var txDecayTasks: [String: Task<Void, Never>] = [:]
     private var receiveSequencer = EchoLinkReceiveSequencer()
+    private var receiveReorderBuffer = EchoLinkAudioReorderBuffer()
+    // Validate wire framing before committing sequence state. This decoder is
+    // independent of the playback decoder, which consumes reordered packets.
+    private let receiveSpeexValidator = SpeexCodec()
+    private var receiveReorderTask: Task<Void, Never>?
     private let remoteVoiceActivityHold: Duration
     var effectiveTransportProvider: (@MainActor () -> EchoLinkEffectiveTransport?)?
     private let relayClientFactory: @MainActor () -> EchoLinkRelayClient
@@ -1243,6 +1248,8 @@ final class EchoLinkConnectionService: ObservableObject {
                 return
             }
             activeTransmitCodec = selectedCodec
+            // A fresh PTT turn cannot sit behind the previous turn's tail.
+            queuedOutgoingAudioPackets.removeAll(keepingCapacity: true)
             currentSession.isPTTActive = true
             session = currentSession
             if isLocalDemoMode { localDemoAudio.clear() }
@@ -1760,7 +1767,7 @@ final class EchoLinkConnectionService: ObservableObject {
         let samplesInPacket = codec == .speex ? SpeexCodec.samplesPerPacket
             : payload.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame
         rtpTimestamp &+= UInt32(samplesInPacket)
-        queuedOutgoingAudioPackets.append(
+        queuedOutgoingAudioPackets.enqueue(
             OutgoingAudioPacket(data: packet, sessionID: sessionID, remoteHost: remoteHost)
         )
         voicePacketsQueued += 1
@@ -1780,7 +1787,7 @@ final class EchoLinkConnectionService: ObservableObject {
         while !Task.isCancelled,
               audioSendDrainGeneration == generation,
               !queuedOutgoingAudioPackets.isEmpty {
-            let queuedPacket = queuedOutgoingAudioPackets.removeFirst()
+            guard let queuedPacket = queuedOutgoingAudioPackets.dequeue() else { break }
             guard session?.id == queuedPacket.sessionID, hasTransmitPermission else { continue }
             do {
                 if let proxySession {
@@ -2364,6 +2371,44 @@ final class EchoLinkConnectionService: ObservableObject {
         guard let currentSession = session,
               currentSession.state == .connected else { return }
 
+        if case .unsupportedPayloadType = datagram.packet {
+            playIncomingAudioDatagram(data, datagram: datagram)
+            return
+        }
+        if case .speex(let payload) = datagram.packet,
+           receiveSpeexValidator.decodePacket(payload) == nil {
+            logger.debug("Dropped malformed Speex before receive sequence admission")
+            return
+        }
+        let ready = receiveReorderBuffer.insert(data, metadata: datagram.metadata)
+        for packet in ready {
+            guard let parsed = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet) else { continue }
+            playIncomingAudioDatagram(packet, datagram: parsed)
+        }
+        scheduleReceiveReorderDrain(sessionID: currentSession.id)
+    }
+
+    private func scheduleReceiveReorderDrain(sessionID: UUID) {
+        receiveReorderTask?.cancel()
+        receiveReorderTask = nil
+        guard let deadline = receiveReorderBuffer.nextDeadline else { return }
+        let delay = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+        receiveReorderTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, !Task.isCancelled, self.session?.id == sessionID,
+                  self.session?.state == .connected else { return }
+            self.receiveReorderTask = nil
+            for packet in self.receiveReorderBuffer.drain() {
+                guard let parsed = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet) else { continue }
+                self.playIncomingAudioDatagram(packet, datagram: parsed)
+            }
+            self.scheduleReceiveReorderDrain(sessionID: sessionID)
+        }
+    }
+
+    private func playIncomingAudioDatagram(_ data: Data, datagram: ParsedIncomingAudioDatagram) {
+        guard let currentSession = session, currentSession.state == .connected else { return }
+
         switch datagram.packet {
         case .gsm(let payload):
             guard receiveSequencer.shouldAcceptForPlayback(datagram.metadata) else {
@@ -2411,12 +2456,12 @@ final class EchoLinkConnectionService: ObservableObject {
             audioEngine.playReceivedPCM(samples, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
             if audioEngine.outputLevel >= 0.01 { noteIncomingAudioActivity() }
         case .speex(let payload):
-            guard receiveSequencer.shouldAcceptForPlayback(datagram.metadata) else {
-                logger.debug("Dropped duplicate or late Speex audio packet")
-                return
-            }
             guard let samples = audioEngine.decodeReceivedSpeex(payload) else {
                 logger.debug("Dropped malformed EchoLink Speex audio packet")
+                return
+            }
+            guard receiveSequencer.shouldAcceptForPlayback(datagram.metadata) else {
+                logger.debug("Dropped duplicate or late Speex audio packet")
                 return
             }
             resetPeerTimeout(sessionID: currentSession.id)
@@ -2565,6 +2610,10 @@ final class EchoLinkConnectionService: ObservableObject {
         hasLoggedUnsupportedSpeex = false
         loggedUnsupportedPayloadTypes.removeAll()
         receiveSequencer.reset()
+        receiveReorderTask?.cancel()
+        receiveReorderTask = nil
+        receiveReorderBuffer.reset()
+        receiveSpeexValidator.reset()
         lastRemoteChatBody = nil
         lastRemoteChatAt = nil
     }

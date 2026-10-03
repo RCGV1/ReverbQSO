@@ -58,7 +58,7 @@ actor EchoLinkRelayClient {
     private var callsign: String?
     private var activePeers: Set<Peer> = []
     private var isClosing = false
-    private var streamContinuation: AsyncThrowingStream<EchoLinkRelayResponse, Error>.Continuation?
+    private var responseBuffer = LiveTransportMessageBuffer<EchoLinkRelayResponse>()
     private var receiveTask: Task<Void, Never>?
     private var keepaliveTask: Task<Void, Never>?
     private var registrationTask: Task<Void, Never>?
@@ -132,11 +132,21 @@ actor EchoLinkRelayClient {
         logger.info("Relay selected host=\(acceptedAddress, privacy: .public)")
 
         self.callsign = callsign
-        let stream = AsyncThrowingStream<EchoLinkRelayResponse, Error> { continuation in
-            self.streamContinuation = continuation
+        let responseBuffer = LiveTransportMessageBuffer<EchoLinkRelayResponse>()
+        responseBuffer.setOnConsumerCancellation { [weak self, weak responseBuffer] in
+            guard let responseBuffer else { return }
+            Task { await self?.closeIfCurrentResponseBuffer(responseBuffer) }
         }
+        self.responseBuffer = responseBuffer
+        let stream = AsyncThrowingStream<EchoLinkRelayResponse, Error>(
+            unfolding: { try await responseBuffer.next() }
+        )
         receiveTask = Task { [weak self] in
-            await self?.receiveLoop(socket: newSocket, relayHost: acceptedAddress)
+            await self?.receiveLoop(
+                socket: newSocket,
+                relayHost: acceptedAddress,
+                responseBuffer: responseBuffer
+            )
         }
         keepaliveTask = Task { [weak self] in
             await self?.keepaliveLoop()
@@ -194,8 +204,7 @@ actor EchoLinkRelayClient {
         resolvedHost = nil
         callsign = nil
         activePeers.removeAll()
-        streamContinuation?.finish()
-        streamContinuation = nil
+        responseBuffer.finish()
 
         if let closingSocket, let closingHost {
             if let closingCallsign {
@@ -215,6 +224,13 @@ actor EchoLinkRelayClient {
             }
         }
         closingSocket?.close()
+    }
+
+    private func closeIfCurrentResponseBuffer(
+        _ expectedBuffer: LiveTransportMessageBuffer<EchoLinkRelayResponse>
+    ) async {
+        guard responseBuffer === expectedBuffer else { return }
+        await close()
     }
 
     private func awaitRegistrationAcknowledgement(on socket: BoundUDPSocket, relayHost: String) async throws {
@@ -252,7 +268,11 @@ actor EchoLinkRelayClient {
         }
     }
 
-    private func receiveLoop(socket: BoundUDPSocket, relayHost: String) async {
+    private func receiveLoop(
+        socket: BoundUDPSocket,
+        relayHost: String,
+        responseBuffer: LiveTransportMessageBuffer<EchoLinkRelayResponse>
+    ) async {
         while !Task.isCancelled {
             do {
                 let datagram = try await socket.receive(maximumBytes: EchoLinkRelayProtocol.maxDatagramBytes)
@@ -274,13 +294,25 @@ actor EchoLinkRelayClient {
                 logger.info(
                     "Relay inbound type=\(response.type.rawValue) source=\(response.sourceHost, privacy: .public):\(response.sourcePort) destinationPort=\(response.destinationPort) payloadBytes=\(response.payload.count)"
                 )
-                streamContinuation?.yield(response)
+                let kind: LiveTransportMessageBuffer<EchoLinkRelayResponse>.MessageKind
+                if response.type == .data, response.destinationPort == 5198 {
+                    guard let payloadKind = LiveTransportAudioPortPayloadKind.classify(response.payload)
+                    else { continue }
+                    kind = payloadKind == .voice ? .voice : .control
+                } else {
+                    kind = .control
+                }
+                guard responseBuffer.yield(response, kind: kind) else {
+                    responseBuffer.finish(
+                        throwing: LiveTransportMessageBufferError.controlOverflow
+                    )
+                    break
+                }
             } catch is CancellationError {
                 break
             } catch {
                 if !Task.isCancelled {
-                    streamContinuation?.finish(throwing: error)
-                    streamContinuation = nil
+                    responseBuffer.finish(throwing: error)
                 }
                 break
             }

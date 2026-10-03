@@ -46,7 +46,9 @@ final class EchoLinkProxyClient: @unchecked Sendable {
     private let queue = DispatchQueue(label: "org.reverbqso.app.proxy")
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "EchoLinkProxy")
     private var receiveBuffer = Data()
-    private var continuation: AsyncThrowingStream<EchoLinkProxyMessage, Swift.Error>.Continuation?
+    private lazy var messageBuffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>(
+        onConsumerCancellation: { [weak self] in self?.close() }
+    )
     private var isClosed = false
     private let authenticationTimeout: TimeInterval
 
@@ -116,17 +118,14 @@ final class EchoLinkProxyClient: @unchecked Sendable {
     }
 
     func messages() -> AsyncThrowingStream<EchoLinkProxyMessage, Swift.Error> {
-        AsyncThrowingStream { continuation in
-            queue.async {
-                guard !self.isClosed else {
-                    continuation.finish(throwing: ClientError.connectionClosed)
-                    return
-                }
-                self.continuation = continuation
-                continuation.onTermination = { [weak self] _ in self?.close() }
-                self.receiveNextChunk()
+        queue.async {
+            guard !self.isClosed else {
+                self.messageBuffer.finish(throwing: ClientError.connectionClosed)
+                return
             }
+            self.receiveNextChunk()
         }
+        return AsyncThrowingStream(unfolding: { try await self.messageBuffer.next() })
     }
 
     func sendAudio(_ data: Data, to remoteHost: String) async throws {
@@ -154,8 +153,7 @@ final class EchoLinkProxyClient: @unchecked Sendable {
             guard !self.isClosed else { return }
             self.isClosed = true
             self.connection.cancel()
-            self.continuation?.finish()
-            self.continuation = nil
+            self.messageBuffer.finish()
         }
     }
 
@@ -251,7 +249,20 @@ final class EchoLinkProxyClient: @unchecked Sendable {
                             case .unknown(let code): throw ClientError.unexpectedSystemEvent(code)
                             }
                         }
-                        self.continuation?.yield(message)
+                        let kind: LiveTransportMessageBuffer<EchoLinkProxyMessage>.MessageKind
+                        if message.type == .udpData {
+                            guard let payloadKind = LiveTransportAudioPortPayloadKind.classify(message.payload)
+                            else { continue }
+                            kind = payloadKind == .voice ? .voice : .control
+                        } else {
+                            kind = .control
+                        }
+                        guard self.messageBuffer.yield(message, kind: kind) else {
+                            self.finishReceiving(
+                                throwing: LiveTransportMessageBufferError.controlOverflow
+                            )
+                            return
+                        }
                     }
                 } catch {
                     self.logger.warning(
@@ -276,8 +287,7 @@ final class EchoLinkProxyClient: @unchecked Sendable {
         guard !isClosed else { return }
         isClosed = true
         connection.cancel()
-        continuation?.finish(throwing: error)
-        continuation = nil
+        messageBuffer.finish(throwing: error)
     }
 }
 

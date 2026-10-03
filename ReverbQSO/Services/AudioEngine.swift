@@ -102,9 +102,13 @@ struct AdaptiveMicrophoneGain {
         }
 
         let peak = Double(samples.reduce(0) { max($0, abs(Int($1))) })
-        let requestedGain = min(maximumGain, max(1, targetRMS / rms))
+        let voiceGain = min(maximumGain, max(1, targetRMS / rms))
+        let transition = min(1, (rms - noiseFloorRMS) / noiseFloorRMS)
+        let voiceWeight = transition * transition * (3 - 2 * transition)
+        let requestedGain = 1 + (voiceGain - 1) * voiceWeight
+        let recovery = 1 - exp(-Double(samples.count) / 8_000 / 0.03)
         let smoothedGain = previousGain.map { prior in
-            requestedGain < prior ? requestedGain : prior + (requestedGain - prior) * 0.5
+            requestedGain < prior ? requestedGain : prior + (requestedGain - prior) * recovery
         } ?? requestedGain
         let appliedGain = min(smoothedGain, maximumPeak / peak)
         previousGain = appliedGain
@@ -176,7 +180,7 @@ private final class CaptureBufferProcessingBarrier: @unchecked Sendable {
     func enter() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !isSealed else { return false }
+        guard !isSealed, LiveCaptureBacklogPolicy.canAccept(pending: pendingCount) else { return false }
         pendingCount += 1
         return true
     }
@@ -371,7 +375,7 @@ final class AudioEngine: ObservableObject {
         // An input node created while its hardware route was disabled can keep
         // reporting 0 Hz even after the session becomes valid. A new engine
         // creates a new input node against the now-active route.
-        playerNode.stop()
+        stopPlaybackTimeline()
         engine.stop()
         if engine.attachedNodes.contains(playerNode) {
             engine.detach(playerNode)
@@ -385,6 +389,9 @@ final class AudioEngine: ObservableObject {
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         do {
             try engine.inputNode.setVoiceProcessingEnabled(true)
+            // Software gain handles automatic/manual levels. Keep voice I/O
+            // echo cancellation, but do not run two competing gain controls.
+            engine.inputNode.isVoiceProcessingAGCEnabled = false
             VoiceDiagnosticLog.record("fresh engine voice processing enabled AGC=\(engine.inputNode.isVoiceProcessingAGCEnabled)")
         } catch {
             VoiceDiagnosticLog.record("fresh engine voice processing unavailable error=\(error.localizedDescription)")
@@ -408,8 +415,8 @@ final class AudioEngine: ObservableObject {
 
     private let sampleRate: Double = 8000
     private let channelCount: AVAudioChannelCount = 1
-    /// Fixed receive-side gain to compensate for low telephony-level decoded PCM.
-    private let playbackGain: Float = 2.5
+    private var playbackGain = ReceivePlaybackGain()
+    private var playbackQueue = ReceivePlaybackQueue()
 
     private var captureFormat: AVAudioFormat? {
         AVAudioFormat(
@@ -696,7 +703,7 @@ final class AudioEngine: ObservableObject {
         // Restart the player timeline after the input graph was rebuilt for
         // capture. Incoming EchoLink packets arrive after PTT is released.
         if isRunning {
-            playerNode.stop()
+            stopPlaybackTimeline()
             playerNode.play()
             ensurePlaybackOutputRoute()
             logger.info("Playback resumed after PTT engineRunning=\(self.engine.isRunning) playerPlaying=\(self.playerNode.isPlaying)")
@@ -715,7 +722,7 @@ final class AudioEngine: ObservableObject {
         capturePreparationFailed = false
         invalidateCaptureStart(preservingIntent: false)
         captureRecoveryFailureCount = 0
-        playerNode.stop()
+        stopPlaybackTimeline()
         if isRunning {
             engine.stop()
         }
@@ -727,6 +734,7 @@ final class AudioEngine: ObservableObject {
         // Reset all codec state for a clean session.
         codec.resetAll()
         speexCodec.reset()
+        playbackGain.reset()
         resetCaptureEncodingCounters()
     }
 
@@ -737,6 +745,7 @@ final class AudioEngine: ObservableObject {
     func resetCodecState() {
         codec.resetAll()
         speexCodec.reset()
+        playbackGain.reset()
         resetCaptureEncodingCounters()
     }
 
@@ -759,7 +768,7 @@ final class AudioEngine: ObservableObject {
         guard let format = captureFormat,
               let buffer = pcmBuffer(from: pcmSamples, format: format) else { return }
 
-        playerNode.scheduleBuffer(buffer)
+        schedulePlaybackBuffer(buffer)
 
         if !playerNode.isPlaying {
             playerNode.play()
@@ -790,7 +799,7 @@ final class AudioEngine: ObservableObject {
         guard let format = captureFormat,
               let buffer = pcmBuffer(from: samples, format: format) else { return }
 
-        playerNode.scheduleBuffer(buffer)
+        schedulePlaybackBuffer(buffer)
         if !playerNode.isPlaying {
             playerNode.play()
         }
@@ -1045,16 +1054,35 @@ final class AudioEngine: ObservableObject {
             return nil
         }
 
+        let amplified = playbackGain.process(samples)
         let channels = Int(format.channelCount)
         for i in 0..<samples.count {
-            let normalized = (Float(samples[i]) / Float(Int16.max)) * playbackGain
-            let clamped = max(-1.0, min(1.0, normalized))
             for channel in 0..<channels {
-                floatData[channel][i] = clamped
+                floatData[channel][i] = amplified[i]
             }
         }
 
         return buffer
+    }
+
+    private func schedulePlaybackBuffer(_ buffer: AVAudioPCMBuffer) {
+        let count = Int(buffer.frameLength)
+        if playbackQueue.needsReset(adding: count) {
+            // A stalled route must not turn into seconds of old speech.
+            stopPlaybackTimeline()
+            logger.debug("Trimmed receive playback backlog to current speech")
+        }
+        let token = playbackQueue.reserve(count)
+        playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.playbackQueue.complete(count, generation: token)
+            }
+        }
+    }
+
+    private func stopPlaybackTimeline() {
+        playbackQueue.reset()
+        playerNode.stop()
     }
 
     private func computeRMS(_ samples: [Int16]) -> Double {
@@ -1219,7 +1247,7 @@ final class AudioEngine: ObservableObject {
         let installedTapVersion = tapVersion
         inputNode.installTap(
             onBus: 0,
-            bufferSize: 1024,
+            bufferSize: LiveCaptureBacklogPolicy.tapFrames(sampleRate: format.sampleRate),
             format: format,
             block: Self.captureTapBlock(
                 engine: self,
@@ -1252,6 +1280,7 @@ final class AudioEngine: ObservableObject {
                 }
             }
             guard let ticket = gate.admitBuffer() else { return }
+            let capturedAt = ProcessInfo.processInfo.systemUptime
             // AVAudioEngine delivers tap buffers on a real-time audio thread.
             // Copy PCM before the callback returns, then pass only Sendable
             // samples across to the main actor for encoding and UI updates.
@@ -1259,6 +1288,8 @@ final class AudioEngine: ObservableObject {
             let sampleRate = buffer.format.sampleRate
             Task { @MainActor [weak engine, barrier = ticket.barrier, generation = ticket.generation] in
                 defer { barrier.leave() }
+                guard LiveCaptureBacklogPolicy.isFresh(capturedAt: capturedAt,
+                    now: ProcessInfo.processInfo.systemUptime) else { return }
                 if engine?.captureBufferCount == 0 {
                     VoiceDiagnosticLog.record(
                         "first tap callback frames=\(samples.count) rate=\(sampleRate)"
@@ -1946,7 +1977,7 @@ final class AudioEngine: ObservableObject {
 
     private func resetEngineGraph() {
         stopCaptureTap(preservingIntent: true)
-        playerNode.stop()
+        stopPlaybackTimeline()
         engine.stop()
 
         if engine.attachedNodes.contains(playerNode) {
