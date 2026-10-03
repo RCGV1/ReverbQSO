@@ -44,9 +44,35 @@ final class ConferenceReceiveAudioCodecTests: XCTestCase {
         )
         let decoded = try XCTUnwrap(codec.decode(incoming))
         XCTAssertEqual(decoded.samples.count, 640)
+        XCTAssertEqual(decoded.nativeConcealment, [])
         XCTAssertEqual(decoded.gsmPayload.count, 132)
         XCTAssertEqual(GSMCodec().decodePacket(decoded.gsmPayload).count, 640)
         XCTAssertNil(codec.decode(incoming))
+    }
+
+    func testLostSpeexPacketConcealsLocallyButForwardsOnlyReceivedPacket() throws {
+        let codec = ConferenceReceiveAudioCodec()
+        let first = ParsedIncomingAudioDatagram(
+            packet: .speex(SpeexCodecTests.fixture),
+            metadata: EchoLinkVoicePacketMetadata(
+                payloadType: 0x96, sequenceNumber: 1, timestamp: 0, ssrc: 7
+            )
+        )
+        let afterLoss = ParsedIncomingAudioDatagram(
+            packet: .speex(SpeexCodecTests.fixture),
+            metadata: EchoLinkVoicePacketMetadata(
+                payloadType: 0x96, sequenceNumber: 3, timestamp: 1_280, ssrc: 7
+            )
+        )
+        _ = try XCTUnwrap(codec.decode(first))
+
+        let decoded = try XCTUnwrap(codec.decode(afterLoss))
+
+        XCTAssertEqual(decoded.nativeConcealment?.count, 640)
+        XCTAssertTrue(try XCTUnwrap(decoded.nativeConcealment).contains { abs(Int($0)) > 0 })
+        XCTAssertEqual(decoded.samples.count, 640)
+        XCTAssertEqual(decoded.gsmPayload.count, 132)
+        XCTAssertEqual(GSMCodec().decodePacket(decoded.gsmPayload).count, 640)
     }
 
     private func metadata(_ sequence: UInt16) -> EchoLinkVoicePacketMetadata {

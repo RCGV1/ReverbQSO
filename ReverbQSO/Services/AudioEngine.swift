@@ -296,6 +296,7 @@ final class AudioEngine: ObservableObject {
     private var engine = AVAudioEngine()
     private let codec = GSMCodec()
     private let speexCodec = SpeexCodec()
+    private let speexReceiveDecoder = SpeexReceiveStreamDecoder()
     private(set) var transmitCodec: EchoLinkVoiceCodec = .gsm
     var isSpeexTransmitAvailable: Bool { speexCodec.isEncoderAvailable }
     /// Optional second consumer for host fanout, after resampling and microphone gain.
@@ -316,7 +317,7 @@ final class AudioEngine: ObservableObject {
         receiveOutputMuted = muted
         playerNode.volume = muted ? 0 : 1
     }
-    private let playerNode = AVAudioPlayerNode()
+    private var playerNode = AVAudioPlayerNode()
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "AudioEngine")
     private var isConfigured = false
     private var tapInstalled = false
@@ -332,7 +333,12 @@ final class AudioEngine: ObservableObject {
     private var captureDSPNextOrdinal: UInt64 = 0
     private var captureDSPResults: [UInt64: (CaptureDSPProcessor.Result, Int, Bool)] = [:]
     private var prepareCaptureTask: Task<Void, Never>?
-    private var resumeCaptureAfterInterruption = false
+    private var inputPreparationGeneration: UInt64 = 0
+    private var playbackDesired = false
+    private var isAudioInterrupted = false
+    private var automaticPlaybackAllowed = true
+    private var isDeviceRecovering = false
+    private var audioDeviceRecoveryTask: Task<Void, Never>?
     private var captureRecoveryTask: Task<Void, Never>?
     private var isPerformingCaptureRecovery = false
     private var outputLevelDecayTask: Task<Void, Never>?
@@ -390,6 +396,8 @@ final class AudioEngine: ObservableObject {
         }
         sessionObservers.removeAll()
         hasInstalledSessionObservers = false
+        playerNode = AVAudioPlayerNode()
+        playerNode.volume = receiveOutputMuted ? 0 : 1
         engine = AVAudioEngine()
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         do {
@@ -415,6 +423,7 @@ final class AudioEngine: ObservableObject {
 
     /// Callback invoked with encoded audio data ready for transmission.
     var onCapturedAudio: (@MainActor (Data) -> Void)?
+    var onCaptureSuspended: (@MainActor () -> Void)?
 
     // MARK: - Configuration
 
@@ -444,14 +453,17 @@ final class AudioEngine: ObservableObject {
     deinit {
         prepareCaptureTask?.cancel()
         captureRecoveryTask?.cancel()
+        audioDeviceRecoveryTask?.cancel()
         for token in sessionObservers {
             NotificationCenter.default.removeObserver(token.rawValue)
         }
     }
 
     /// Start playback/capture engine so received audio can be rendered even when not transmitting.
-    func startPlayback() {
-        guard !isRunning else { return }
+    func startPlayback(rebuildGraph: Bool = false) {
+        playbackDesired = true
+        automaticPlaybackAllowed = true
+        guard !isAudioInterrupted, !isRunning else { return }
 
         RecordingAudioSession.shared.beginLiveAudio(owner: self)
         do {
@@ -462,6 +474,8 @@ final class AudioEngine: ObservableObject {
             // route. Reusing the preactivation engine leaves it at 0 Hz on
             // physical iPhone even though AVAudioSession reports 48 kHz input.
             replaceEngineAfterSessionActivation()
+#else
+            if rebuildGraph { replaceEngineAfterSessionActivation() }
 #endif
             try setupEngineIfNeeded()
             playerNode.volume = receiveOutputMuted ? 0 : 1
@@ -500,6 +514,7 @@ final class AudioEngine: ObservableObject {
             guard !Task.isCancelled else { return false }
             if tapInstalled { stopCaptureTap(preservingIntent: false) }
             let installed = await startCapture(requestPermission: requestPermission)
+            guard !Task.isCancelled else { return false }
             captureRequested = false
             if installed {
                 for _ in 0..<20 {
@@ -520,6 +535,7 @@ final class AudioEngine: ObservableObject {
 
     /// Start capturing audio from the microphone (PTT pressed).
     func startCapture(requestPermission: Bool = true) async -> Bool {
+        guard !isAudioInterrupted, !isDeviceRecovering else { return false }
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         if tapInstalled && isCaptureReady && !isPreparingCapture {
             guard !captureRequested else { return true }
@@ -731,6 +747,12 @@ final class AudioEngine: ObservableObject {
 
     /// Fully stop audio playback + capture for session teardown.
     func stopAll() {
+        playbackDesired = false
+        isAudioInterrupted = false
+        automaticPlaybackAllowed = true
+        audioDeviceRecoveryTask?.cancel()
+        audioDeviceRecoveryTask = nil
+        isDeviceRecovering = false
         RecordingAudioSession.shared.endLiveAudio(owner: self)
         rxWindowActive = false
         prepareCaptureTask?.cancel()
@@ -751,6 +773,7 @@ final class AudioEngine: ObservableObject {
         // Reset all codec state for a clean session.
         codec.resetAll()
         speexCodec.reset()
+        speexReceiveDecoder.reset()
         playbackGain.reset()
         resetReceiveProcessing()
         resetCaptureEncodingCounters()
@@ -763,6 +786,7 @@ final class AudioEngine: ObservableObject {
     func resetCodecState() {
         codec.resetAll()
         speexCodec.reset()
+        speexReceiveDecoder.reset()
         playbackGain.reset()
         resetReceiveProcessing()
         resetCaptureEncodingCounters()
@@ -781,15 +805,16 @@ final class AudioEngine: ObservableObject {
     }
 
     /// Decode an EchoLink Speex datagram before receive activity/mute decisions.
-    func decodeReceivedSpeex(_ payload: Data) -> [Int16]? {
-        speexCodec.decodePacket(payload)
+    func decodeReceivedSpeex(_ payload: Data, metadata: EchoLinkVoicePacketMetadata?) -> SpeexReceiveStreamDecoder.Audio? {
+        speexReceiveDecoder.decode(payload, metadata: metadata)
     }
 
     /// Records real network samples; smoothing and concealment affect playback only.
-    func playReceivedPCM(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata? = nil,
+    func playReceivedPCM(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata? = nil, nativeConcealment: [Int16]? = nil,
                          diagnoseFirstRXAfterPTT: Bool = false) {
         guard !samples.isEmpty else { return }
         onRecordingPCM?(samples)
+        guard !isAudioInterrupted, automaticPlaybackAllowed, !isDeviceRecovering else { return }
         if !isRunning { startPlayback() }
         guard isRunning else { return }
         accumulateRXWindow(samples: samples)
@@ -798,7 +823,12 @@ final class AudioEngine: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
         lastReceiveArrival = now
-        receivePlayout.enqueue(receiveSpeech.process(samples, metadata: metadata, now: now), networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
+        let playbackSamples: [Int16]
+        if let nativeConcealment {
+            receiveSpeech.reset()
+            playbackSamples = nativeConcealment + samples
+        } else { playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now) }
+        receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
         scheduleReceivePlayout()
     }
 
@@ -881,11 +911,6 @@ final class AudioEngine: ObservableObject {
         }
 #if !os(watchOS)
         do {
-            try session.setPreferredSampleRate(sampleRate)
-        } catch {
-            logger.debug("Preferred sample rate not applied error='\(error.localizedDescription, privacy: .public)'")
-        }
-        do {
             try session.setPreferredIOBufferDuration(0.02)
         } catch {
             logger.debug("Preferred IO buffer duration not applied error='\(error.localizedDescription, privacy: .public)'")
@@ -893,10 +918,15 @@ final class AudioEngine: ObservableObject {
 #endif
 #endif
         try session.setActive(true)
+#if !os(watchOS) && !targetEnvironment(simulator)
+        if session.maximumInputNumberOfChannels > 0 {
+            try? session.setPreferredInputNumberOfChannels(1)
+        }
+#endif
         logRouteDiagnostics(context: "session-activated")
         refreshAvailableInputDevices(session: session)
         ensurePlaybackOutputRoute(session: session)
-        applyPreferredInput(session: session)
+        if !isDeviceRecovering { applyPreferredInput(session: session) }
         updateOutputRouteName(session: session)
     }
 
@@ -931,7 +961,6 @@ final class AudioEngine: ObservableObject {
             case .system:
                 try session.overrideOutputAudioPort(.none)
             }
-            applyPreferredInput(session: session)
         } catch {
             logger.error("Could not select audio output: \(error.localizedDescription, privacy: .public)")
         }
@@ -1026,41 +1055,6 @@ final class AudioEngine: ObservableObject {
     }
 
     // MARK: - Audio Utilities
-
-    private nonisolated static func extractSamples(from buffer: AVAudioPCMBuffer) -> [Int16] {
-        let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else { return [] }
-
-        let channels = max(Int(buffer.format.channelCount), 1)
-
-        if let channelData = buffer.int16ChannelData {
-            var samples = [Int16](repeating: 0, count: frameCount)
-            for i in 0..<frameCount {
-                var mixed: Int32 = 0
-                for channel in 0..<channels {
-                    mixed += Int32(channelData[channel][i])
-                }
-                samples[i] = Int16(clamping: mixed / Int32(channels))
-            }
-            return samples
-        }
-
-        if let floatData = buffer.floatChannelData {
-            var samples = [Int16](repeating: 0, count: frameCount)
-            for i in 0..<frameCount {
-                var mixed: Float = 0
-                for channel in 0..<channels {
-                    mixed += floatData[channel][i]
-                }
-                let mono = mixed / Float(channels)
-                let clamped = max(-1.0, min(1.0, mono))
-                samples[i] = Int16(clamped * Float(Int16.max))
-            }
-            return samples
-        }
-
-        return []
-    }
 
     private func pcmBuffer(from samples: [Int16], format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else {
@@ -1337,9 +1331,9 @@ final class AudioEngine: ObservableObject {
             // AVAudioEngine delivers tap buffers on a real-time audio thread.
             // Copy PCM before the callback returns, then pass only Sendable
             // samples to the serial DSP queue; only delivery and meters use MainActor.
-            let samples = Self.extractSamples(from: buffer)
+            let samples = NativeCapturePCM.extractSamples(from: buffer)
             let sampleRate = buffer.format.sampleRate
-            processor.submit(samples: samples, sampleRate: sampleRate, generation: ticket.generation,
+            processor.submit(normalizedSamples: samples, sampleRate: sampleRate, generation: ticket.generation,
                              capturedAt: capturedAt, configuration: ticket.configuration) { [weak engine] result in
                 Task { @MainActor [weak engine, barrier = ticket.barrier] in
                     defer { barrier.leave() }
@@ -1543,11 +1537,6 @@ final class AudioEngine: ObservableObject {
             )
 #endif
 #if !os(watchOS)
-            do {
-                try session.setPreferredSampleRate(sampleRate)
-            } catch {
-                logger.debug("Capture recovery preferred sample rate step failed error='\(error.localizedDescription, privacy: .public)'")
-            }
             do {
                 try session.setPreferredIOBufferDuration(0.02)
             } catch {
@@ -1753,10 +1742,12 @@ final class AudioEngine: ObservableObject {
     private func scheduleInputPreparation() {
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         guard prepareCaptureTask == nil else { return }
+        inputPreparationGeneration &+= 1
+        let generation = inputPreparationGeneration
         prepareCaptureTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
             _ = await self.prepareCaptureInput(requestPermission: false)
-            self.prepareCaptureTask = nil
+            if self.inputPreparationGeneration == generation { self.prepareCaptureTask = nil }
         }
 #endif
     }
@@ -1798,13 +1789,15 @@ final class AudioEngine: ObservableObject {
             }
         }
 
+        let observedEngine = engine
         let engineConfigObserver = center.addObserver(
             forName: NSNotification.Name.AVAudioEngineConfigurationChange,
             object: engine,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleEngineConfigurationChange()
+        ) { [weak self, weak observedEngine] _ in
+            Task { @MainActor [weak self, weak observedEngine] in
+                guard let self, let observedEngine, self.engine === observedEngine else { return }
+                self.handleEngineConfigurationChange()
             }
         }
 
@@ -1824,8 +1817,12 @@ final class AudioEngine: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let session = AVAudioSession.sharedInstance()
+                let previous = Set(self.availableInputDevices.map(\.id))
                 self.refreshAvailableInputDevices(session: session)
-                self.applyPreferredInput(session: session)
+                if let selected = self.selectedInputDeviceID, !previous.contains(selected),
+                   self.availableInputDevices.contains(where: { $0.id == selected }) {
+                    self.applyPreferredInput(session: session)
+                }
             }
         }
             sessionObservers.append(SessionObserverToken(rawValue: availableInputsObserver))
@@ -1836,76 +1833,58 @@ final class AudioEngine: ObservableObject {
 
     private func handleRouteChange(reasonValue: UInt) {
         refreshAvailableInputDevices()
-        applyPreferredInput(session: AVAudioSession.sharedInstance())
-        guard captureRequested || isRunning else { return }
-        let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
-
-        if isPreparingCapture {
-            updateOutputRouteName()
-            return
-        }
-
-        if isPerformingCaptureRecovery {
-            updateOutputRouteName()
-            VoiceDiagnosticLog.record(
-                "route change ignored during capture recovery reason=\(reasonValue)"
-            )
-            return
-        }
-
-        if reason == .categoryChange {
-            updateOutputRouteName()
-            if captureRequested && !hasUsableCaptureRoute() {
-                logger.warning("Audio route changed reason=categoryChange; capture route invalid, scheduling recovery")
-                logRouteDiagnostics(context: "category-change-invalid-route")
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-                invalidateCaptureStart(preservingIntent: false)
-                scheduleInputPreparation()
-#else
-                invalidateCaptureStart(preservingIntent: true)
-                scheduleCaptureRecoveryAfterFailure(reason: "category-change-invalid-route")
-#endif
-            } else if tapInstalled && !hasUsableCaptureRoute() {
-                stopCaptureTap(preservingIntent: false)
-                scheduleInputPreparation()
-            } else {
-                logger.debug("Audio route changed reason=categoryChange; route remains usable")
-            }
-            return
-        }
-
-        logger.info("Audio route changed reason=\(reasonValue)")
-        ensurePlaybackOutputRoute()
-        applyPreferredInput(session: AVAudioSession.sharedInstance())
         updateOutputRouteName()
-
-        let shouldTriggerRecovery: Bool
-        switch reason {
-        case .newDeviceAvailable, .oldDeviceUnavailable, .routeConfigurationChange, .noSuitableRouteForCategory, .wakeFromSleep:
-            shouldTriggerRecovery = true
-        case .override:
-            shouldTriggerRecovery = false
-        case .categoryChange:
-            shouldTriggerRecovery = false
-        case .unknown:
-            shouldTriggerRecovery = true
-        case .none:
-            shouldTriggerRecovery = true
-        @unknown default:
-            shouldTriggerRecovery = true
+        guard playbackDesired || captureRequested else { return }
+        let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+        if reason == .categoryChange {
+            recoverAudioDevice(for: .categoryChange(inputUsable: hasUsableCaptureRoute()))
+            return
         }
+        if reason == .override { return }
+        guard !isPreparingCapture, !isPerformingCaptureRecovery, !isDeviceRecovering else { return }
+        recoverAudioDevice(for: .deviceChange)
+    }
 
-        if captureRequested && shouldTriggerRecovery {
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+    private func recoverAudioDevice(for event: AudioDeviceRecoveryPolicy.Event) {
+        let plan = AudioDeviceRecoveryPolicy.plan(for: event,
+            playbackActive: playbackDesired && automaticPlaybackAllowed && !isAudioInterrupted, captureRequested: captureRequested,
+            preparingOrRecovering: isPreparingCapture || isPerformingCaptureRecovery || isDeviceRecovering)
+        guard plan != .none else { return }
+        if plan.rebuildGraph || plan.discardBufferedReceive {
+            prepareCaptureTask?.cancel()
+            prepareCaptureTask = nil
+        }
+        if plan.stopCapture {
             invalidateCaptureStart(preservingIntent: false)
-            scheduleInputPreparation()
-#else
-            invalidateCaptureStart(preservingIntent: true)
-            scheduleCaptureRecoveryAfterFailure(reason: "route-change")
-#endif
-        } else if tapInstalled && shouldTriggerRecovery {
+            onCaptureSuspended?()
+        } else if tapInstalled && (plan.rebuildGraph || plan.discardBufferedReceive) {
             stopCaptureTap(preservingIntent: false)
-            scheduleInputPreparation()
+        }
+        if plan.discardBufferedReceive { stopPlaybackTimeline() }
+        if case .interruptionBegan = event {
+            engine.pause()
+            isRunning = false
+            return
+        }
+        guard plan.rebuildGraph || plan.restartPlayback || plan.prepareMicrophone else { return }
+        audioDeviceRecoveryTask?.cancel()
+        isDeviceRecovering = true
+        audioDeviceRecoveryTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            defer { self.isDeviceRecovering = false; self.audioDeviceRecoveryTask = nil }
+            if plan.rebuildGraph {
+                self.engine.stop()
+                self.isRunning = false
+            }
+            if plan.restartPlayback && self.playbackDesired && !self.isAudioInterrupted {
+                self.startPlayback(rebuildGraph: plan.rebuildGraph)
+            } else if plan.rebuildGraph {
+                self.replaceEngineAfterSessionActivation()
+            }
+            if plan.prepareMicrophone && self.playbackDesired && !self.isAudioInterrupted {
+                self.scheduleInputPreparation()
+            }
         }
     }
 
@@ -1916,103 +1895,29 @@ final class AudioEngine: ObservableObject {
     }
 
     private func handleInterruption(typeValue: UInt, optionsValue: UInt) {
-        guard let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
-            return
-        }
-
-        switch type {
-        case .began:
-            resumeCaptureAfterInterruption = captureRequested
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-            invalidateCaptureStart(preservingIntent: false)
-#else
-            invalidateCaptureStart(preservingIntent: true)
-#endif
-            if engine.isRunning {
-                engine.pause()
-            }
-            isRunning = false
-
-        case .ended:
-            do {
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                logger.error("Audio session reactivation after interruption failed error='\(error.localizedDescription, privacy: .public)'")
-            }
-
-            startPlayback()
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-            scheduleInputPreparation()
-#else
-            if !resumeCaptureAfterInterruption { scheduleInputPreparation() }
-#endif
-
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            if resumeCaptureAfterInterruption && options.contains(.shouldResume) {
-                scheduleCaptureRecovery(reason: "interruption-ended")
-            }
-            resumeCaptureAfterInterruption = false
-
-        @unknown default:
-            break
+        guard let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        if type == .began {
+            isAudioInterrupted = true
+            automaticPlaybackAllowed = false
+            audioDeviceRecoveryTask?.cancel()
+            audioDeviceRecoveryTask = nil
+            isDeviceRecovering = false
+            recoverAudioDevice(for: .interruptionBegan)
+        } else {
+            isAudioInterrupted = false
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
+            automaticPlaybackAllowed = shouldResume
+            recoverAudioDevice(for: .interruptionEnded(shouldResume: shouldResume))
         }
     }
 
     private func handleMediaServicesReset() {
-        logger.warning("Audio media services reset detected; rebuilding audio engine state")
-
-        let shouldRestartPlayback = isRunning || captureRequested
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-        invalidateCaptureStart(preservingIntent: false)
-#else
-        invalidateCaptureStart(preservingIntent: true)
-#endif
-        resetEngineGraph()
-        isRunning = false
-
-        guard shouldRestartPlayback else { return }
-        startPlayback()
-        if !captureRequested { scheduleInputPreparation() }
-        if captureRequested {
-            scheduleCaptureRecovery(reason: "media-services-reset", delay: .milliseconds(100))
-        }
+        recoverAudioDevice(for: .mediaReset)
     }
 
     private func handleEngineConfigurationChange() {
-        logger.warning("Audio engine configuration changed; validating capture chain")
-        VoiceDiagnosticLog.record(
-            "engine configuration changed captureRequested=\(captureRequested) capturing=\(isCapturing) engineRunning=\(engine.isRunning)"
-        )
-
-        if isPerformingCaptureRecovery || isPreparingCapture {
-            VoiceDiagnosticLog.record("engine configuration change ignored during capture recovery")
-            return
-        }
-
-        if isRunning, !engine.isRunning {
-            do {
-                try engine.start()
-                if engine.isRunning {
-                    playerNode.play()
-                }
-            } catch {
-                logger.error("Engine restart after configuration change failed error='\(error.localizedDescription, privacy: .public)'")
-            }
-            isRunning = engine.isRunning
-        }
-
-        if captureRequested {
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-            invalidateCaptureStart(preservingIntent: false)
-            scheduleInputPreparation()
-#else
-            invalidateCaptureStart(preservingIntent: true)
-            scheduleCaptureRecovery(reason: "engine-config-change")
-#endif
-        } else if tapInstalled {
-            stopCaptureTap(preservingIntent: false)
-            scheduleInputPreparation()
-        }
+        guard (isRunning && !engine.isRunning) || (captureRequested && !hasUsableCaptureRoute()) else { return }
+        recoverAudioDevice(for: .engineConfigurationChanged)
     }
 
     private func isUsableHardwareFormat(_ format: AVAudioFormat?) -> Bool {

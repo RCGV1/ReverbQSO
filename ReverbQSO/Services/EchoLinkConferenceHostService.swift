@@ -152,6 +152,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             true
 #endif
         }
+        audioEngine.onCaptureSuspended = { [weak self] in self?.setPTT(active: false) }
         recordingPreferencesSubscription = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -803,7 +804,11 @@ final class EchoLinkConferenceHostService: ObservableObject {
             await broadcastInfo("\(peer.callsign) talking")
         }
         if isMonitoringAudio {
-            audioEngine.playReceivedPCM(decoded.samples)
+            audioEngine.playReceivedPCM(
+                decoded.samples,
+                metadata: parsed.metadata,
+                nativeConcealment: decoded.nativeConcealment
+            )
         } else {
             onUnmonitoredReceivedPCM?(decoded.samples)
         }

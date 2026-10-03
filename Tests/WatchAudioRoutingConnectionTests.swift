@@ -158,6 +158,7 @@ final class WatchAudioRoutingConnectionTests: XCTestCase {
 
         await service.handleAudioData(malformed)
         await service.handleAudioData(valid)
+        await service.handleAudioData(valid)
 
         XCTAssertEqual(forwarded, [valid])
     }

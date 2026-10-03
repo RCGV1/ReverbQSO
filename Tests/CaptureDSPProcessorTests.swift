@@ -185,6 +185,60 @@ final class CaptureDSPProcessorTests: XCTestCase {
         XCTAssertEqual(result.metrics.appliedGain, 2)
     }
 
+    func testNormalizedFloatPathAppliesGainBeforeSingleInt16Quantization() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 12
+        processor.begin(generation: generation)
+        let configuration = CaptureDSPProcessor.Configuration(
+            codec: .gsm, gainMode: .manual, manualGainMultiplier: 4
+        )
+
+        let result = try await submit(
+            processor, normalizedSamples: [0.25 / Float(Int16.max), -0.25 / Float(Int16.max)],
+            sampleRate: 8_000, generation: generation, configuration: configuration
+        )
+
+        XCTAssertEqual(result.transmittedPCM, [1, -1],
+                       "Gain must run in Float before the only Int16 quantization")
+        XCTAssertEqual(result.metrics.appliedGain, 4)
+    }
+
+    func testNormalizedFloatPathUsesNativeStreamingSampleRateConversion() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 13
+        processor.begin(generation: generation)
+        var output: [Int16] = []
+
+        for _ in 0..<50 {
+            let result = try await submit(
+                processor, normalizedSamples: [Float](repeating: 0.25, count: 960),
+                sampleRate: 48_000, generation: generation, configuration: manualUnity
+            )
+            output += result.transmittedPCM
+        }
+
+        XCTAssertEqual(output.count, 8_000)
+        let expectedNativeSteadySample = Int16((0.25 * 0.989_806 * Float(Int16.max)).rounded())
+        XCTAssertEqual(output.dropFirst(64).last ?? 0, expectedNativeSteadySample, accuracy: 2,
+                       "Preserve Apple's measured minimum-phase steady gain without another gain stage")
+    }
+
+    func testNormalizedFloatPathSanitizesNonfiniteSamplesBeforeMetricsAndGain() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 14
+        processor.begin(generation: generation)
+
+        let result = try await submit(
+            processor,
+            normalizedSamples: [.nan, .infinity, -.infinity, 0.25, 2, -2],
+            sampleRate: 8_000, generation: generation, configuration: manualUnity
+        )
+
+        XCTAssertEqual(result.transmittedPCM, [0, 0, 0, 8_192, 32_767, -32_767])
+        XCTAssertTrue(result.metrics.rawRMS.isFinite)
+        XCTAssertEqual(result.metrics.rawPeak, Int(Int16.max))
+    }
+
     private func submit(
         _ processor: CaptureDSPProcessor,
         samples: [Int16],
@@ -217,5 +271,26 @@ final class CaptureDSPProcessorTests: XCTestCase {
                 continuation.resume(returning: result)
             }
         }
+    }
+
+    private func submit(
+        _ processor: CaptureDSPProcessor,
+        normalizedSamples: [Float],
+        sampleRate: Double,
+        generation: UInt64,
+        configuration: CaptureDSPProcessor.Configuration
+    ) async throws -> CaptureDSPProcessor.Result {
+        let result: CaptureDSPProcessor.Result? = await withCheckedContinuation { continuation in
+            processor.submit(
+                normalizedSamples: normalizedSamples,
+                sampleRate: sampleRate,
+                generation: generation,
+                capturedAt: ProcessInfo.processInfo.systemUptime,
+                configuration: configuration
+            ) { result in
+                continuation.resume(returning: result)
+            }
+        }
+        return try XCTUnwrap(result)
     }
 }

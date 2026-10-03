@@ -58,6 +58,20 @@ final class SpeexCodec {
         return count == Self.samplesPerPacket ? output : nil
     }
 
+    /// Advances receive state and synthesizes 20 ms frames for a bounded packet gap.
+    func concealMissingSamples(_ sampleCount: Int) -> [Int16]? {
+        guard sampleCount > 0, sampleCount <= 1_280, sampleCount.isMultiple(of: 160) else {
+            return nil
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        var output = [Int16](repeating: 0, count: sampleCount)
+        let count = output.withUnsafeMutableBufferPointer { samples in
+            oe_speex_conceal(decoder, sampleCount / 160, samples.baseAddress, samples.count)
+        }
+        return count == sampleCount ? output : nil
+    }
+
     /// Buffers incomplete input and emits one packet for each complete 640-sample block.
     /// An empty result means more samples are needed; nil means the encoder is unavailable.
     func encode(_ samples: [Int16]) -> [Data]? {

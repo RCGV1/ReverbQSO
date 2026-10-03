@@ -6,6 +6,17 @@
 typedef struct { void *state; } OESpeexDecoder;
 typedef struct { void *state; } OESpeexEncoder;
 
+static void *oe_speex_new_decoder_state(void) {
+    void *state = speex_decoder_init(&speex_nb_mode);
+    int enhancement = 1;
+    if (!state) return NULL;
+    if (speex_decoder_ctl(state, SPEEX_SET_ENH, &enhancement) != 0) {
+        speex_decoder_destroy(state);
+        return NULL;
+    }
+    return state;
+}
+
 static void *oe_speex_new_encoder_state(void) {
     void *state = speex_encoder_init(&speex_nb_mode);
     int bitrate = 25000;
@@ -24,7 +35,7 @@ static void *oe_speex_new_encoder_state(void) {
 void *oe_speex_create(void) {
     OESpeexDecoder *decoder = calloc(1, sizeof(*decoder));
     if (!decoder) return NULL;
-    decoder->state = speex_decoder_init(&speex_nb_mode);
+    decoder->state = oe_speex_new_decoder_state();
     if (!decoder->state) { free(decoder); return NULL; }
     return decoder;
 }
@@ -36,7 +47,7 @@ void oe_speex_reset(void *handle) {
     OESpeexDecoder *decoder = handle;
     if (decoder) {
         if (decoder->state) speex_decoder_destroy(decoder->state);
-        decoder->state = speex_decoder_init(&speex_nb_mode);
+        decoder->state = oe_speex_new_decoder_state();
     }
 }
 int oe_speex_decode(void *handle, const uint8_t *payload, size_t size, int16_t *output) {
@@ -58,6 +69,27 @@ int oe_speex_decode(void *handle, const uint8_t *payload, size_t size, int16_t *
     if (!valid) { oe_speex_reset(decoder); return 0; }
     memcpy(output, samples, sizeof(samples));
     return 640;
+}
+
+int oe_speex_conceal(void *handle, size_t frame_count,
+                     int16_t *output, size_t output_capacity) {
+    OESpeexDecoder *decoder = handle;
+    int16_t samples[8 * 160];
+    size_t sample_count;
+
+    if (!decoder || !decoder->state || !output || frame_count == 0 || frame_count > 8)
+        return 0;
+    sample_count = frame_count * 160;
+    if (output_capacity < sample_count) return 0;
+
+    for (size_t frame = 0; frame < frame_count; ++frame) {
+        if (speex_decode_int(decoder->state, NULL, samples + frame * 160) != 0) {
+            oe_speex_reset(decoder);
+            return 0;
+        }
+    }
+    memcpy(output, samples, sample_count * sizeof(*samples));
+    return (int)sample_count;
 }
 
 void *oe_speex_encoder_create(void) {

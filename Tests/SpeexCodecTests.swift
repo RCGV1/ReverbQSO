@@ -22,6 +22,42 @@ final class SpeexCodecTests: XCTestCase {
         XCTAssertNil(codec.decodePacket(Data(repeating: 0, count: 513)))
     }
 
+    func testConcealmentProducesBoundedAlignedSpeechRecovery() throws {
+        let codec = SpeexCodec()
+        _ = try XCTUnwrap(codec.decodePacket(Self.fixture))
+
+        let recovered = try XCTUnwrap(codec.concealMissingSamples(1_280))
+
+        XCTAssertEqual(recovered.count, 1_280)
+        XCTAssertGreaterThan(recovered.reduce(0) { $0 + abs(Int($1)) }, 0)
+        XCTAssertNil(codec.concealMissingSamples(0))
+        XCTAssertNil(codec.concealMissingSamples(159))
+        XCTAssertNil(codec.concealMissingSamples(1_440))
+    }
+
+    func testConcealmentAdvancesDecoderAndResetRestoresInitialState() throws {
+        let codec = SpeexCodec()
+        let initial = try XCTUnwrap(codec.decodePacket(Self.fixture))
+        _ = try XCTUnwrap(codec.concealMissingSamples(160))
+        let afterLoss = try XCTUnwrap(codec.decodePacket(Self.fixture))
+        XCTAssertNotEqual(afterLoss, initial)
+
+        codec.reset()
+
+        XCTAssertEqual(codec.decodePacket(Self.fixture), initial)
+    }
+
+    func testInvalidConcealmentCountDoesNotChangeDecoderState() throws {
+        let codec = SpeexCodec()
+        let control = SpeexCodec()
+        _ = try XCTUnwrap(codec.decodePacket(Self.fixture))
+        _ = try XCTUnwrap(control.decodePacket(Self.fixture))
+
+        XCTAssertNil(codec.concealMissingSamples(161))
+
+        XCTAssertEqual(codec.decodePacket(Self.fixture), control.decodePacket(Self.fixture))
+    }
+
     func testResetStartsIndependentReceiveAndTransmitSession() throws {
         let codec = SpeexCodec()
         let original = try XCTUnwrap(codec.decodePacket(Self.fixture))

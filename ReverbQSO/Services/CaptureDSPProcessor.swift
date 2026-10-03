@@ -45,6 +45,8 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     private var stateGeneration: UInt64?
     private var resamplerState = PCMLinearResamplerState()
     private var automaticGain = AdaptiveMicrophoneGain()
+    private let nativeCapturePCM = NativeCapturePCM()
+    private var floatAutomaticGain = FloatAutomaticGain()
     private let gsmCodec = GSMCodec()
     private let speexCodec = SpeexCodec()
     private var selectedCodec = EchoLinkVoiceCodec.gsm
@@ -106,6 +108,41 @@ final class CaptureDSPProcessor: @unchecked Sendable {
             lastProcessedCaptureAt = capturedAt
             let result = process(
                 samples: samples,
+                sampleRate: sampleRate,
+                generation: generation,
+                configuration: configuration
+            )
+            completion(isActive(generation) ? result : nil)
+        }
+    }
+
+    /// Processes normalized native capture without reducing it to Int16 before
+    /// sample-rate conversion and microphone gain.
+    func submit(
+        normalizedSamples: [Float],
+        sampleRate: Double,
+        generation: UInt64,
+        capturedAt: TimeInterval,
+        configuration: Configuration,
+        completion: @escaping Completion
+    ) {
+        queue.async { [self] in
+            guard isActive(generation), stateGeneration == generation,
+                  LiveCaptureBacklogPolicy.isFresh(
+                    capturedAt: capturedAt,
+                    now: ProcessInfo.processInfo.systemUptime
+                  ) else {
+                completion(nil)
+                return
+            }
+            if let previous = lastProcessedCaptureAt, capturedAt - previous > 0.240 {
+                let ordinal = nextOrdinal
+                resetQueueConfinedState()
+                nextOrdinal = ordinal
+            }
+            lastProcessedCaptureAt = capturedAt
+            let result = process(
+                normalizedSamples: normalizedSamples,
                 sampleRate: sampleRate,
                 generation: generation,
                 configuration: configuration
@@ -209,6 +246,103 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         )
     }
 
+    private func process(
+        normalizedSamples: [Float],
+        sampleRate: Double,
+        generation: UInt64,
+        configuration: Configuration
+    ) -> Result? {
+        prepareCodec(configuration.codec)
+
+        let sanitizedSamples = Self.sanitize(normalizedSamples)
+        let rawRMS = Self.rms(sanitizedSamples)
+        let rawPeak = Self.peak(sanitizedSamples)
+        let codecInput: [Float]
+        do {
+            codecInput = try nativeCapturePCM.resample(
+                sanitizedSamples,
+                sourceSampleRate: sampleRate
+            )
+        } catch {
+            resetAfterNativeConversionFailure()
+            return nil
+        }
+        let codecRMS = Self.rms(codecInput)
+        let codecPeak = Self.peak(codecInput)
+
+        let gained: [Float]
+        let appliedGain: Double
+        switch configuration.gainMode {
+        case .automatic:
+            let result = floatAutomaticGain.process(codecInput)
+            gained = result.samples
+            appliedGain = result.appliedGain
+        case .manual:
+            let result = Self.applyManualFloatGain(
+                codecInput,
+                multiplier: configuration.manualGainMultiplier
+            )
+            gained = result.samples
+            appliedGain = result.appliedGain
+        }
+        let transmittedPCM = Self.quantize(gained)
+        let packets = encode(transmittedPCM, codec: configuration.codec)
+
+        let ordinal = nextOrdinal
+        nextOrdinal &+= 1
+        return Result(
+            generation: generation,
+            ordinal: ordinal,
+            transmittedPCM: transmittedPCM,
+            encodedPackets: packets,
+            metrics: Metrics(
+                rawRMS: rawRMS,
+                rawPeak: rawPeak,
+                codecRMS: codecRMS,
+                codecPeak: codecPeak,
+                transmittedRMS: Self.rms(transmittedPCM),
+                transmittedPeak: Self.peak(transmittedPCM),
+                appliedGain: appliedGain,
+                encodedByteCount: packets.reduce(0) { $0 + $1.count },
+                gsmSampleRemainder: gsmSampleRemainder,
+                gsmFrameRemainder: gsmFrameRemainder
+            )
+        )
+    }
+
+    private func prepareCodec(_ codec: EchoLinkVoiceCodec) {
+        guard selectedCodec != codec else { return }
+        gsmCodec.resetEncodeState()
+        speexCodec.resetEncoding()
+        hasGSMInput = false
+        gsmSampleRemainder = 0
+        gsmFrameRemainder = 0
+        selectedCodec = codec
+    }
+
+    private func encode(_ samples: [Int16], codec: EchoLinkVoiceCodec) -> [Data] {
+        switch codec {
+        case .speex:
+            return speexCodec.encode(samples) ?? []
+        case .gsm:
+            hasGSMInput = hasGSMInput || !samples.isEmpty
+            gsmSampleRemainder = (gsmSampleRemainder + samples.count) % GSMCodec.samplesPerFrame
+            let encoded = gsmCodec.encode(samples)
+            recordGSMFrames(encoded)
+            return encoded.isEmpty ? [] : [encoded]
+        }
+    }
+
+    private func resetAfterNativeConversionFailure() {
+        nativeCapturePCM.reset()
+        floatAutomaticGain.reset()
+        gsmCodec.resetEncodeState()
+        speexCodec.resetEncoding()
+        hasGSMInput = false
+        gsmSampleRemainder = 0
+        gsmFrameRemainder = 0
+    }
+
     private func flushQueueConfined() -> Data {
         if selectedCodec == .speex { return speexCodec.flushEncoding() ?? Data() }
         guard hasGSMInput else { return Data() }
@@ -250,6 +384,8 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     private func resetQueueConfinedState() {
         resamplerState.reset()
         automaticGain.reset()
+        nativeCapturePCM.reset()
+        floatAutomaticGain.reset()
         gsmCodec.resetEncodeState()
         speexCodec.resetEncoding()
         selectedCodec = .gsm
@@ -286,5 +422,81 @@ final class CaptureDSPProcessor: @unchecked Sendable {
 
     private static func peak(_ samples: [Int16]) -> Int {
         samples.reduce(0) { max($0, abs(Int($1))) }
+    }
+
+    private static func rms(_ samples: [Float]) -> Double {
+        guard !samples.isEmpty else { return 0 }
+        let squares = samples.reduce(0.0) { $0 + Double($1) * Double($1) }
+        return sqrt(squares / Double(samples.count)) * Double(Int16.max)
+    }
+
+    private static func peak(_ samples: [Float]) -> Int {
+        Int((samples.reduce(0 as Float) { max($0, abs($1)) } * Float(Int16.max)).rounded())
+    }
+
+    private static func quantize(_ samples: [Float]) -> [Int16] {
+        samples.map { sample in
+            let finite = sample.isFinite ? sample : 0
+            let normalized = min(1, max(-1, finite))
+            return Int16(clamping: Int((normalized * Float(Int16.max)).rounded()))
+        }
+    }
+
+    private static func sanitize(_ samples: [Float]) -> [Float] {
+        samples.map { sample in
+            guard sample.isFinite else { return 0 }
+            return min(1, max(-1, sample))
+        }
+    }
+
+    private static func applyManualFloatGain(
+        _ samples: [Float],
+        multiplier: Double
+    ) -> (samples: [Float], appliedGain: Double) {
+        let requested = multiplier.isFinite ? min(max(multiplier, 0.25), 4) : 1
+        guard !samples.isEmpty else { return ([], requested) }
+        let peak = Double(samples.reduce(0 as Float) { max($0, abs($1)) })
+        let ceiling = 30_000.0 / Double(Int16.max)
+        let applied = requested > 1 && peak > 0
+            ? min(requested, max(1, ceiling / peak))
+            : requested
+        return (samples.map { Float(Double($0) * applied) }, applied)
+    }
+}
+
+private struct FloatAutomaticGain {
+    struct Result {
+        let samples: [Float]
+        let appliedGain: Double
+    }
+
+    private var previousGain: Double?
+    private let targetRMS = 2_500.0 / Double(Int16.max)
+    private let maximumGain = 8.0
+    private let noiseFloorRMS = 60.0 / Double(Int16.max)
+    private let maximumPeak = 30_000.0 / Double(Int16.max)
+
+    mutating func reset() {
+        previousGain = nil
+    }
+
+    mutating func process(_ samples: [Float]) -> Result {
+        guard !samples.isEmpty else { return Result(samples: [], appliedGain: 1) }
+        let rms = sqrt(samples.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(samples.count))
+        guard rms >= noiseFloorRMS else {
+            return Result(samples: samples, appliedGain: 1)
+        }
+        let peak = Double(samples.reduce(0 as Float) { max($0, abs($1)) })
+        let voiceGain = min(maximumGain, max(1, targetRMS / rms))
+        let transition = min(1, (rms - noiseFloorRMS) / noiseFloorRMS)
+        let voiceWeight = transition * transition * (3 - 2 * transition)
+        let requestedGain = 1 + (voiceGain - 1) * voiceWeight
+        let recovery = 1 - exp(-Double(samples.count) / 8_000 / 0.03)
+        let smoothedGain = previousGain.map { prior in
+            requestedGain < prior ? requestedGain : prior + (requestedGain - prior) * recovery
+        } ?? requestedGain
+        let appliedGain = peak > 0 ? min(smoothedGain, maximumPeak / peak) : smoothedGain
+        previousGain = appliedGain
+        return Result(samples: samples.map { Float(Double($0) * appliedGain) }, appliedGain: appliedGain)
     }
 }

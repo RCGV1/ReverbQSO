@@ -757,6 +757,10 @@ final class EchoLinkConnectionService: ObservableObject {
         audioEngine.$outputRouteName
             .receive(on: DispatchQueue.main)
             .assign(to: &$audioOutputRouteName)
+        audioEngine.onCaptureSuspended = { [weak self] in
+            guard let self, self.session?.isPTTActive == true else { return }
+            self.sendPTT(active: false)
+        }
         audioEngine.$outputPreference
             .receive(on: DispatchQueue.main)
             .assign(to: &$audioOutputPreference)
@@ -2456,14 +2460,17 @@ final class EchoLinkConnectionService: ObservableObject {
             audioEngine.playReceivedPCM(samples, metadata: datagram.metadata, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
             if audioEngine.outputLevel >= 0.01 { noteIncomingAudioActivity() }
         case .speex(let payload):
-            guard let samples = audioEngine.decodeReceivedSpeex(payload) else {
-                logger.debug("Dropped malformed EchoLink Speex audio packet")
-                return
-            }
-            guard receiveSequencer.shouldAcceptForPlayback(datagram.metadata) else {
+            var sequenceCandidate = receiveSequencer
+            guard sequenceCandidate.shouldAcceptForPlayback(datagram.metadata) else {
                 logger.debug("Dropped duplicate or late Speex audio packet")
                 return
             }
+            guard let decoded = audioEngine.decodeReceivedSpeex(payload, metadata: datagram.metadata) else {
+                logger.debug("Dropped malformed EchoLink Speex audio packet")
+                return
+            }
+            receiveSequencer = sequenceCandidate
+            let samples = decoded.received
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
@@ -2479,7 +2486,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 logger.info("RX voice resumed after PTT codec=Speex samples=\(samples.count)")
                 logNextVoiceAfterPTT = false
             }
-            audioEngine.playReceivedPCM(samples, metadata: datagram.metadata, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
+            audioEngine.playReceivedPCM(samples, metadata: datagram.metadata, nativeConcealment: decoded.concealed, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
             if audioEngine.outputLevel >= 0.01 { noteIncomingAudioActivity() }
         case .unsupportedPayloadType(let pt):
             audioStatusMessage = "Remote station sent unsupported audio payload type \(pt)."

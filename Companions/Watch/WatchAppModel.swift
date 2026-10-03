@@ -708,9 +708,11 @@ final class WatchAppModel: NSObject, ObservableObject {
 
     private func receivePhoneAudio(_ data: Data) -> Bool {
         guard isForeground, connectionService.session == nil, companionStatus.connected,
-              let frame = WatchAudioFrame.decode(data),
-              phoneAudioSequence.accept(frame, expectedStreamID: companionStatus.sessionID),
+              let frame = WatchAudioFrame.decode(data) else { return false }
+        var candidateSequence = phoneAudioSequence
+        guard candidateSequence.accept(frame, expectedStreamID: companionStatus.sessionID),
               phoneAudioPlayer.play(frame.datagram) else { return false }
+        phoneAudioSequence = candidateSequence
         phoneAudioStopTask?.cancel()
         phoneAudioStopTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(1)) } catch { return }
