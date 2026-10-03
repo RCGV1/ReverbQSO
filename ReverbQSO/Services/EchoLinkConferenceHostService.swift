@@ -16,6 +16,24 @@ final class EchoLinkConferenceHostService: ObservableObject {
         static let echolink = Ports(audio: 5198, control: 5199)
     }
 
+    private struct LocalAudioRecipient {
+        let id: UUID
+        let host: String
+        let port: UInt16
+    }
+
+    private struct QueuedLocalAudioPacket {
+        let payload: Data
+        let codec: EchoLinkVoiceCodec
+        let sampleCount: Int
+        let recipients: [LocalAudioRecipient]
+    }
+
+    private struct PeerVoiceClock {
+        var sequence: UInt16 = 0
+        var timestamp: UInt32 = 0
+    }
+
     @Published private(set) var isRecording = false
     private var recordingService: QSORecordingService?
 
@@ -69,7 +87,8 @@ final class EchoLinkConferenceHostService: ObservableObject {
     var callAccessPolicyProvider: (() -> CallAccessPolicy)?
 
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "ConferenceHost")
-    private let audioEngine = AudioEngine()
+    private let audioEngine: AudioEngine
+    private let speexCodec = SpeexCodec()
     private var audioSocket: BoundUDPSocket?
     private var controlSocket: BoundUDPSocket?
     private var audioReceiveTask: Task<Void, Never>?
@@ -83,23 +102,29 @@ final class EchoLinkConferenceHostService: ObservableObject {
     var onUnmonitoredReceivedPCM: (@MainActor ([Int16]) -> Void)?
     private var localCallsign = ""
     private var ports = Ports.echolink
-    private var voiceSequence: UInt16 = 0
-    private var voiceTimestamp: UInt32 = 0
+    private var peerVoiceClocks: [UUID: PeerVoiceClock] = [:]
     private var generation: UInt64 = 0
     private var isMonitoringAudio = false
     private let localTalkerID = UUID()
     private var captureStartTask: Task<Void, Never>?
     private var captureStopTask: Task<Void, Never>?
     private var audioSendTask: Task<Void, Never>?
-    private var queuedLocalAudio: [Data] = []
+    private var queuedLocalAudio: [QueuedLocalAudioPacket] = []
     private var pendingLocalGSM = Data()
+    private var speexCapablePeerIDs: Set<UUID> = []
+    private var activeLocalTransmitCodecs: [UUID: EchoLinkVoiceCodec] = [:]
     private var transmissionGeneration: UInt64 = 0
     private let prepareCaptureInput: @MainActor () async -> Bool
     private var isLocalDemo = false
     private var localDemoIncomingTask: Task<Void, Never>?
     private var localDemoStation: Station?
 
-    init(prepareCaptureInput: (@MainActor () async -> Bool)? = nil) {
+    init(
+        audioEngine injectedAudioEngine: AudioEngine? = nil,
+        prepareCaptureInput: (@MainActor () async -> Bool)? = nil
+    ) {
+        let audioEngine = injectedAudioEngine ?? AudioEngine()
+        self.audioEngine = audioEngine
         self.prepareCaptureInput = prepareCaptureInput ?? { [audioEngine] in
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
             await audioEngine.prepareCaptureInput()
@@ -225,8 +250,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             self.pendingCall = nil
             self.isLocalDemo = false
             self.localDemoStation = nil
-            self.voiceSequence = 0
-            self.voiceTimestamp = 0
+            self.peerVoiceClocks = [:]
             self.isMonitoringAudio = monitorAudio
             self.floor.reset()
             self.sessions = []
@@ -235,11 +259,16 @@ final class EchoLinkConferenceHostService: ObservableObject {
             self.isTransmitting = false
             self.queuedLocalAudio = []
             self.pendingLocalGSM = Data()
+            self.speexCapablePeerIDs = []
+            self.activeLocalTransmitCodecs = [:]
             self.isRunning = true
             self.isStarting = false
             audioEngine.resetCodecState()
             audioEngine.onCapturedAudio = { [weak self] data in
-                self?.enqueueLocalAudio(data)
+                self?.enqueueLocalGSM(data)
+            }
+            audioEngine.onCapturedPCM = { [weak self] samples in
+                self?.enqueueLocalSpeex(samples)
             }
             if monitorAudio { audioEngine.startPlayback() }
             controlReceiveTask = Task { [weak self] in await self?.receiveControl() }
@@ -282,6 +311,10 @@ final class EchoLinkConferenceHostService: ObservableObject {
         audioSendTask = nil
         queuedLocalAudio.removeAll()
         pendingLocalGSM.removeAll()
+        activeLocalTransmitCodecs.removeAll()
+        speexCapablePeerIDs.removeAll()
+        peerVoiceClocks.removeAll()
+        speexCodec.resetEncoding()
         isTransmitting = false
         let departing = machine?.setEnabled(false) ?? []
         let bye = EchoLinkControlPacketCodec.buildBYEPacket(reason: "Conference closed")
@@ -302,6 +335,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
         audioSocket = nil
         audioEngine.stopAll()
         audioEngine.onCapturedAudio = nil
+        audioEngine.onCapturedPCM = nil
         isMonitoringAudio = false
         machine = nil
         directory = nil
@@ -317,7 +351,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
         logger.info("Incoming host stopped")
     }
 
-    /// Press-and-hold local PTT. Captured GSM is sent to every active peer.
+    /// Press-and-hold local PTT. Each active peer receives its negotiated codec.
     /// A remote speaker or an outgoing QSO prevents the Mac from taking the floor.
     func setPTT(active: Bool) {
         if active {
@@ -328,6 +362,14 @@ final class EchoLinkConferenceHostService: ObservableObject {
             let txGeneration = transmissionGeneration
             isTransmitting = true
             pendingLocalGSM.removeAll(keepingCapacity: true)
+            speexCodec.resetEncoding()
+            activeLocalTransmitCodecs = Dictionary(uniqueKeysWithValues:
+                (machine?.sessions ?? []).filter { $0.state == .active }.map { peer in
+                    let codec: EchoLinkVoiceCodec = speexCodec.isEncoderAvailable
+                        && speexCapablePeerIDs.contains(peer.id) ? .speex : .gsm
+                    return (peer.id, codec)
+                }
+            )
             _ = floor.listeners(
                 for: localTalkerID,
                 activeIDs: [localTalkerID] + (machine?.sessions.filter { $0.state == .active }.map(\.id) ?? []),
@@ -363,9 +405,12 @@ final class EchoLinkConferenceHostService: ObservableObject {
             captureStopTask = Task { [weak self] in
                 guard let self else { return }
                 _ = await self.audioEngine.stopCaptureAndFlushPendingBuffers()
+                guard self.transmissionGeneration == txGeneration else { return }
+                self.flushLocalSpeex()
                 if let sendTask = self.audioSendTask { await sendTask.value }
                 guard self.transmissionGeneration == txGeneration else { return }
                 self.pendingLocalGSM.removeAll(keepingCapacity: true)
+                self.activeLocalTransmitCodecs.removeAll(keepingCapacity: true)
                 self.floor.remove(self.localTalkerID)
                 self.isTransmitting = false
                 self.captureStopTask = nil
@@ -374,26 +419,69 @@ final class EchoLinkConferenceHostService: ObservableObject {
         }
     }
 
-    private func enqueueLocalAudio(_ encodedData: Data) {
+    private func enqueueLocalGSM(_ encodedData: Data) {
         guard isRunning, isTransmitting,
               let gsm = GSMCodec.stripHeader(encodedData), !gsm.isEmpty else { return }
         pendingLocalGSM.append(gsm)
         for payload in EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(buffer: &pendingLocalGSM) {
-            queuedLocalAudio.append(EchoLinkAudioPacketCodec.buildLegacyVoicePacket(
-                gsmPayload: payload, sequence: voiceSequence, timestamp: voiceTimestamp
-            ))
-            voiceSequence &+= 1
-            voiceTimestamp &+= UInt32(payload.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame)
+            let sampleCount = payload.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame
+            enqueueLocalPacket(payload, codec: .gsm, sampleCount: sampleCount)
         }
-        if audioSendTask == nil, !queuedLocalAudio.isEmpty {
+    }
+
+    private func enqueueLocalSpeex(_ samples: [Int16]) {
+        guard isRunning, isTransmitting, !samples.isEmpty,
+              activeLocalTransmitCodecs.values.contains(.speex) else { return }
+        guard let payloads = speexCodec.encode(samples) else {
+            activeLocalTransmitCodecs = activeLocalTransmitCodecs.mapValues { _ in .gsm }
+            return
+        }
+        for payload in payloads {
+            enqueueLocalSpeexPayload(payload)
+        }
+    }
+
+    private func flushLocalSpeex() {
+        guard activeLocalTransmitCodecs.values.contains(.speex),
+              let payload = speexCodec.flushEncoding() else { return }
+        enqueueLocalSpeexPayload(payload)
+    }
+
+    private func enqueueLocalSpeexPayload(_ payload: Data) {
+        enqueueLocalPacket(payload, codec: .speex, sampleCount: SpeexCodec.samplesPerPacket)
+    }
+
+    private func enqueueLocalPacket(_ payload: Data, codec: EchoLinkVoiceCodec, sampleCount: Int) {
+        let recipients = (machine?.sessions ?? []).compactMap { peer -> LocalAudioRecipient? in
+            guard peer.state == .active,
+                  (activeLocalTransmitCodecs[peer.id] ?? .gsm) == codec else { return nil }
+            return LocalAudioRecipient(id: peer.id, host: peer.sourceIPv4Address, port: peer.audioPort)
+        }
+        guard !recipients.isEmpty else { return }
+        if queuedLocalAudio.count >= 128 {
+            queuedLocalAudio.removeFirst(queuedLocalAudio.count - 127)
+        }
+        queuedLocalAudio.append(QueuedLocalAudioPacket(
+            payload: payload, codec: codec, sampleCount: sampleCount, recipients: recipients
+        ))
+        if audioSendTask == nil {
             audioSendTask = Task { [weak self] in await self?.drainLocalAudio() }
         }
     }
 
     private func drainLocalAudio() async {
         while !Task.isCancelled, isRunning, !queuedLocalAudio.isEmpty {
-            let packet = queuedLocalAudio.removeFirst()
-            await broadcastAudio(packet)
+            let queued = queuedLocalAudio.removeFirst()
+            for recipient in queued.recipients
+                where machine?.sessions.contains(where: { $0.id == recipient.id && $0.state == .active }) == true {
+                let packet = buildVoicePacket(
+                    payload: queued.payload,
+                    codec: queued.codec,
+                    sampleCount: queued.sampleCount,
+                    peerID: recipient.id
+                )
+                try? await audioSocket?.send(packet, to: recipient.host, port: recipient.port)
+            }
         }
         audioSendTask = nil
         if isRunning, !queuedLocalAudio.isEmpty {
@@ -408,6 +496,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             try? await controlSocket.send(bye, to: peer.sourceIPv4Address, port: peer.controlPort)
         }
         machine?.remove(id: id)
+        removePeerTransmitState(id: id)
         floor.remove(id)
         publishSessions()
         await syncHostAvailability()
@@ -421,7 +510,8 @@ final class EchoLinkConferenceHostService: ObservableObject {
         isAnsweringPendingCall = true
         defer { isAnsweringPendingCall = false }
         let acknowledgement = EchoLinkControlPacketCodec.buildSDESPacket(
-            callsign: localCallsign, audioPort: ports.audio
+            callsign: localCallsign, audioPort: ports.audio,
+            advertiseSpeex: speexCodec.isEncoderAvailable
         )
         do {
             if !isLocalDemo {
@@ -438,6 +528,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             }
         } catch {
             machine?.remove(id: pendingCall.id)
+            removePeerTransmitState(id: pendingCall.id)
             self.pendingCall = nil
             errorMessage = "Could not answer the incoming call."
             await syncHostAvailability()
@@ -451,6 +542,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
     private func declinePendingCall(reason: String) async {
         guard isPersonalMode, !isAnsweringPendingCall, let pendingCall else { return }
         machine?.remove(id: pendingCall.id)
+        removePeerTransmitState(id: pendingCall.id)
         self.pendingCall = nil
         let bye = EchoLinkControlPacketCodec.buildBYEPacket(reason: reason)
         try? await controlSocket?.send(bye, to: pendingCall.sourceIPv4Address,
@@ -542,6 +634,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
                     $0.sourceIPv4Address == datagram.sourceHost && $0.controlPort == datagram.sourcePort
                 }) else { continue }
                 machine?.remove(id: peer.id)
+                removePeerTransmitState(id: peer.id)
                 if pendingCall?.id == peer.id { pendingCall = nil }
                 floor.remove(peer.id)
                 publishSessions()
@@ -560,6 +653,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             $0.sourceIPv4Address == datagram.sourceHost && $0.controlPort == datagram.sourcePort
         }) {
             guard name.split(whereSeparator: \.isWhitespace).first?.uppercased() == existing.callsign else { return }
+            if info.supportsSpeex { speexCapablePeerIDs.insert(existing.id) }
             machine?.recordActivity(id: existing.id, now: now)
             return
         }
@@ -598,6 +692,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             try? await controlSocket?.send(bye, to: datagram.sourceHost, port: datagram.sourcePort)
             return
         }
+        if info.supportsSpeex { speexCapablePeerIDs.insert(admitted.id) }
 
         if isPersonalMode {
             pendingCall = admitted
@@ -606,7 +701,8 @@ final class EchoLinkConferenceHostService: ObservableObject {
         }
 
         let acknowledgement = EchoLinkControlPacketCodec.buildSDESPacket(
-            callsign: localCallsign, audioPort: ports.audio
+            callsign: localCallsign, audioPort: ports.audio,
+            advertiseSpeex: speexCodec.isEncoderAvailable
         )
         do {
             try await controlSocket?.send(acknowledgement, to: datagram.sourceHost, port: datagram.sourcePort)
@@ -618,6 +714,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             logger.info("Admitted conference peer callsign=\(admitted.callsign, privacy: .public)")
         } catch {
             machine?.remove(id: admitted.id)
+            removePeerTransmitState(id: admitted.id)
             publishSessions()
         }
     }
@@ -684,12 +781,11 @@ final class EchoLinkConferenceHostService: ObservableObject {
         } else {
             onUnmonitoredReceivedPCM?(decoded.samples)
         }
-        let packet = EchoLinkAudioPacketCodec.buildLegacyVoicePacket(
-            gsmPayload: gsm, sequence: voiceSequence, timestamp: voiceTimestamp
-        )
-        voiceSequence &+= 1
-        voiceTimestamp &+= UInt32(gsm.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame)
+        let sampleCount = gsm.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame
         for listener in active where listenerIDs.contains(listener.id) {
+            let packet = buildVoicePacket(
+                payload: gsm, codec: .gsm, sampleCount: sampleCount, peerID: listener.id
+            )
             try? await audioSocket?.send(packet, to: listener.sourceIPv4Address, port: listener.audioPort)
         }
     }
@@ -713,7 +809,8 @@ final class EchoLinkConferenceHostService: ObservableObject {
             if secondsSinceKeepalive >= 20 {
                 secondsSinceKeepalive = 0
                 let keepalive = EchoLinkControlPacketCodec.buildSDESPacket(
-                    callsign: localCallsign, audioPort: ports.audio
+                    callsign: localCallsign, audioPort: ports.audio,
+                    advertiseSpeex: speexCodec.isEncoderAvailable
                 )
                 for peer in machine?.sessions ?? [] where peer.state == .active {
                     try? await controlSocket?.send(keepalive, to: peer.sourceIPv4Address, port: peer.controlPort)
@@ -755,7 +852,47 @@ final class EchoLinkConferenceHostService: ObservableObject {
         sessions = machine?.sessions.filter { $0.state == .active } ?? []
         let activeIDs = Set(sessions.map(\.id))
         peerAudioCodecs = peerAudioCodecs.filter { activeIDs.contains($0.key) }
+        let admittedIDs = Set((machine?.sessions ?? []).map(\.id))
+        speexCapablePeerIDs.formIntersection(admittedIDs)
+        activeLocalTransmitCodecs = activeLocalTransmitCodecs.filter { admittedIDs.contains($0.key) }
+        peerVoiceClocks = peerVoiceClocks.filter { admittedIDs.contains($0.key) }
+        queuedLocalAudio = queuedLocalAudio.compactMap { queued in
+            let recipients = queued.recipients.filter { admittedIDs.contains($0.id) }
+            return recipients.isEmpty ? nil : QueuedLocalAudioPacket(
+                payload: queued.payload, codec: queued.codec,
+                sampleCount: queued.sampleCount, recipients: recipients
+            )
+        }
         publishTalker()
+    }
+
+    private func removePeerTransmitState(id: UUID) {
+        speexCapablePeerIDs.remove(id)
+        activeLocalTransmitCodecs.removeValue(forKey: id)
+        peerVoiceClocks.removeValue(forKey: id)
+        queuedLocalAudio = queuedLocalAudio.compactMap { queued in
+            let recipients = queued.recipients.filter { $0.id != id }
+            return recipients.isEmpty ? nil : QueuedLocalAudioPacket(
+                payload: queued.payload, codec: queued.codec,
+                sampleCount: queued.sampleCount, recipients: recipients
+            )
+        }
+    }
+
+    private func buildVoicePacket(
+        payload: Data,
+        codec: EchoLinkVoiceCodec,
+        sampleCount: Int,
+        peerID: UUID
+    ) -> Data {
+        var clock = peerVoiceClocks[peerID] ?? PeerVoiceClock()
+        let packet = EchoLinkAudioPacketCodec.buildLegacyVoicePacket(
+            gsmPayload: payload, sequence: clock.sequence, timestamp: clock.timestamp, codec: codec
+        )
+        clock.sequence &+= 1
+        clock.timestamp &+= UInt32(max(0, sampleCount))
+        peerVoiceClocks[peerID] = clock
+        return packet
     }
 
     private func publishTalker() {
@@ -795,12 +932,19 @@ final class EchoLinkConferenceHostService: ObservableObject {
         isTransmitting = false
         queuedLocalAudio = []
         pendingLocalGSM = Data()
+        speexCapablePeerIDs = []
+        activeLocalTransmitCodecs = [:]
+        peerVoiceClocks = [:]
+        speexCodec.resetEncoding()
         floor.reset()
         isStarting = false
         isRunning = true
         audioEngine.resetCodecState()
         audioEngine.onCapturedAudio = { [weak self] data in
-            self?.enqueueLocalAudio(data)
+            self?.enqueueLocalGSM(data)
+        }
+        audioEngine.onCapturedPCM = { [weak self] samples in
+            self?.enqueueLocalSpeex(samples)
         }
         if monitorAudio { audioEngine.startPlayback() }
 

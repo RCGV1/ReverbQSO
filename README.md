@@ -8,7 +8,7 @@ Browse repeaters and links, call another operator, or use **Call CQ** to find so
 
 - **Station browser:** separate Nodes and People, search, sorting, country filters, favorites and reconnectable history.
 - **Call CQ:** language, country and station-type preferences; queue cancellation; automatic handoff to the normal QSO interface.
-- **Voice and text:** hold-to-talk PTT, receive/transmit meters, microphone gain, audio routing, participant lists and chat. GSM, G.711 and Speex reception; GSM transmission.
+- **Voice and text:** hold-to-talk PTT, receive/transmit meters, microphone gain, audio routing, participant lists and chat. GSM, G.711 and Speex reception. Speex transmission is selected automatically when the peer advertises support, with GSM fallback for other peers.
 - **Recordings:** explicitly start and stop a QSO recording, play it back, export a WAV file on iPhone/iPad/Mac, or delete it. Incoming personal calls can also be recorded. Silence between audio turns is omitted; each recording is limited to one hour of audio.
 - **Call restrictions:** independently apply callsign, country and station-type rules to incoming and outgoing calls, with an optional callsign allow-list.
 - **Network options:** Direct UDP, Relay, Public Proxy, Custom Proxy and Automatic selection.
@@ -24,7 +24,7 @@ Country browsing follows ITU callsign allocations, matching EchoLink’s country
 
 Direct mode needs UDP **5198/5199** to be reachable. Relay provides outgoing calls and cannot receive incoming calls. A public or custom proxy can help on networks that block direct UDP. Personal incoming calls and conference hosting currently require Direct mode; the iPhone incoming listener operates while the app is in the foreground.
 
-Radio hardware control and full Sysop operation are outside the current scope. Dedicated conference-server registration and proxy-hosted incoming calls are not implemented. CQ wire behavior is covered by offline tests; live matching with another operator has not been verified. Speex reception is covered by encoded-speech and malformed-packet tests; external station interoperability still needs field testing.
+Radio hardware control and full Sysop operation are outside the current scope. Dedicated conference-server registration and proxy-hosted incoming calls are not implemented. CQ wire behavior is covered by offline tests; live matching with another operator has not been verified. Speex transmit/receive behavior is covered by encoded-speech, malformed-packet and localhost transport tests; external station interoperability still needs field testing.
 
 ## Build
 

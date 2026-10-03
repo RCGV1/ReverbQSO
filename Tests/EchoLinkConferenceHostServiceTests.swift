@@ -62,6 +62,199 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         await host.stop()
     }
 
+    func testLocalPTTSendsSpeexOnlyToCapablePeerAndFlushesOneShortPacket() async throws {
+        let audioEngine = AudioEngine()
+        let stations = [
+            Station(callsign: "N0SPX", ipAddress: "127.0.0.1"),
+            Station(callsign: "N0GSM", ipAddress: "127.0.0.1")
+        ]
+        let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { stations })
+        directory.isLoggedIn = true
+        let host = EchoLinkConferenceHostService(
+            audioEngine: audioEngine,
+            prepareCaptureInput: {
+                try? await Task.sleep(for: .seconds(60))
+                return false
+            }
+        )
+        let audioPort = try availablePort()
+        let controlPort = try availablePort()
+        await host.start(
+            callsign: "W6HOST", directory: directory, outbound: EchoLinkConnectionService(),
+            policy: .init(maximumPeers: 2),
+            ports: .init(audio: audioPort, control: controlPort), monitorAudio: false
+        )
+        guard host.isRunning else { return XCTFail(host.errorMessage ?? "Host failed to start") }
+        defer { Task { await host.stop() } }
+
+        let speexAudio = try BoundUDPSocket(localPort: 0)
+        let speexControl = try BoundUDPSocket(localPort: 0)
+        let gsmAudio = try BoundUDPSocket(localPort: 0)
+        let gsmControl = try BoundUDPSocket(localPort: 0)
+        defer {
+            speexAudio.close(); speexControl.close()
+            gsmAudio.close(); gsmControl.close()
+        }
+        try await joinPeer(
+            callsign: "N0SPX", audio: speexAudio, control: speexControl,
+            hostControlPort: controlPort, advertiseSpeex: true
+        )
+        try await joinPeer(
+            callsign: "N0GSM", audio: gsmAudio, control: gsmControl,
+            hostControlPort: controlPort, advertiseSpeex: false
+        )
+        try await waitUntil { host.sessions.count == 2 }
+
+        let forwardedPCM = (0..<640).map { Int16(($0 % 32) * 300 - 4_800) }
+        let forwardedPayload = try XCTUnwrap(GSMCodec.stripHeader(GSMCodec().encode(forwardedPCM)))
+        try await gsmAudio.send(
+            EchoLinkAudioPacketCodec.buildLegacyVoicePacket(gsmPayload: forwardedPayload, sequence: 77),
+            to: "127.0.0.1", port: audioPort
+        )
+        let forwarded = try await receiveVoice(speexAudio, payloadType: 3)
+        XCTAssertEqual(Data(forwarded.data[2...3]), Data([0, 0]))
+        XCTAssertEqual(Data(forwarded.data[4...7]), Data([0, 0, 0, 0]))
+        try await waitUntil { host.talkerCallsign == nil }
+
+        host.setPTT(active: true)
+        let samples = (0..<700).map { Int16(($0 % 80) * 200 - 8_000) }
+        audioEngine.encodeTransmitPCM(samples)
+        host.setPTT(active: false)
+
+        let firstSpeex = try await receiveVoice(speexAudio, payloadType: 0x96)
+        let finalSpeex = try await receiveVoice(speexAudio, payloadType: 0x96)
+        let gsm = try await receiveVoice(gsmAudio, payloadType: 3)
+        XCTAssertEqual(Data(firstSpeex.data[2...3]), Data([0, 1]))
+        XCTAssertEqual(Data(firstSpeex.data[4...7]), Data([0, 0, 2, 128]))
+        XCTAssertEqual(Data(finalSpeex.data[2...3]), Data([0, 2]))
+        XCTAssertEqual(Data(finalSpeex.data[4...7]), Data([0, 0, 5, 0]))
+        XCTAssertEqual(Data(gsm.data[4...7]), Data([0, 0, 0, 0]))
+        guard case .gsm(let gsmPayload) = EchoLinkAudioPacketCodec.parseIncomingAudioPacket(gsm.data) else {
+            return XCTFail("Expected GSM packet")
+        }
+        XCTAssertEqual(gsmPayload.count, GSMCodec.encodedFrameSize * 4)
+        let speexDecoder = SpeexCodec()
+        XCTAssertEqual(speexDecoder.decodePacket(Data(firstSpeex.data.dropFirst(12)))?.count, 640)
+        XCTAssertEqual(speexDecoder.decodePacket(Data(finalSpeex.data.dropFirst(12)))?.count, 640)
+        try await waitUntil { !host.isTransmitting }
+
+        host.setPTT(active: true)
+        let exactPacket = Array(samples.prefix(640))
+        audioEngine.encodeTransmitPCM(exactPacket)
+        let onlySpeex = try await receiveVoice(speexAudio, payloadType: 0x96)
+        XCTAssertEqual(Data(onlySpeex.data[2...3]), Data([0, 3]))
+        XCTAssertEqual(Data(onlySpeex.data[4...7]), Data([0, 0, 7, 128]))
+        host.setPTT(active: false)
+        try await waitUntil { !host.isTransmitting }
+        let receivedExtraVoice = try await receivesVoice(speexAudio, within: .milliseconds(250))
+        XCTAssertFalse(receivedExtraVoice, "An exact 640-sample burst must not flush an extra silent packet")
+    }
+
+    func testSpeexCapabilityUpdateTakesEffectOnNextPTTInsteadOfMidBurst() async throws {
+        let audioEngine = AudioEngine()
+        let station = Station(callsign: "N0PEER", ipAddress: "127.0.0.1")
+        let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [station] })
+        directory.isLoggedIn = true
+        let host = EchoLinkConferenceHostService(
+            audioEngine: audioEngine,
+            prepareCaptureInput: {
+                try? await Task.sleep(for: .seconds(60))
+                return false
+            }
+        )
+        let audioPort = try availablePort()
+        let controlPort = try availablePort()
+        await host.start(
+            callsign: "W6HOST", directory: directory, outbound: EchoLinkConnectionService(),
+            policy: .init(maximumPeers: 2),
+            ports: .init(audio: audioPort, control: controlPort), monitorAudio: false
+        )
+        guard host.isRunning else { return XCTFail(host.errorMessage ?? "Host failed to start") }
+        defer { Task { await host.stop() } }
+
+        let peerAudio = try BoundUDPSocket(localPort: 0)
+        let peerControl = try BoundUDPSocket(localPort: 0)
+        defer { peerAudio.close(); peerControl.close() }
+        try await joinPeer(
+            callsign: "N0PEER", audio: peerAudio, control: peerControl,
+            hostControlPort: controlPort, advertiseSpeex: false
+        )
+        try await waitUntil { host.sessions.count == 1 }
+
+        let samples = (0..<640).map { Int16(($0 % 64) * 250 - 8_000) }
+        host.setPTT(active: true)
+        try await peerControl.send(
+            EchoLinkControlPacketCodec.buildSDESPacket(
+                callsign: "N0PEER", audioPort: peerAudio.actualLocalPort, advertiseSpeex: true
+            ),
+            to: "127.0.0.1", port: controlPort
+        )
+        try await Task.sleep(for: .milliseconds(50))
+        audioEngine.encodeTransmitPCM(samples)
+        let firstBurst = try await receiveVoice(peerAudio, payloadType: 3)
+        XCTAssertEqual(firstBurst.data[1], 3)
+        host.setPTT(active: false)
+        try await waitUntil { !host.isTransmitting }
+
+        host.setPTT(active: true)
+        audioEngine.encodeTransmitPCM(samples)
+        let nextBurst = try await receiveVoice(peerAudio, payloadType: 0x96)
+        XCTAssertEqual(nextBurst.data[1], 0x96)
+        host.setPTT(active: false)
+        try await waitUntil { !host.isTransmitting }
+    }
+
+    func testPersonalIncomingCallRetainsSpeexCapabilityAfterAnswer() async throws {
+        let audioEngine = AudioEngine()
+        let station = Station(callsign: "N0CALL", ipAddress: "127.0.0.1")
+        let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [station] })
+        directory.isLoggedIn = true
+        let host = EchoLinkConferenceHostService(
+            audioEngine: audioEngine,
+            prepareCaptureInput: {
+                try? await Task.sleep(for: .seconds(60))
+                return false
+            }
+        )
+        let audioPort = try availablePort()
+        let controlPort = try availablePort()
+        await host.startPersonal(
+            callsign: "W6HOST", directory: directory, outbound: EchoLinkConnectionService(),
+            ports: .init(audio: audioPort, control: controlPort), monitorAudio: false
+        )
+        guard host.isRunning else { return XCTFail(host.errorMessage ?? "Personal host failed to start") }
+        defer { Task { await host.stop() } }
+
+        let peerAudio = try BoundUDPSocket(localPort: 0)
+        let peerControl = try BoundUDPSocket(localPort: 0)
+        defer { peerAudio.close(); peerControl.close() }
+        try await peerControl.send(
+            EchoLinkControlPacketCodec.buildSDESPacket(
+                callsign: "N0CALL", audioPort: peerAudio.actualLocalPort, advertiseSpeex: true
+            ),
+            to: "127.0.0.1", port: controlPort
+        )
+        try await waitUntil { host.pendingCall?.callsign == "N0CALL" }
+        await host.acceptPendingCall()
+        let acknowledgement = try await receive(peerControl)
+        let acknowledgementInfo = try XCTUnwrap(
+            EchoLinkControlPacketCodec.parseEvents(from: acknowledgement.data).compactMap { event in
+                if case .sdes(let info) = event { return info }
+                return nil
+            }.first
+        )
+        XCTAssertTrue(acknowledgementInfo.supportsSpeex)
+        try await waitUntil { host.sessions.count == 1 }
+
+        let samples = (0..<640).map { Int16(($0 % 40) * 300 - 6_000) }
+        host.setPTT(active: true)
+        audioEngine.encodeTransmitPCM(samples)
+        let voice = try await receiveVoice(peerAudio, payloadType: 0x96)
+        XCTAssertEqual(voice.data[1], 0x96)
+        host.setPTT(active: false)
+        try await waitUntil { !host.isTransmitting }
+    }
+
     func testPersonalCallRingsUntilAcceptedAndRejectsAnotherCaller() async throws {
         let stations = [
             Station(callsign: "N0AAA", ipAddress: "127.0.0.1"),
@@ -323,5 +516,58 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
             if predicate(datagram.data) { return datagram }
         }
         throw TestTimeout.expired
+    }
+
+    private func joinPeer(
+        callsign: String,
+        audio: BoundUDPSocket,
+        control: BoundUDPSocket,
+        hostControlPort: UInt16,
+        advertiseSpeex: Bool
+    ) async throws {
+        try await control.send(
+            EchoLinkControlPacketCodec.buildSDESPacket(
+                callsign: callsign,
+                audioPort: audio.actualLocalPort,
+                advertiseSpeex: advertiseSpeex
+            ),
+            to: "127.0.0.1", port: hostControlPort
+        )
+        let acknowledgement = try await receive(control)
+        let info = try XCTUnwrap(
+            EchoLinkControlPacketCodec.parseEvents(from: acknowledgement.data).compactMap { event in
+                if case .sdes(let info) = event { return info }
+                return nil
+            }.first
+        )
+        XCTAssertTrue(info.supportsSpeex)
+    }
+
+    private func receiveVoice(
+        _ socket: BoundUDPSocket,
+        payloadType: UInt8
+    ) async throws -> BoundUDPSocket.Datagram {
+        try await receiveUntil(socket) { data in
+            data.count >= 12 && data[data.startIndex] == 0xC0 && data[data.startIndex + 1] == payloadType
+        }
+    }
+
+    private func receivesVoice(
+        _ socket: BoundUDPSocket,
+        within duration: Duration
+    ) async throws -> Bool {
+        try await withThrowingTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                let datagram = try await socket.receive(maximumBytes: 4_096)
+                return EchoLinkAudioPacketCodec.parseIncomingAudioPacket(datagram.data) != nil
+            }
+            group.addTask {
+                try await Task.sleep(for: duration)
+                return false
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
     }
 }

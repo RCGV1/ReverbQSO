@@ -33,7 +33,7 @@ enum EchoLinkAudioPacketCodec {
     ///
     /// Header layout:
     /// - byte 0: version (0xC0)
-    /// - byte 1: payload type (0x03 for GSM)
+    /// - byte 1: payload type (0x03 for GSM, 0x96 for legacy Speex)
     /// - bytes 2-3: sequence number (big-endian)
     /// - bytes 4-7: RTP timestamp (big-endian, in 8 kHz sample ticks)
     /// - bytes 8-11: SSRC (legacy clients often use zero)
@@ -41,10 +41,11 @@ enum EchoLinkAudioPacketCodec {
     /// Pass a monotonically increasing `timestamp` so receiving jitter buffers
     /// can correctly schedule playout. The increment per packet equals the number
     /// of PCM samples contained: `GSMCodec.samplesPerFrame × framesInPacket`.
-    static func buildLegacyVoicePacket(gsmPayload: Data, sequence: UInt16, timestamp: UInt32 = 0) -> Data {
+    static func buildLegacyVoicePacket(gsmPayload: Data, sequence: UInt16, timestamp: UInt32 = 0,
+                                       codec: EchoLinkVoiceCodec = .gsm) -> Data {
         var packet = Data(capacity: legacyVoiceHeaderLength + gsmPayload.count)
         packet.append(0xC0)
-        packet.append(0x03)
+        packet.append(codec.payloadType)
         packet.append(UInt8((sequence >> 8) & 0xFF))
         packet.append(UInt8(sequence & 0xFF))
         packet.append(UInt8((timestamp >> 24) & 0xFF))

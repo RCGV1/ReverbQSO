@@ -22,12 +22,83 @@ final class SpeexCodecTests: XCTestCase {
         XCTAssertNil(codec.decodePacket(Data(repeating: 0, count: 513)))
     }
 
-    func testResetStartsIndependentSession() throws {
+    func testResetStartsIndependentReceiveAndTransmitSession() throws {
         let codec = SpeexCodec()
         let original = try XCTUnwrap(codec.decodePacket(Self.fixture))
         _ = codec.decodePacket(Self.fixture)
+        _ = codec.encode(Self.sineSamples(count: 640))
+        _ = codec.encode([1, 2, 3])
         codec.reset()
         XCTAssertEqual(codec.decodePacket(Self.fixture), original)
+        XCTAssertNil(codec.flushEncoding())
+        let resetPacket = try XCTUnwrap(try XCTUnwrap(codec.encode(Self.sineSamples(count: 640))).first)
+        let freshPacket = try XCTUnwrap(try XCTUnwrap(SpeexCodec().encode(Self.sineSamples(count: 640))).first)
+        XCTAssertEqual(resetPacket, freshPacket)
+    }
+
+    func testEncodeProducesDecodableFourFramePacket() throws {
+        let input = Self.sineSamples(count: 640)
+        let codec = SpeexCodec()
+
+        XCTAssertTrue(codec.isEncoderAvailable)
+        let packets = try XCTUnwrap(codec.encode(input))
+
+        XCTAssertEqual(packets.count, 1)
+        XCTAssertEqual(packets[0].count, 150)
+        let decoded = try XCTUnwrap(SpeexCodec().decodePacket(packets[0]))
+        XCTAssertEqual(decoded.count, input.count)
+        XCTAssertGreaterThan(decoded.reduce(0) { $0 + abs(Int($1)) }, 10_000)
+    }
+
+    func testIrregularChunksProduceSamePacketsAsContiguousInput() throws {
+        let input = Self.sineSamples(count: 1_517)
+        let contiguous = try XCTUnwrap(SpeexCodec().encode(input))
+        let chunkedCodec = SpeexCodec()
+        var chunked: [Data] = []
+        var offset = 0
+        for count in [1, 159, 3, 477, 640, 237] {
+            let end = offset + count
+            chunked += try XCTUnwrap(chunkedCodec.encode(Array(input[offset..<end])))
+            offset = end
+        }
+
+        XCTAssertEqual(offset, input.count)
+        XCTAssertEqual(chunked, contiguous)
+        XCTAssertEqual(chunked.count, 2)
+    }
+
+    func testFlushPadsFinalShortPacketAndConsumesRemainder() throws {
+        let shortInput = Self.sineSamples(count: 137)
+        let streamingCodec = SpeexCodec()
+        XCTAssertEqual(try XCTUnwrap(streamingCodec.encode(shortInput)), [])
+
+        let flushed = try XCTUnwrap(streamingCodec.flushEncoding())
+        XCTAssertNil(streamingCodec.flushEncoding())
+
+        let padded = shortInput + [Int16](repeating: 0, count: 640 - shortInput.count)
+        let expected = try XCTUnwrap(try XCTUnwrap(SpeexCodec().encode(padded)).first)
+        XCTAssertEqual(flushed, expected)
+    }
+
+    func testResetEncodingClearsRemainderAndPreservesDecoderState() throws {
+        let codec = SpeexCodec()
+        let decoderControl = SpeexCodec()
+        _ = codec.decodePacket(Self.fixture)
+        _ = decoderControl.decodePacket(Self.fixture)
+        XCTAssertEqual(try XCTUnwrap(codec.encode(Self.sineSamples(count: 640))).count, 1)
+        XCTAssertEqual(try XCTUnwrap(codec.encode([1, 2, 3])), [])
+
+        codec.resetEncoding()
+
+        XCTAssertNil(codec.flushEncoding())
+        XCTAssertEqual(codec.decodePacket(Self.fixture), decoderControl.decodePacket(Self.fixture))
+        let resetPacket = try XCTUnwrap(try XCTUnwrap(codec.encode(Self.sineSamples(count: 640))).first)
+        let freshPacket = try XCTUnwrap(try XCTUnwrap(SpeexCodec().encode(Self.sineSamples(count: 640))).first)
+        XCTAssertEqual(resetPacket, freshPacket)
+    }
+
+    private static func sineSamples(count: Int) -> [Int16] {
+        (0..<count).map { Int16(10_000 * sin(Double($0) * 0.1728)) }
     }
 }
 

@@ -34,6 +34,13 @@ struct EchoLinkSDESInfo: Equatable {
     var priv: String?
     var privateItems: [String] = []
 
+    var supportsSpeex: Bool {
+        (privateItems + [priv].compactMap { $0 }).contains { item in
+            item.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" })
+                .contains { $0 == "SPEEX" }
+        }
+    }
+
     var preferredDisplayName: String? {
         if let name {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,7 +87,8 @@ enum EchoLinkControlPacketCodec {
         phone: String = "08:30",
         includePadding: Bool = false,
         rtpVersion: UInt8 = 3,
-        audioPort: UInt16 = 5198
+        audioPort: UInt16 = 5198,
+        advertiseSpeex: Bool = true
     ) -> Data {
         var packet = Data()
 
@@ -107,8 +115,11 @@ enum EchoLinkControlPacketCodec {
         if let tool, !tool.isEmpty {
             appendSDESItem(type: sdesTypeTOOL, text: tool, to: &sdesBody)
         }
-        // Current EchoLink clients advertise the local audio port and GSM mode
-        // using RFC 3550 PRIV items (one-byte prefix length, then prefix/value).
+        // EchoLib peers inspect only the first PRIV item. The legacy SPEEX
+        // capability is bare ASCII, so it must precede RFC-shaped port/pad items.
+        if advertiseSpeex {
+            appendSDESItem(type: sdesTypePRIV, text: "SPEEX", to: &sdesBody)
+        }
         appendSDESPrivateItem(prefix: "P", value: String(audioPort), to: &sdesBody)
         appendSDESPrivateItem(prefix: "D", value: "0", to: &sdesBody)
         sdesBody.append(sdesTypeEnd)
@@ -577,7 +588,9 @@ final class EchoLinkConnectionService: ObservableObject {
     private var controlSocket: BoundUDPSocket?
     private var proxySession: EchoLinkProxySession?
     private var relayClient: EchoLinkRelayClient?
-    private let audioEngine = AudioEngine()
+    private let audioEngine: AudioEngine
+    @Published private(set) var transmitCodec: EchoLinkVoiceCodec = .gsm
+    private var activeTransmitCodec: EchoLinkVoiceCodec = .gsm
     private let mutedActivityCodec = GSMCodec()
     private var cancellables = Set<AnyCancellable>()
     private var keepAliveTask: Task<Void, Never>?
@@ -645,7 +658,7 @@ final class EchoLinkConnectionService: ObservableObject {
         let baseReady = session?.state == .connected && !isRemoteTransmitting && !isSendingDTMF
             && hasTransmitPermission
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-        return baseReady && isCaptureReady
+        return baseReady && isCaptureReady && !audioEngine.isPreparingCapture
 #else
         return baseReady
 #endif
@@ -674,8 +687,10 @@ final class EchoLinkConnectionService: ObservableObject {
         },
         networkConfigurationProvider: @escaping @MainActor () -> EchoLinkProxyConfiguration = { EchoLinkProxyConfiguration.load() },
         localDemoPlayback: (@MainActor (Data) -> Void)? = nil,
-        localDemoAnnouncement: @escaping @MainActor () -> [Data] = { LocalDemoAnnouncement.echoTestPackets() }
+        localDemoAnnouncement: @escaping @MainActor () -> [Data] = { LocalDemoAnnouncement.echoTestPackets() },
+        audioEngine injectedAudioEngine: AudioEngine? = nil
     ) {
+        self.audioEngine = injectedAudioEngine ?? AudioEngine()
         self.remoteVoiceActivityHold = remoteVoiceActivityHold
         self.relayClientFactory = relayClientFactory
         self.selectedRelayClientFactory = selectedRelayClientFactory
@@ -695,9 +710,11 @@ final class EchoLinkConnectionService: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$audioOutputPreference)
         audioEngine.$isCaptureReady
+            .combineLatest(audioEngine.$isPreparingCapture)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] ready in
+            .sink { [weak self] state in
                 guard let self else { return }
+                let ready = state.0 && !state.1
                 self.isCaptureReady = ready
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
                 guard self.session?.state == .connected, !self.isBackgroundMuted else { return }
@@ -818,6 +835,8 @@ final class EchoLinkConnectionService: ObservableObject {
         error = nil
         audioStatusMessage = nil
         remotePadAllowed = false
+        transmitCodec = .gsm
+        activeTransmitCodec = .gsm
         isSendingDTMF = false
         lastRemoteChatBody = nil
         lastRemoteChatAt = nil
@@ -1140,6 +1159,13 @@ final class EchoLinkConnectionService: ObservableObject {
             captureStopGeneration &+= 1
             captureStopTask?.cancel()
             captureStopTask = nil
+            let selectedCodec: EchoLinkVoiceCodec = !isLocalDemoMode && transmitCodec == .speex
+                && audioEngine.isSpeexTransmitAvailable ? .speex : .gsm
+            guard audioEngine.setTransmitCodec(selectedCodec) else {
+                desiredPTTActive = false
+                return
+            }
+            activeTransmitCodec = selectedCodec
             currentSession.isPTTActive = true
             session = currentSession
             if isLocalDemoMode { localDemoAudio.clear() }
@@ -1544,7 +1570,8 @@ final class EchoLinkConnectionService: ObservableObject {
     private func buildSDESPacket(callsign: String) -> Data {
         EchoLinkControlPacketCodec.buildSDESPacket(
             callsign: callsign,
-            includePadding: true
+            includePadding: true,
+            advertiseSpeex: audioEngine.isSpeexTransmitAvailable
         )
     }
 
@@ -1609,9 +1636,15 @@ final class EchoLinkConnectionService: ObservableObject {
               currentSession.state == .connected,
               currentSession.isPTTActive,
               (isLocalDemoMode || audioSocket != nil || proxySession != nil || relayClient != nil),
-              (!isLocalDemoMode || hasTransmitPermission),
-              let gsmPayload = GSMCodec.stripHeader(data),
-              !gsmPayload.isEmpty else { return }
+              (!isLocalDemoMode || hasTransmitPermission) else { return }
+
+        if activeTransmitCodec == .speex {
+            guard !data.isEmpty, data.count <= 512 else { return }
+            enqueueVoicePayload(data, sessionID: currentSession.id,
+                                remoteHost: currentSession.station.ipAddress, codec: .speex)
+            return
+        }
+        guard let gsmPayload = GSMCodec.stripHeader(data), !gsmPayload.isEmpty else { return }
 
         pendingOutgoingGSMPayload.append(gsmPayload)
         let packetPayloads = EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(
@@ -1627,7 +1660,8 @@ final class EchoLinkConnectionService: ObservableObject {
         }
     }
 
-    private func enqueueVoicePayload(_ payload: Data, sessionID: UUID, remoteHost: String) {
+    private func enqueueVoicePayload(_ payload: Data, sessionID: UUID, remoteHost: String,
+                                     codec: EchoLinkVoiceCodec = .gsm) {
         if isLocalDemoMode {
             guard session?.id == sessionID, hasTransmitPermission else { return }
             if !localDemoAudio.append(payload) {
@@ -1638,11 +1672,13 @@ final class EchoLinkConnectionService: ObservableObject {
         let packet = EchoLinkAudioPacketCodec.buildLegacyVoicePacket(
             gsmPayload: payload,
             sequence: rtpSequence,
-            timestamp: rtpTimestamp
+            timestamp: rtpTimestamp,
+            codec: codec
         )
         rtpSequence &+= 1
-        let framesInPacket = payload.count / GSMCodec.encodedFrameSize
-        rtpTimestamp &+= UInt32(framesInPacket * GSMCodec.samplesPerFrame)
+        let samplesInPacket = codec == .speex ? SpeexCodec.samplesPerPacket
+            : payload.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame
+        rtpTimestamp &+= UInt32(samplesInPacket)
         queuedOutgoingAudioPackets.append(
             OutgoingAudioPacket(data: packet, sessionID: sessionID, remoteHost: remoteHost)
         )
@@ -1901,6 +1937,9 @@ final class EchoLinkConnectionService: ObservableObject {
         for event in events {
             switch event {
             case .sdes(let sdes):
+                if sdes.supportsSpeex, audioEngine.isSpeexTransmitAvailable {
+                    transmitCodec = .speex
+                }
                 if sdes.privateItems.contains("D1") {
                     remotePadAllowed = true
                 } else if sdes.privateItems.contains("D0") {
@@ -2388,6 +2427,8 @@ final class EchoLinkConnectionService: ObservableObject {
         dtmfTask = nil
         isSendingDTMF = false
         remotePadAllowed = false
+        transmitCodec = .gsm
+        activeTransmitCodec = .gsm
         desiredPTTActive = false
         captureStopGeneration &+= 1
         captureStopTask?.cancel()

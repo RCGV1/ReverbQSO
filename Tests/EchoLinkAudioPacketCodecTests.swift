@@ -551,7 +551,7 @@ final class EchoLinkAudioPacketCodecTests: XCTestCase {
         }
         XCTAssertEqual(sdes.phone, "6DD56173")
         XCTAssertEqual(sdes.tool, "ReverbQSO/1.0")
-        XCTAssertEqual(sdes.privateItems, ["P5198", "D0"])
+        XCTAssertEqual(sdes.privateItems, ["SPEEX", "P5198", "D0"])
     }
 
     func testBuildSDESPacketSupportsVersion2ForCompatibility() {
@@ -574,7 +574,7 @@ final class EchoLinkAudioPacketCodecTests: XCTestCase {
         XCTAssertEqual(sdes.email, "CALLSIGN")
         XCTAssertEqual(sdes.phone, "08:30")
         XCTAssertEqual(sdes.tool, "ReverbQSO/1.0")
-        XCTAssertEqual(sdes.privateItems, ["P5198", "D0"])
+        XCTAssertEqual(sdes.privateItems, ["SPEEX", "P5198", "D0"])
         XCTAssertEqual(sdes.preferredDisplayName, "K1ABC")
     }
 

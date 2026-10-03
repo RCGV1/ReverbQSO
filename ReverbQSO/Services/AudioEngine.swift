@@ -252,6 +252,19 @@ final class AudioEngine: ObservableObject {
     private var engine = AVAudioEngine()
     private let codec = GSMCodec()
     private let speexCodec = SpeexCodec()
+    private(set) var transmitCodec: EchoLinkVoiceCodec = .gsm
+    var isSpeexTransmitAvailable: Bool { speexCodec.isEncoderAvailable }
+    /// Optional second consumer for host fanout, after resampling and microphone gain.
+    var onCapturedPCM: (@MainActor ([Int16]) -> Void)?
+
+    @discardableResult
+    func setTransmitCodec(_ selected: EchoLinkVoiceCodec) -> Bool {
+        guard !captureRequested, selected != .speex || isSpeexTransmitAvailable else { return false }
+        transmitCodec = selected
+        codec.resetEncodeState()
+        speexCodec.resetEncoding()
+        return true
+    }
     var onRecordingPCM: (@MainActor ([Int16]) -> Void)?
     private let playerNode = AVAudioPlayerNode()
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "AudioEngine")
@@ -259,7 +272,7 @@ final class AudioEngine: ObservableObject {
     private var tapInstalled = false
     private var tapVersion: UInt64 = 0
     private var captureRequested = false
-    private var isPreparingCapture = false
+    @Published private(set) var isPreparingCapture = false
     private var captureGeneration: UInt64 = 0
     private var captureDrainGeneration: UInt64?
     private var captureBufferBarrier = CaptureBufferProcessingBarrier()
@@ -564,7 +577,7 @@ final class AudioEngine: ObservableObject {
         _ = stopCaptureAndFlush()
     }
 
-    /// Stop capture and emit the final zero-padded four-frame GSM payload.
+    /// Stop capture and emit the final zero-padded four-frame voice payload.
     ///
     /// The returned data is the same data synchronously delivered through
     /// `onCapturedAudio`; callers should use one delivery path, not both.
@@ -584,7 +597,7 @@ final class AudioEngine: ObservableObject {
     }
 
     /// Stop the input tap, process callbacks already handed off by AVAudioEngine,
-    /// then emit the final zero-padded four-frame GSM payload.
+    /// then emit the final zero-padded four-frame voice payload.
     @discardableResult
     func stopCaptureAndFlushPendingBuffers() async -> Data {
         let generation = captureGeneration
@@ -1205,12 +1218,30 @@ final class AudioEngine: ObservableObject {
         if captureBufferCount == 1 {
             VoiceDiagnosticLog.record("first input PCM frames=\(samples.count) rate=\(sampleRate) rms=\(rawRMS) peak=\(rawPeak) codecFrames=\(codecInput.count) codecRMS=\(codecRMS) codecPeak=\(codecPeak) txRMS=\(transmittedRMS) txPeak=\(transmittedPeak) gain=\(appliedGain)")
         }
-        if !codecInput.isEmpty {
-            captureHasCodecInput = true
-            captureCodecSampleRemainder = (
-                captureCodecSampleRemainder + codecInput.count
-            ) % GSMCodec.samplesPerFrame
+        encodeTransmitPCM(transmittedInput)
+
+        // The TX meter represents the samples sent after microphone gain.
+        inputLevel = min(1.0, transmittedRMS / 10000.0)
+        capturePeakLevel = max(capturePeakLevel, inputLevel)
+    }
+
+    /// Encodes gained, mono 8 kHz PCM from the capture graph. Speex callbacks
+    /// always contain exactly one packed four-frame packet; GSM remains streaming.
+    func encodeTransmitPCM(_ transmittedInput: [Int16]) {
+        guard !transmittedInput.isEmpty else { return }
+        onCapturedPCM?(transmittedInput)
+        if transmitCodec == .speex {
+            guard let packets = speexCodec.encode(transmittedInput) else { return }
+            for packet in packets {
+                captureEncodedByteCount += packet.count
+                onCapturedAudio?(packet)
+            }
+            return
         }
+        captureHasCodecInput = true
+        captureCodecSampleRemainder = (
+            captureCodecSampleRemainder + transmittedInput.count
+        ) % GSMCodec.samplesPerFrame
         let encoded = codec.encode(transmittedInput)
 
         if !encoded.isEmpty {
@@ -1218,16 +1249,11 @@ final class AudioEngine: ObservableObject {
             recordEncodedFrames(in: encoded)
             if captureEncodedByteCount == encoded.count {
                 VoiceDiagnosticLog.record(
-                    "first encoded audio bytes=\(encoded.count) codecSamples=\(codecInput.count)"
+                    "first encoded audio bytes=\(encoded.count) codecSamples=\(transmittedInput.count)"
                 )
             }
             onCapturedAudio?(encoded)
         }
-
-        // The TX meter represents the samples sent to GSM after microphone
-        // gain, so quiet speech does not appear silent while transmitting.
-        inputLevel = min(1.0, transmittedRMS / 10000.0)
-        capturePeakLevel = max(capturePeakLevel, inputLevel)
     }
 
     private func resetCaptureLevelDiagnostics() {
@@ -1393,6 +1419,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func flushCaptureEncoderToPacketBoundary() -> Data {
+        if transmitCodec == .speex { return speexCodec.flushEncoding() ?? Data() }
         guard captureHasCodecInput else { return Data() }
 
         var finalPayload = Data()
@@ -1429,6 +1456,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func resetCaptureEncodingCounters() {
+        speexCodec.resetEncoding()
         captureCodecSampleRemainder = 0
         captureEncodedFrameRemainder = 0
         captureHasCodecInput = false
