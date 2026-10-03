@@ -58,6 +58,9 @@ final class EchoLinkDirectoryService: ObservableObject {
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "DirectoryService")
     private var keepAliveTask: Task<Void, Never>?
     private var availabilityTask: Task<Bool, Never>?
+    private var proxyRecoveryTask: Task<Void, Error>?
+    private var proxyRecoveryID: UUID?
+    private var authenticatedCallsign = ""
     private var foregroundRefreshTask: Task<Void, Never>?
     private var lifecycleGeneration = DirectoryLifecycleGeneration()
     private var refreshGeneration = DirectoryLifecycleGeneration()
@@ -134,7 +137,9 @@ final class EchoLinkDirectoryService: ObservableObject {
             guard self.isAvailableForCalls != available else { return true }
             do {
                 if self.fetchStationsForRefresh == nil {
-                    try await self.client.setAvailableForCalls(available)
+                    try await self.withProxyRecovery {
+                        try await self.client.setAvailableForCalls(available)
+                    }
                 }
                 guard self.lifecycleGeneration.matches(generation), self.isLoggedIn else { return false }
                 self.isAvailableForCalls = available
@@ -241,6 +246,7 @@ final class EchoLinkDirectoryService: ObservableObject {
                 }
             }
 
+            authenticatedCallsign = cs.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             stations = initialStations
             lastSuccessfulSnapshotAt = .now
             applyFilter()
@@ -283,7 +289,7 @@ final class EchoLinkDirectoryService: ObservableObject {
             if let fetchStationsForRefresh {
                 refreshedStations = try await fetchStationsForRefresh()
             } else {
-                refreshedStations = try await client.fetchStations()
+                refreshedStations = try await withProxyRecovery { try await self.client.fetchStations() }
             }
             guard !Task.isCancelled,
                   lifecycleGeneration.matches(lifecycle), refreshGeneration.matches(refresh) else { return false }
@@ -294,7 +300,8 @@ final class EchoLinkDirectoryService: ObservableObject {
             applyFilter()
             return true
         } catch {
-            guard lifecycleGeneration.matches(lifecycle), refreshGeneration.matches(refresh) else { return false }
+            guard !Task.isCancelled, !(error is CancellationError),
+                  lifecycleGeneration.matches(lifecycle), refreshGeneration.matches(refresh) else { return false }
             logger.error("Refresh failed error='\(error.localizedDescription, privacy: .public)'")
             if DirectoryRegistrationFailurePolicy.shouldRetireImmediately(error) {
                 await retireDirectorySession(with: error)
@@ -431,9 +438,79 @@ final class EchoLinkDirectoryService: ObservableObject {
 
     // MARK: - Private
 
+    private func withProxyRecovery<T>(_ operation: @MainActor () async throws -> T) async throws -> T {
+        let generation = lifecycleGeneration.current
+        do { return try await operation() }
+        catch {
+            try Task.checkCancellation()
+            guard lifecycleGeneration.matches(generation), isLoggedIn,
+                  effectiveTransport?.configuration.isEnabled == true,
+                  Self.isRecoverableProxyFailure(error) else { throw error }
+            try await recoverProxy(for: generation)
+            try Task.checkCancellation()
+            guard lifecycleGeneration.matches(generation), isLoggedIn else { throw CancellationError() }
+            return try await operation()
+        }
+    }
+
+    private static func isRecoverableProxyFailure(_ error: Error) -> Bool {
+        if let error = error as? EchoLinkProxySession.SessionError {
+            switch error {
+            case .directoryClosed, .directoryOpenFailed, .timedOut: return true
+            case .directoryBusy: return false
+            }
+        }
+        if let error = error as? EchoLinkProxyClient.ClientError {
+            switch error {
+            case .connectionClosed, .connectionFailed, .authenticationTimedOut, .allCandidatesFailed: return true
+            default: return false
+            }
+        }
+        return false
+    }
+
+    private func recoverProxy(for generation: UInt64) async throws {
+        if let proxyRecoveryTask { return try await proxyRecoveryTask.value }
+        guard let selection = effectiveTransport, !authenticatedCallsign.isEmpty,
+              let failed = await client.activeProxySession() else { throw CancellationError() }
+        // Another caller may already have repaired the tunnel before this
+        // queued failure reached us. Keep that fresh connection.
+        if await failed.isUsable() { return }
+        // Both actor lookups above can suspend. Share any recovery another
+        // refresh started in the meantime instead of replacing its tunnel.
+        if let proxyRecoveryTask { return try await proxyRecoveryTask.value }
+        guard lifecycleGeneration.matches(generation), isLoggedIn else { throw CancellationError() }
+        let callsign = authenticatedCallsign
+        let recoveryID = UUID()
+        let task = Task { [weak self] in
+            guard let self, self.lifecycleGeneration.matches(generation) else { throw CancellationError() }
+            let exclusions = selection.configuration.mode == .publicProxy ? [failed.configuration] : []
+            guard let replacement = try await self.proxySessionStore.session(
+                callsign: callsign, configuration: selection.configuration, excluding: exclusions
+            ) else { throw EchoLinkProxySession.SessionError.directoryClosed }
+            try Task.checkCancellation()
+            guard self.lifecycleGeneration.matches(generation) else { throw CancellationError() }
+            try await self.client.recoverProxySession(replacement, replacing: failed)
+            guard self.lifecycleGeneration.matches(generation) else { throw CancellationError() }
+            self.logger.info("Reconnected proxy after a failed directory request")
+        }
+        proxyRecoveryTask = task
+        proxyRecoveryID = recoveryID
+        defer {
+            if proxyRecoveryID == recoveryID {
+                proxyRecoveryTask = nil
+                proxyRecoveryID = nil
+            }
+        }
+        try await task.value
+    }
+
     @discardableResult
     private func beginLifecycleOperation() -> UInt64 {
         let generation = lifecycleGeneration.advance()
+        proxyRecoveryTask?.cancel()
+        proxyRecoveryTask = nil
+        proxyRecoveryID = nil
         _ = refreshGeneration.advance()
         keepAliveTask?.cancel()
         keepAliveTask = nil
@@ -447,6 +524,9 @@ final class EchoLinkDirectoryService: ObservableObject {
 
     private func retireDirectorySession(with terminalError: Error) async {
         let terminalGeneration = lifecycleGeneration.advance()
+        proxyRecoveryTask?.cancel()
+        proxyRecoveryTask = nil
+        proxyRecoveryID = nil
         _ = refreshGeneration.advance()
         keepAliveTask?.cancel()
         keepAliveTask = nil
@@ -460,6 +540,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     }
 
     private func clearPublishedLoginState() {
+        authenticatedCallsign = ""
         clearPendingCQSocketPair()
         effectiveTransport = nil
         isLoggedIn = false
@@ -563,7 +644,7 @@ final class EchoLinkDirectoryService: ObservableObject {
         guard lifecycleGeneration.matches(generation), isLoggedIn else { return false }
 
         do {
-            try await client.sendKeepAlive()
+            try await withProxyRecovery { try await self.client.sendKeepAlive() }
             guard lifecycleGeneration.matches(generation) else { return false }
 
             keepAliveFailures.recordSuccess()

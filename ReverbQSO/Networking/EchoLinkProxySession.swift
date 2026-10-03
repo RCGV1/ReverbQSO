@@ -34,6 +34,8 @@ actor EchoLinkProxySession {
     private var statusWaiter: (UUID, CheckedContinuation<Void, Error>)?
     private var responseWaiter: (UUID, ResponseBoundary, Data, CheckedContinuation<Data, Error>)?
     private var isDirectoryTransactionActive = false
+    private var serializedTurnActive = false
+    private var directoryTurnWaiters: [(UUID, CheckedContinuation<Void, Error>)] = []
     private var terminalError: Error?
 
     private init(client: EchoLinkProxyClient, configuration: EchoLinkProxyConfiguration, callsign: String) {
@@ -87,10 +89,59 @@ actor EchoLinkProxySession {
         boundary: ResponseBoundary,
         timeout: Duration = .seconds(30)
     ) async throws -> Data {
+        try Task.checkCancellation()
         if let terminalError { throw terminalError }
         guard !isDirectoryTransactionActive else { throw SessionError.directoryBusy }
         isDirectoryTransactionActive = true
         defer { isDirectoryTransactionActive = false }
+        // Once TCP_OPEN has been sent, drain the bounded response even if the
+        // page disappears. Cancelling that UI task must not cut off QSO UDP.
+        return try await performDirectoryRequest(payload, host: host, boundary: boundary, timeout: timeout)
+    }
+
+    /// Serialize directory commands while retaining the proxy's UDP stream.
+    /// Cancelling a queued request does not close the shared authenticated tunnel.
+    func serializedDirectoryRequest(
+        _ payload: Data, host: String, boundary: ResponseBoundary,
+        timeout: Duration = .seconds(30)
+    ) async throws -> Data {
+        try await acquireDirectoryTurn()
+        defer { releaseDirectoryTurn() }
+        try Task.checkCancellation()
+        return try await directoryRequest(payload, host: host, boundary: boundary, timeout: timeout)
+    }
+
+    private func acquireDirectoryTurn() async throws {
+        try Task.checkCancellation()
+        if let terminalError { throw terminalError }
+        if !serializedTurnActive {
+            serializedTurnActive = true
+            return
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { directoryTurnWaiters.append((id, continuation)) }
+            }
+        } onCancel: {
+            Task { await self.cancelDirectoryTurn(id: id) }
+        }
+    }
+
+    private func releaseDirectoryTurn() {
+        guard !directoryTurnWaiters.isEmpty else { serializedTurnActive = false; return }
+        directoryTurnWaiters.removeFirst().1.resume()
+    }
+
+    private func cancelDirectoryTurn(id: UUID) {
+        guard let index = directoryTurnWaiters.firstIndex(where: { $0.0 == id }) else { return }
+        directoryTurnWaiters.remove(at: index).1.resume(throwing: CancellationError())
+    }
+
+    private func performDirectoryRequest(
+        _ payload: Data, host: String, boundary: ResponseBoundary, timeout: Duration
+    ) async throws -> Data {
         let numericHost = try Self.resolveIPv4(host)
         do {
             try await awaitDirectoryOpen(host: numericHost, timeout: timeout)
@@ -238,6 +289,9 @@ actor EchoLinkProxySession {
 
     private func failAll(_ error: Error) {
         terminalError = error
+        let waiting = directoryTurnWaiters
+        directoryTurnWaiters.removeAll()
+        for (_, continuation) in waiting { continuation.resume(throwing: error) }
         if let (_, continuation) = statusWaiter { continuation.resume(throwing: error) }
         statusWaiter = nil
         if let (_, _, _, continuation) = responseWaiter { continuation.resume(throwing: error) }

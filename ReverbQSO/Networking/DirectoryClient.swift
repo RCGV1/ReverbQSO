@@ -317,6 +317,18 @@ actor DirectoryClient {
         proxySession = session
     }
 
+    func activeProxySession() -> EchoLinkProxySession? { proxySession }
+
+    /// A reconnect reuses the credentials and availability already acknowledged
+    /// for this directory login. An obsolete recovery cannot replace a new login.
+    func recoverProxySession(_ replacement: EchoLinkProxySession, replacing failed: EchoLinkProxySession) async throws {
+        guard proxySession === failed, isLoggedIn else { throw CancellationError() }
+        let generation = lifecycleGeneration.current
+        proxySession = replacement
+        try await sendKeepAlive()
+        try ensureCurrent(generation)
+    }
+
     func login(
         callsign: String,
         password: String,
@@ -385,7 +397,7 @@ actor DirectoryClient {
     private func fetchStations(generation: UInt64) async throws -> [Station] {
         if let proxySession {
             try ensureCurrent(generation)
-            let raw = try await proxySession.directoryRequest(
+            let raw = try await proxySession.serializedDirectoryRequest(
                 Data("s".utf8), host: lastHost, boundary: .marker(Data("+++".utf8))
             )
             try ensureCurrent(generation)
@@ -636,7 +648,7 @@ actor DirectoryClient {
         try ensureCurrent(generation)
         let response: String
         if let proxySession {
-            let raw = try await proxySession.directoryRequest(
+            let raw = try await proxySession.serializedDirectoryRequest(
                 payload,
                 host: host,
                 boundary: .marker(Data("\n\n".utf8)),
@@ -665,7 +677,7 @@ actor DirectoryClient {
         let payload = Data("z\(callsign)\r".utf8)
         let response: String
         if let proxySession {
-            let raw = try await proxySession.directoryRequest(
+            let raw = try await proxySession.serializedDirectoryRequest(
                 payload, host: lastHost, boundary: .line, timeout: .seconds(5)
             )
             response = String(data: raw, encoding: .utf8) ?? ""
