@@ -20,30 +20,43 @@ struct CountryFilterView: View {
     }
 
     var body: some View {
-        List {
-            Button {
-                selectedCode = ""
-                dismiss()
-            } label: {
-                selectionRow(title: "All countries", code: "")
-            }
-            .foregroundStyle(.primary)
+        NavigationStack {
+            List {
+                Button {
+                    selectedCode = ""
+                    dismiss()
+                } label: {
+                    selectionRow(title: "All countries", code: "")
+                }
+                .foregroundStyle(.primary)
 
-            Section("Countries") {
-                ForEach(filteredCountries) { country in
-                    Button {
-                        selectedCode = country.code
-                        dismiss()
-                    } label: {
-                        selectionRow(title: country.name, code: country.code)
+                Section("Countries") {
+                    ForEach(filteredCountries) { country in
+                        Button {
+                            selectedCode = country.code
+                            dismiss()
+                        } label: {
+                            selectionRow(title: country.name, code: country.code)
+                        }
+                        .foregroundStyle(.primary)
                     }
-                    .foregroundStyle(.primary)
+                }
+            }
+            .navigationTitle("Country")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Country name or code")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
                 }
             }
         }
-        .navigationTitle("Country")
-        .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "Country name or code")
+        #if targetEnvironment(macCatalyst)
+        .frame(minWidth: 400, idealWidth: 440, minHeight: 460, idealHeight: 540)
+        #else
+        .presentationDetents([.large])
+        #endif
     }
 
     private func selectionRow(title: String, code: String) -> some View {

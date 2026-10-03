@@ -5,7 +5,6 @@ import SwiftUI
 /// The main directory view showing all EchoLink stations.
 struct DirectoryView: View {
 
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject var connectionService: EchoLinkConnectionService
     @StateObject private var viewModel: DirectoryViewModel
@@ -13,7 +12,7 @@ struct DirectoryView: View {
 
     @State private var detailStation: Station?
     @State private var callCQService: CallCQService?
-    @State private var showingFilters = false
+    @State private var showingCountryFilter = false
 
     init(directoryService: EchoLinkDirectoryService) {
         _viewModel = StateObject(wrappedValue: DirectoryViewModel(directoryService: directoryService))
@@ -31,13 +30,20 @@ struct DirectoryView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                filterBar
+                if viewModel.hasActiveFilters {
+                    activeFilters
+                }
 
                 stationList
             }
             .navigationTitle("Directory")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    DirectoryFiltersMenu(viewModel: viewModel) {
+                        showingCountryFilter = true
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         presentCallCQ()
@@ -94,8 +100,11 @@ struct DirectoryView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingFilters) {
-                DirectoryFiltersView(viewModel: viewModel)
+            .sheet(isPresented: $showingCountryFilter) {
+                CountryFilterView(
+                    countries: viewModel.availableCountries,
+                    selectedCode: $viewModel.countryFilter
+                )
             }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
@@ -108,36 +117,45 @@ struct DirectoryView: View {
         }
     }
 
-    private var filterBar: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(spacing: 12))
-        return layout {
-            Button { showingFilters = true } label: {
-                Label("Filters", systemImage: viewModel.hasActiveFilters
-                      ? "line.3.horizontal.decrease.circle.fill"
-                      : "line.3.horizontal.decrease.circle")
-            }
-            .controlSize(.large)
-            .buttonStyle(.bordered)
-            .fixedSize()
-            .accessibilityValue(viewModel.filterSummary)
-            .accessibilityIdentifier("directory-filters")
-
-            Text(viewModel.filterSummary)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if viewModel.isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("Refreshing directory")
-            }
+    private var activeFilters: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { activeFilterButtons }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) { activeFilterButtons }
         }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder
+    private var activeFilterButtons: some View {
+        if viewModel.browseGroup == .nodes, viewModel.typeFilter != nil {
+            Button { viewModel.typeFilter = nil } label: {
+                removableFilter(viewModel.nodeTypeTitle)
+            }
+            .accessibilityLabel("Remove node type filter, \(viewModel.nodeTypeTitle)")
+        }
+        if !viewModel.countryFilter.isEmpty {
+            Button { viewModel.countryFilter = "" } label: {
+                removableFilter(viewModel.countryFilterTitle)
+            }
+            .accessibilityLabel("Remove country filter, \(viewModel.countryFilterTitle)")
+        }
+    }
+
+    private func removableFilter(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .fixedSize(horizontal: false, vertical: true)
+            Image(systemName: "xmark")
+                .imageScale(.small)
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Station List

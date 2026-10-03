@@ -96,18 +96,17 @@ final class DirectoryViewModel: ObservableObject {
             (availableCountries.first { $0.code == countryFilter }?.name ?? countryFilter)
     }
 
-    var filterSummary: String {
-        let group: String
-        if browseGroup == .people {
-            group = "People"
-        } else {
-            switch typeFilter {
-            case .link: group = "Links"
-            case .repeater: group = "Repeaters"
-            case .conference: group = "Conferences"
-            default: group = "All nodes"
-            }
+    var nodeTypeTitle: String {
+        switch typeFilter {
+        case .link: "Links"
+        case .repeater: "Repeaters"
+        case .conference: "Conferences"
+        default: "All nodes"
         }
+    }
+
+    var filterSummary: String {
+        let group = browseGroup == .people ? "People" : nodeTypeTitle
         return "\(group) · \(countryFilterTitle)"
     }
 
