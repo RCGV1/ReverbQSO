@@ -2431,7 +2431,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 logger.info("RX voice resumed after PTT codec=GSM bytes=\(payload.count) playbackRunning=\(self.audioEngine.isRunning)")
                 logNextVoiceAfterPTT = false
             }
-            audioEngine.playReceivedAudio(payload, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
+            audioEngine.playReceivedAudio(payload, metadata: datagram.metadata, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
             if audioEngine.outputLevel >= 0.01 { noteIncomingAudioActivity() }
         case .pcm(let samples):
             guard receiveSequencer.shouldAcceptForPlayback(datagram.metadata) else {
@@ -2453,7 +2453,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 logger.info("RX voice resumed after PTT codec=PCM samples=\(samples.count) playbackRunning=\(self.audioEngine.isRunning)")
                 logNextVoiceAfterPTT = false
             }
-            audioEngine.playReceivedPCM(samples, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
+            audioEngine.playReceivedPCM(samples, metadata: datagram.metadata, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
             if audioEngine.outputLevel >= 0.01 { noteIncomingAudioActivity() }
         case .speex(let payload):
             guard let samples = audioEngine.decodeReceivedSpeex(payload) else {
@@ -2479,7 +2479,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 logger.info("RX voice resumed after PTT codec=Speex samples=\(samples.count)")
                 logNextVoiceAfterPTT = false
             }
-            audioEngine.playReceivedPCM(samples, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
+            audioEngine.playReceivedPCM(samples, metadata: datagram.metadata, diagnoseFirstRXAfterPTT: diagnoseFirstRX)
             if audioEngine.outputLevel >= 0.01 { noteIncomingAudioActivity() }
         case .unsupportedPayloadType(let pt):
             audioStatusMessage = "Remote station sent unsupported audio payload type \(pt)."

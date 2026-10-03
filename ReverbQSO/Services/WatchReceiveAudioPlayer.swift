@@ -10,7 +10,7 @@ import os
 @MainActor
 final class WatchReceiveAudioPlayer {
     private static let sampleRate = 8_000.0
-    private static let maximumQueuedSamples = 4_000 // 500 ms at 8 kHz
+    private static let maximumQueuedSamples = 1_936 // 242 ms including clock correction at 8 kHz
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -29,6 +29,12 @@ final class WatchReceiveAudioPlayer {
     private var queuedSampleCount = 0
     private var playbackGeneration: UInt64 = 0
     private var playbackGain = ReceivePlaybackGain()
+    private let receiveClock = ReceiveClockCompensator()
+    private let receiveSpeech = ReceiveSpeechSmoother()
+    private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
+    private var playoutTask: Task<Void, Never>?
+    private var playbackEndSampleTime: Int64 = 0
+    private var lastReceiveArrival = -Double.infinity
 
     /// Parses and plays one complete EchoLink/RTP voice datagram.
     @discardableResult
@@ -48,24 +54,48 @@ final class WatchReceiveAudioPlayer {
             return false
         }
 
-        guard !samples.isEmpty,
-              queuedSampleCount + samples.count <= Self.maximumQueuedSamples,
-              startIfNeeded(),
-              let buffer = makeBuffer(samples) else { return false }
-
-        queuedSampleCount += samples.count
-        let generation = playbackGeneration
-        let sampleCount = samples.count
-        playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.playbackGeneration == generation else { return }
-                self.queuedSampleCount = max(0, self.queuedSampleCount - sampleCount)
-            }
-        }
-        if !playerNode.isPlaying {
-            playerNode.play()
-        }
+        guard !samples.isEmpty, startIfNeeded() else { return false }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
+        lastReceiveArrival = now
+        receivePlayout.enqueue(receiveSpeech.process(samples, metadata: parsed.metadata, now: now), networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
+        schedulePlayout()
         return true
+    }
+
+    private func schedulePlayout() {
+        guard playoutTask == nil, let deadline = receivePlayout.nextDeadline else { return }
+        let generation = playbackGeneration
+        playoutTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, deadline - ProcessInfo.processInfo.systemUptime))) }
+            catch { return }
+            guard let self, !Task.isCancelled, self.playbackGeneration == generation else { return }
+            self.playoutTask = nil
+            for packet in self.receivePlayout.drain() {
+                let corrected = self.receiveClock.process(packet, queuedSamples: self.remainingPlaybackSamples,
+                    targetQueuedSamples: Int(self.receivePlayout.targetDelay * 8000))
+                guard let buffer = self.makeBuffer(corrected) else { continue }
+                if self.queuedSampleCount + corrected.count > Self.maximumQueuedSamples {
+                    self.playbackGeneration &+= 1
+                    self.playerNode.stop()
+                    self.queuedSampleCount = 0
+                    self.playbackEndSampleTime = 0
+                    self.receiveClock.reset()
+                }
+                let token = self.playbackGeneration
+                let count = corrected.count
+                self.playbackEndSampleTime = max(self.playbackEndSampleTime, self.renderedPlaybackSampleTime ?? 0) + Int64(count)
+                self.queuedSampleCount += count
+                self.playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.playbackGeneration == token else { return }
+                        self.queuedSampleCount = max(0, self.queuedSampleCount - count)
+                    }
+                }
+                if !self.playerNode.isPlaying { self.playerNode.play() }
+            }
+            self.schedulePlayout()
+        }
     }
 
     /// Stops forwarded audio and resets decoder and queue state for a new phone QSO.
@@ -73,7 +103,14 @@ final class WatchReceiveAudioPlayer {
         RecordingAudioSession.shared.endLiveAudio(owner: self)
         playbackGeneration &+= 1
         queuedSampleCount = 0
+        playbackEndSampleTime = 0
+        lastReceiveArrival = -Double.infinity
         playbackGain.reset()
+        playoutTask?.cancel()
+        playoutTask = nil
+        receivePlayout.reset()
+        receiveSpeech.reset()
+        receiveClock.reset()
         if isConfigured { playerNode.stop() }
         engine.stop()
         gsmCodec.resetAll()
@@ -82,6 +119,16 @@ final class WatchReceiveAudioPlayer {
             ownsPlaybackSession = false
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+    }
+
+    private var renderedPlaybackSampleTime: Int64? {
+        guard let renderTime = playerNode.lastRenderTime,
+              let playerTime = playerNode.playerTime(forNodeTime: renderTime) else { return nil }
+        return playerTime.sampleTime
+    }
+    private var remainingPlaybackSamples: Int {
+        guard let rendered = renderedPlaybackSampleTime else { return queuedSampleCount }
+        return max(0, Int(playbackEndSampleTime - rendered))
     }
 
     private func startIfNeeded() -> Bool {

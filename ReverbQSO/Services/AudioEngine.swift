@@ -218,12 +218,13 @@ private final class CaptureBufferProcessingBarrier: @unchecked Sendable {
 /// down may enter the encoder; sealing the gate makes release deterministic.
 private final class CaptureTapGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var active: (CaptureBufferProcessingBarrier, UInt64)?
+    private var active: (CaptureBufferProcessingBarrier, UInt64, CaptureDSPProcessor.Configuration)?
     private var firstBufferSeen = false
 
-    func activate(_ barrier: CaptureBufferProcessingBarrier, generation: UInt64) {
+    func activate(_ barrier: CaptureBufferProcessingBarrier, generation: UInt64,
+                  configuration: CaptureDSPProcessor.Configuration = .init(codec: .gsm, gainMode: .automatic, manualGainMultiplier: 1)) {
         lock.lock()
-        active = (barrier, generation)
+        active = (barrier, generation, configuration)
         lock.unlock()
     }
 
@@ -235,11 +236,11 @@ private final class CaptureTapGate: @unchecked Sendable {
         return barrier
     }
 
-    func admitBuffer() -> (barrier: CaptureBufferProcessingBarrier, generation: UInt64)? {
+    func admitBuffer() -> (barrier: CaptureBufferProcessingBarrier, generation: UInt64, configuration: CaptureDSPProcessor.Configuration)? {
         lock.lock()
         defer { lock.unlock() }
-        guard let (barrier, generation) = active, barrier.enter() else { return nil }
-        return (barrier, generation)
+        guard let (barrier, generation, configuration) = active, barrier.enter() else { return nil }
+        return (barrier, generation, configuration)
     }
 
     func markFirstBuffer() -> Bool {
@@ -326,6 +327,10 @@ final class AudioEngine: ObservableObject {
     private var captureDrainGeneration: UInt64?
     private var captureBufferBarrier = CaptureBufferProcessingBarrier()
     private let captureTapGate = CaptureTapGate()
+    private nonisolated let captureDSP = CaptureDSPProcessor()
+    private var nativeCaptureGeneration: UInt64?
+    private var captureDSPNextOrdinal: UInt64 = 0
+    private var captureDSPResults: [UInt64: (CaptureDSPProcessor.Result, Int, Bool)] = [:]
     private var prepareCaptureTask: Task<Void, Never>?
     private var resumeCaptureAfterInterruption = false
     private var captureRecoveryTask: Task<Void, Never>?
@@ -417,6 +422,13 @@ final class AudioEngine: ObservableObject {
     private let channelCount: AVAudioChannelCount = 1
     private var playbackGain = ReceivePlaybackGain()
     private var playbackQueue = ReceivePlaybackQueue()
+    private let receiveClock = ReceiveClockCompensator()
+    private let receiveSpeech = ReceiveSpeechSmoother()
+    private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
+    private var receivePlayoutTask: Task<Void, Never>?
+    private var receivePlayoutGeneration: UInt64 = 0
+    private var playbackEndSampleTime: Int64 = 0
+    private var lastReceiveArrival = -Double.infinity
 
     private var captureFormat: AVAudioFormat? {
         AVAudioFormat(
@@ -524,7 +536,7 @@ final class AudioEngine: ObservableObject {
             microphoneGain.reset()
             codec.resetEncodeState()
             resetCaptureEncodingCounters()
-            captureTapGate.activate(captureBufferBarrier, generation: captureGeneration)
+            activateCaptureDelivery(generation: captureGeneration)
             VoiceDiagnosticLog.record("capture began from ready input graph")
             let outputs = AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
             VoiceDiagnosticLog.record("PTT audio route preference=\(outputPreference.rawValue) outputs=[\(outputs)] voiceProcessing=\(engine.inputNode.isVoiceProcessingEnabled) AGC=\(engine.inputNode.isVoiceProcessingAGCEnabled) bypassed=\(engine.inputNode.isVoiceProcessingBypassed) inputMuted=\(engine.inputNode.isVoiceProcessingInputMuted)")
@@ -604,7 +616,7 @@ final class AudioEngine: ObservableObject {
         if let safeTapFormat = validatedTapFormat(for: inputNode, preferred: selectedFormat),
            installCaptureTap(on: inputNode, format: safeTapFormat, generation: generation) {
             guard activateCaptureGraphAfterInstallingTap() else { return false }
-            if !isPreparingCapture { captureTapGate.activate(captureBufferBarrier, generation: generation) }
+            if !isPreparingCapture { activateCaptureDelivery(generation: generation) }
             logger.debug(
                 "Capture started using native tap format (selected candidate rate=\(safeTapFormat.sampleRate) channels=\(safeTapFormat.channelCount))"
             )
@@ -628,7 +640,7 @@ final class AudioEngine: ObservableObject {
         if let safeTapFormat = validatedTapFormat(for: recoveredInputNode, preferred: selectedFormat),
            installCaptureTap(on: recoveredInputNode, format: safeTapFormat, generation: generation) {
             guard activateCaptureGraphAfterInstallingTap() else { return false }
-            if !isPreparingCapture { captureTapGate.activate(captureBufferBarrier, generation: generation) }
+            if !isPreparingCapture { activateCaptureDelivery(generation: generation) }
             logger.debug(
                 "Capture started using native tap format after recovery (rate=\(safeTapFormat.sampleRate) channels=\(safeTapFormat.channelCount))"
             )
@@ -686,11 +698,16 @@ final class AudioEngine: ObservableObject {
         guard captureGeneration == generation,
               captureDrainGeneration == generation else { return Data() }
 
+        let finalAudio = nativeCaptureGeneration == generation
+            ? await captureDSP.flush(generation: generation) : flushCaptureEncoderToPacketBoundary()
+        guard captureGeneration == generation, captureDrainGeneration == generation else { return Data() }
+        captureDSP.end(generation: generation)
+        nativeCaptureGeneration = nil
+        captureDSPResults.removeAll(keepingCapacity: true)
         captureGeneration &+= 1
         captureDrainGeneration = nil
         captureRecoveryFailureCount = 0
         recordCaptureLevelSummary()
-        let finalAudio = flushCaptureEncoderToPacketBoundary()
         logger.info("PTT capture buffers=\(self.captureBufferCount) samples=\(self.captureSampleCount) encodedBytes=\(self.captureEncodedByteCount) peakLevel=\(self.capturePeakLevel) flushBytes=\(finalAudio.count)")
         if !finalAudio.isEmpty {
             onCapturedAudio?(finalAudio)
@@ -735,6 +752,7 @@ final class AudioEngine: ObservableObject {
         codec.resetAll()
         speexCodec.reset()
         playbackGain.reset()
+        resetReceiveProcessing()
         resetCaptureEncodingCounters()
     }
 
@@ -746,6 +764,7 @@ final class AudioEngine: ObservableObject {
         codec.resetAll()
         speexCodec.reset()
         playbackGain.reset()
+        resetReceiveProcessing()
         resetCaptureEncodingCounters()
     }
 
@@ -754,31 +773,11 @@ final class AudioEngine: ObservableObject {
     /// Each call corresponds to a self-contained network packet, so we use
     /// `decodePacket()` which discards any stale partial-frame bytes from
     /// prior packets. This prevents audio corruption after packet loss.
-    func playReceivedAudio(_ data: Data, diagnoseFirstRXAfterPTT: Bool = false) {
+    func playReceivedAudio(_ data: Data, metadata: EchoLinkVoicePacketMetadata? = nil,
+                           diagnoseFirstRXAfterPTT: Bool = false) {
         let pcmSamples = codec.decodePacket(data)
-        guard !pcmSamples.isEmpty else { return }
-        onRecordingPCM?(pcmSamples)
-        if !isRunning {
-            startPlayback()
-        }
-        guard isRunning else { return }
-
-        accumulateRXWindow(samples: pcmSamples)
-
-        guard let format = captureFormat,
-              let buffer = pcmBuffer(from: pcmSamples, format: format) else { return }
-
-        schedulePlaybackBuffer(buffer)
-
-        if !playerNode.isPlaying {
-            playerNode.play()
-        }
-
-        if diagnoseFirstRXAfterPTT {
-            recordFirstRXDiagnostics(samples: pcmSamples, codec: "GSM")
-        }
-
-        recordOutputLevel(from: pcmSamples)
+        playReceivedPCM(pcmSamples, metadata: metadata,
+                        diagnoseFirstRXAfterPTT: diagnoseFirstRXAfterPTT)
     }
 
     /// Decode an EchoLink Speex datagram before receive activity/mute decisions.
@@ -786,29 +785,50 @@ final class AudioEngine: ObservableObject {
         speexCodec.decodePacket(payload)
     }
 
-    /// Play decoded PCM audio samples directly.
-    func playReceivedPCM(_ samples: [Int16], diagnoseFirstRXAfterPTT: Bool = false) {
+    /// Records real network samples; smoothing and concealment affect playback only.
+    func playReceivedPCM(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata? = nil,
+                         diagnoseFirstRXAfterPTT: Bool = false) {
         guard !samples.isEmpty else { return }
         onRecordingPCM?(samples)
-        if !isRunning {
-            startPlayback()
-        }
+        if !isRunning { startPlayback() }
         guard isRunning else { return }
         accumulateRXWindow(samples: samples)
-
-        guard let format = captureFormat,
-              let buffer = pcmBuffer(from: samples, format: format) else { return }
-
-        schedulePlaybackBuffer(buffer)
-        if !playerNode.isPlaying {
-            playerNode.play()
-        }
-
-        if diagnoseFirstRXAfterPTT {
-            recordFirstRXDiagnostics(samples: samples, codec: "PCM")
-        }
-
         recordOutputLevel(from: samples)
+        if diagnoseFirstRXAfterPTT { recordFirstRXDiagnostics(samples: samples, codec: "PCM") }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
+        lastReceiveArrival = now
+        receivePlayout.enqueue(receiveSpeech.process(samples, metadata: metadata, now: now), networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
+        scheduleReceivePlayout()
+    }
+
+    private func scheduleReceivePlayout() {
+        guard receivePlayoutTask == nil, let deadline = receivePlayout.nextDeadline else { return }
+        let generation = receivePlayoutGeneration
+        receivePlayoutTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, deadline - ProcessInfo.processInfo.systemUptime))) }
+            catch { return }
+            guard let self, !Task.isCancelled, self.receivePlayoutGeneration == generation else { return }
+            self.receivePlayoutTask = nil
+            for samples in self.receivePlayout.drain() {
+                guard self.isRunning, let format = self.captureFormat else { continue }
+                let corrected = self.receiveClock.process(samples, queuedSamples: self.remainingPlaybackSamples,
+                    targetQueuedSamples: Int(self.receivePlayout.targetDelay * 8000))
+                guard let buffer = self.pcmBuffer(from: corrected, format: format) else { continue }
+                self.schedulePlaybackBuffer(buffer)
+                if !self.playerNode.isPlaying { self.playerNode.play() }
+            }
+            self.scheduleReceivePlayout()
+        }
+    }
+
+    private func resetReceiveProcessing() {
+        receivePlayoutGeneration &+= 1
+        receivePlayoutTask?.cancel()
+        receivePlayoutTask = nil
+        receivePlayout.reset()
+        receiveSpeech.reset()
+        receiveClock.reset()
     }
 
     /// Record the latest receive level and clear it when packet playback stops.
@@ -1069,9 +1089,11 @@ final class AudioEngine: ObservableObject {
         let count = Int(buffer.frameLength)
         if playbackQueue.needsReset(adding: count) {
             // A stalled route must not turn into seconds of old speech.
-            stopPlaybackTimeline()
+            trimPlaybackTimeline()
             logger.debug("Trimmed receive playback backlog to current speech")
         }
+        let rendered = renderedPlaybackSampleTime ?? 0
+        playbackEndSampleTime = max(playbackEndSampleTime, rendered) + Int64(count)
         let token = playbackQueue.reserve(count)
         playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -1080,9 +1102,28 @@ final class AudioEngine: ObservableObject {
         }
     }
 
-    private func stopPlaybackTimeline() {
+    private var renderedPlaybackSampleTime: Int64? {
+        guard let renderTime = playerNode.lastRenderTime,
+              let playerTime = playerNode.playerTime(forNodeTime: renderTime) else { return nil }
+        return playerTime.sampleTime
+    }
+
+    private var remainingPlaybackSamples: Int {
+        guard let rendered = renderedPlaybackSampleTime else { return playbackQueue.queuedSamples }
+        return max(0, Int(playbackEndSampleTime - rendered))
+    }
+
+    private func trimPlaybackTimeline() {
         playbackQueue.reset()
+        playbackEndSampleTime = 0
+        receiveClock.reset()
         playerNode.stop()
+    }
+
+    private func stopPlaybackTimeline() {
+        resetReceiveProcessing()
+        lastReceiveArrival = -Double.infinity
+        trimPlaybackTimeline()
     }
 
     private func computeRMS(_ samples: [Int16]) -> Double {
@@ -1265,12 +1306,24 @@ final class AudioEngine: ObservableObject {
         return true
     }
 
+    private func activateCaptureDelivery(generation: UInt64) {
+        nativeCaptureGeneration = generation
+        captureDSPNextOrdinal = 0
+        captureDSPResults.removeAll(keepingCapacity: true)
+        captureDSP.begin(generation: generation)
+        captureTapGate.activate(captureBufferBarrier, generation: generation, configuration: .init(
+            codec: transmitCodec, gainMode: MicrophoneGainSettings.mode(),
+            manualGainMultiplier: MicrophoneGainSettings.load()
+        ))
+    }
+
     private nonisolated static func captureTapBlock(
         engine: AudioEngine,
         gate: CaptureTapGate,
         tapVersion: UInt64
     ) -> AVAudioNodeTapBlock {
-        { [weak engine, gate] buffer, _ in
+        let processor = engine.captureDSP
+        return { [weak engine, gate, processor] buffer, _ in
             if buffer.frameLength > 0 && gate.markFirstBuffer() {
                 let firstBufferRate = buffer.format.sampleRate
                 Task { @MainActor [weak engine] in
@@ -1283,19 +1336,18 @@ final class AudioEngine: ObservableObject {
             let capturedAt = ProcessInfo.processInfo.systemUptime
             // AVAudioEngine delivers tap buffers on a real-time audio thread.
             // Copy PCM before the callback returns, then pass only Sendable
-            // samples across to the main actor for encoding and UI updates.
+            // samples to the serial DSP queue; only delivery and meters use MainActor.
             let samples = Self.extractSamples(from: buffer)
             let sampleRate = buffer.format.sampleRate
-            Task { @MainActor [weak engine, barrier = ticket.barrier, generation = ticket.generation] in
-                defer { barrier.leave() }
-                guard LiveCaptureBacklogPolicy.isFresh(capturedAt: capturedAt,
-                    now: ProcessInfo.processInfo.systemUptime) else { return }
-                if engine?.captureBufferCount == 0 {
-                    VoiceDiagnosticLog.record(
-                        "first tap callback frames=\(samples.count) rate=\(sampleRate)"
-                    )
+            processor.submit(samples: samples, sampleRate: sampleRate, generation: ticket.generation,
+                             capturedAt: capturedAt, configuration: ticket.configuration) { [weak engine] result in
+                Task { @MainActor [weak engine, barrier = ticket.barrier] in
+                    defer { barrier.leave() }
+                    guard let result else { return }
+                    engine?.acceptCaptureDSPResult(result, sourceSampleCount: samples.count,
+                        fresh: LiveCaptureBacklogPolicy.isFresh(capturedAt: capturedAt,
+                            now: ProcessInfo.processInfo.systemUptime))
                 }
-                engine?.handleCapturedSamples(samples, sampleRate: sampleRate, generation: generation)
             }
         }
     }
@@ -1319,50 +1371,44 @@ final class AudioEngine: ObservableObject {
         return true
     }
 
-    private func handleCapturedSamples(_ samples: [Int16], sampleRate: Double, generation: UInt64) {
-        let isActiveCapture = isCapturing && isCaptureRequestCurrent(generation)
-        let isDrainingCapture = captureDrainGeneration == generation && captureGeneration == generation
-        guard isActiveCapture || isDrainingCapture else { return }
-        captureBufferCount += 1
-        captureSampleCount += samples.count
-        let rawRMS = computeRMS(samples)
-        let rawPeak = samples.reduce(0) { max($0, abs(Int($1))) }
-        capturePeakRawRMS = max(capturePeakRawRMS, rawRMS)
-        capturePeakRawSample = max(capturePeakRawSample, rawPeak)
-        let codecInput = prepareSamplesForCodec(samples, sourceSampleRate: sampleRate)
-        let codecRMS = computeRMS(codecInput)
-        let codecPeak = codecInput.reduce(0) { max($0, abs(Int($1))) }
-        capturePeakCodecRMS = max(capturePeakCodecRMS, codecRMS)
-        capturePeakCodecSample = max(capturePeakCodecSample, codecPeak)
-        let transmittedInput: [Int16]
-        let appliedGain: Double
-        switch MicrophoneGainSettings.mode() {
-        case .automatic:
-            let gained = microphoneGain.process(codecInput)
-            transmittedInput = gained.samples
-            appliedGain = gained.appliedGain
-        case .manual:
-            let gained = MicrophoneGainSettings.process(
-                codecInput,
-                multiplier: MicrophoneGainSettings.load()
-            )
-            transmittedInput = gained.samples
-            appliedGain = gained.appliedMultiplier
+    private func acceptCaptureDSPResult(_ result: CaptureDSPProcessor.Result, sourceSampleCount: Int, fresh: Bool) {
+        guard result.generation == captureGeneration, nativeCaptureGeneration == result.generation else { return }
+        captureDSPResults[result.ordinal] = (result, sourceSampleCount, fresh)
+        while let next = captureDSPResults.removeValue(forKey: captureDSPNextOrdinal) {
+            captureDSPNextOrdinal &+= 1
+            if next.2 { applyCaptureDSPResult(next.0, sourceSampleCount: next.1) }
         }
-        if !transmittedInput.isEmpty { onRecordingPCM?(transmittedInput) }
-        let transmittedRMS = computeRMS(transmittedInput)
-        let transmittedPeak = transmittedInput.reduce(0) { max($0, abs(Int($1))) }
-        captureMaximumAppliedGain = max(captureMaximumAppliedGain, appliedGain)
-        capturePeakTransmittedRMS = max(capturePeakTransmittedRMS, transmittedRMS)
-        capturePeakTransmittedSample = max(capturePeakTransmittedSample, transmittedPeak)
-        if captureBufferCount == 1 {
-            VoiceDiagnosticLog.record("first input PCM frames=\(samples.count) rate=\(sampleRate) rms=\(rawRMS) peak=\(rawPeak) codecFrames=\(codecInput.count) codecRMS=\(codecRMS) codecPeak=\(codecPeak) txRMS=\(transmittedRMS) txPeak=\(transmittedPeak) gain=\(appliedGain)")
-        }
-        encodeTransmitPCM(transmittedInput)
+    }
 
-        // The TX meter represents the samples sent after microphone gain.
-        inputLevel = min(1.0, transmittedRMS / 10000.0)
+    private func applyCaptureDSPResult(_ result: CaptureDSPProcessor.Result, sourceSampleCount: Int) {
+        let generation = result.generation
+        guard (isCapturing && isCaptureRequestCurrent(generation)) ||
+              (captureDrainGeneration == generation && captureGeneration == generation) else { return }
+        captureBufferCount += 1
+        captureSampleCount += sourceSampleCount
+        let metrics = result.metrics
+        capturePeakRawRMS = max(capturePeakRawRMS, metrics.rawRMS)
+        capturePeakRawSample = max(capturePeakRawSample, metrics.rawPeak)
+        capturePeakCodecRMS = max(capturePeakCodecRMS, metrics.codecRMS)
+        capturePeakCodecSample = max(capturePeakCodecSample, metrics.codecPeak)
+        captureMaximumAppliedGain = max(captureMaximumAppliedGain, metrics.appliedGain)
+        capturePeakTransmittedRMS = max(capturePeakTransmittedRMS, metrics.transmittedRMS)
+        capturePeakTransmittedSample = max(capturePeakTransmittedSample, metrics.transmittedPeak)
+        captureCodecSampleRemainder = metrics.gsmSampleRemainder
+        captureEncodedFrameRemainder = metrics.gsmFrameRemainder
+        if !result.transmittedPCM.isEmpty {
+            onRecordingPCM?(result.transmittedPCM)
+            onCapturedPCM?(result.transmittedPCM)
+        }
+        for packet in result.encodedPackets {
+            captureEncodedByteCount += packet.count
+            onCapturedAudio?(packet)
+        }
+        inputLevel = min(1, metrics.transmittedRMS / 10000)
         capturePeakLevel = max(capturePeakLevel, inputLevel)
+        if captureBufferCount == 1 {
+            VoiceDiagnosticLog.record("first capture DSP buffers codecRMS=\(metrics.codecRMS) txRMS=\(metrics.transmittedRMS) gain=\(metrics.appliedGain)")
+        }
     }
 
     /// Encodes gained, mono 8 kHz PCM from the capture graph. Speex callbacks
@@ -1658,6 +1704,9 @@ final class AudioEngine: ObservableObject {
     }
 
     private func invalidateCaptureStart(preservingIntent: Bool) {
+        captureDSP.end(generation: captureGeneration)
+        nativeCaptureGeneration = nil
+        captureDSPResults.removeAll(keepingCapacity: true)
         captureGeneration &+= 1
         captureDrainGeneration = nil
         captureRecoveryTask?.cancel()

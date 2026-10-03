@@ -19,7 +19,7 @@ struct ReceivePlaybackGain {
 struct ReceivePlaybackQueue {
     private(set) var queuedSamples = 0
     private(set) var generation: UInt64 = 0
-    let maximumSamples = 1_920 // 240 ms at 8 kHz
+    let maximumSamples = 1_936 // 242 ms (includes up to 0.5% clock correction) at 8 kHz
     func needsReset(adding count: Int) -> Bool { queuedSamples + count > maximumSamples }
     mutating func reserve(_ count: Int) -> UInt64 {
         queuedSamples += count

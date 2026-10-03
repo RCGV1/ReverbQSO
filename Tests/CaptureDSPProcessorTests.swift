@@ -1,0 +1,221 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import XCTest
+@testable import ReverbQSO
+
+final class CaptureDSPProcessorTests: XCTestCase {
+    private let manualUnity = CaptureDSPProcessor.Configuration(
+        codec: .gsm,
+        gainMode: .manual,
+        manualGainMultiplier: 1
+    )
+
+    func testProcessingMatchesExistingResamplerAndGSMCodec() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 1
+        let input = (0..<960).map { Int16(($0 % 101) * 200 - 10_000) }
+        var expectedState = PCMLinearResamplerState()
+        let expectedPCM = PCMLinearResampler.resample(
+            input,
+            sourceSampleRate: 48_000,
+            targetSampleRate: 8_000,
+            state: &expectedState
+        )
+        let expectedEncoded = GSMCodec().encode(expectedPCM)
+        processor.begin(generation: generation)
+
+        let result = try await submit(
+            processor, samples: input, sampleRate: 48_000,
+            generation: generation, configuration: manualUnity
+        )
+
+        XCTAssertEqual(result.transmittedPCM, expectedPCM)
+        XCTAssertEqual(result.encodedPackets, [expectedEncoded])
+        XCTAssertEqual(result.metrics.gsmSampleRemainder, 0)
+        XCTAssertEqual(result.metrics.gsmFrameRemainder, 1)
+    }
+
+    func testSequentialSubmissionsPreserveStreamingResamplerState() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 2
+        processor.begin(generation: generation)
+        let input = (0..<1_000).map { Int16(($0 % 97) * 300 - 12_000) }
+        var actual: [Int16] = []
+        for offset in stride(from: 0, to: input.count, by: 73) {
+            let end = min(input.count, offset + 73)
+            let result = try await submit(
+                processor, samples: Array(input[offset..<end]), sampleRate: 44_100,
+                generation: generation, configuration: manualUnity
+            )
+            actual += result.transmittedPCM
+        }
+        var expectedState = PCMLinearResamplerState()
+        let expected = PCMLinearResampler.resample(
+            input, sourceSampleRate: 44_100, targetSampleRate: 8_000,
+            state: &expectedState
+        )
+        XCTAssertEqual(actual.count, expected.count)
+        XCTAssertLessThanOrEqual(zip(actual, expected).map { abs(Int($0) - Int($1)) }.max() ?? 0, 256)
+    }
+
+    func testEndImmediatelyRejectsOldGeneration() async {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 3)
+        processor.end(generation: 3)
+
+        let result = await submitOptional(
+            processor, samples: [1, -1], sampleRate: 8_000,
+            generation: 3, configuration: manualUnity
+        )
+        XCTAssertNil(result)
+        let flushed = await processor.flush(generation: 3)
+        XCTAssertTrue(flushed.isEmpty)
+    }
+
+    func testNewGenerationDoesNotInheritGSMRemainder() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 4)
+        _ = try await submit(
+            processor, samples: [Int16](repeating: 100, count: 79), sampleRate: 8_000,
+            generation: 4, configuration: manualUnity
+        )
+        processor.begin(generation: 5)
+
+        let result = try await submit(
+            processor, samples: [Int16](repeating: 200, count: 160), sampleRate: 8_000,
+            generation: 5, configuration: manualUnity
+        )
+        XCTAssertEqual(result.metrics.gsmSampleRemainder, 0)
+        XCTAssertEqual(result.encodedPackets.first?.count, 4 + GSMCodec.encodedFrameSize)
+    }
+
+    func testEndingOldGenerationDoesNotResetNewGenerationPartialFrame() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 8)
+        processor.begin(generation: 9)
+        let first = try await submit(
+            processor, samples: [Int16](repeating: 300, count: 79), sampleRate: 8_000,
+            generation: 9, configuration: manualUnity
+        )
+        XCTAssertTrue(first.encodedPackets.isEmpty)
+
+        processor.end(generation: 8)
+        let second = try await submit(
+            processor, samples: [Int16](repeating: 300, count: 81), sampleRate: 8_000,
+            generation: 9, configuration: manualUnity
+        )
+
+        XCTAssertEqual(second.encodedPackets.first?.count, 4 + GSMCodec.encodedFrameSize)
+        XCTAssertEqual(second.metrics.gsmSampleRemainder, 0)
+    }
+
+    func testDSPCompletionDoesNotWaitForMainActor() async {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 10
+        let mainActorStarted = expectation(description: "main actor occupied")
+        let dspCompleted = expectation(description: "DSP completed")
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        processor.begin(generation: generation)
+
+        DispatchQueue.main.async {
+            mainActorStarted.fulfill()
+            releaseMainActor.wait()
+        }
+        await fulfillment(of: [mainActorStarted], timeout: 1)
+
+        processor.submit(
+            samples: [Int16](repeating: 500, count: 160),
+            sampleRate: 8_000,
+            generation: generation,
+            capturedAt: ProcessInfo.processInfo.systemUptime,
+            configuration: manualUnity
+        ) { result in
+            XCTAssertNotNil(result)
+            dspCompleted.fulfill()
+            releaseMainActor.signal()
+        }
+        await fulfillment(of: [dspCompleted], timeout: 1)
+        // Also release on timeout so a regression cannot strand the test runner's main actor.
+        releaseMainActor.signal()
+    }
+
+    func testLongCaptureGapDiscardsOldPartialFrame() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 11)
+        _ = try await submit(processor, samples: [Int16](repeating: 500, count: 79),
+            sampleRate: 8000, generation: 11, configuration: manualUnity)
+        try await Task.sleep(for: .milliseconds(270))
+        let staleFlush = await processor.flush(generation: 11)
+        XCTAssertTrue(staleFlush.isEmpty)
+        let resumed = try await submit(processor, samples: [Int16](repeating: 1000, count: 81),
+            sampleRate: 8000, generation: 11, configuration: manualUnity)
+        XCTAssertTrue(resumed.encodedPackets.isEmpty)
+        XCTAssertEqual(resumed.metrics.gsmSampleRemainder, 81)
+        XCTAssertEqual(resumed.ordinal, 1)
+    }
+
+    func testFlushPadsGSMToFourFramePacketBoundary() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 6
+        processor.begin(generation: generation)
+        _ = try await submit(
+            processor, samples: [Int16](repeating: 500, count: 137), sampleRate: 8_000,
+            generation: generation, configuration: manualUnity
+        )
+
+        let flushed = await processor.flush(generation: generation)
+        let payload = try XCTUnwrap(GSMCodec.stripHeader(flushed))
+        XCTAssertEqual(payload.count, 4 * GSMCodec.encodedFrameSize)
+        XCTAssertEqual(GSMCodec().decodePacket(flushed).count, 4 * GSMCodec.samplesPerFrame)
+    }
+
+    func testManualGainIsAppliedBeforeEncoding() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        let generation: UInt64 = 7
+        processor.begin(generation: generation)
+        let configuration = CaptureDSPProcessor.Configuration(
+            codec: .gsm, gainMode: .manual, manualGainMultiplier: 2
+        )
+
+        let result = try await submit(
+            processor, samples: [1_000, -1_000], sampleRate: 8_000,
+            generation: generation, configuration: configuration
+        )
+        XCTAssertEqual(result.transmittedPCM, [2_000, -2_000])
+        XCTAssertEqual(result.metrics.appliedGain, 2)
+    }
+
+    private func submit(
+        _ processor: CaptureDSPProcessor,
+        samples: [Int16],
+        sampleRate: Double,
+        generation: UInt64,
+        configuration: CaptureDSPProcessor.Configuration
+    ) async throws -> CaptureDSPProcessor.Result {
+        let result = await submitOptional(
+            processor, samples: samples, sampleRate: sampleRate,
+            generation: generation, configuration: configuration
+        )
+        return try XCTUnwrap(result)
+    }
+
+    private func submitOptional(
+        _ processor: CaptureDSPProcessor,
+        samples: [Int16],
+        sampleRate: Double,
+        generation: UInt64,
+        configuration: CaptureDSPProcessor.Configuration
+    ) async -> CaptureDSPProcessor.Result? {
+        await withCheckedContinuation { continuation in
+            processor.submit(
+                samples: samples,
+                sampleRate: sampleRate,
+                generation: generation,
+                capturedAt: ProcessInfo.processInfo.systemUptime,
+                configuration: configuration
+            ) { result in
+                continuation.resume(returning: result)
+            }
+        }
+    }
+}
