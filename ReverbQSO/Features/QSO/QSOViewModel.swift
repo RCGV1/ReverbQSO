@@ -10,6 +10,7 @@ final class QSOViewModel: ObservableObject {
     // MARK: - Published State
 
     @Published var isRecording = false
+    @Published var isAutomaticallyRecording = false
     @Published var session: QSOSession?
     @Published var isConnected = false
     @Published var isPTTActive = false
@@ -100,6 +101,7 @@ final class QSOViewModel: ObservableObject {
 
     private func bindToService() {
         connectionService.$isRecording.receive(on: DispatchQueue.main).assign(to: &$isRecording)
+        connectionService.$isAutomaticallyRecording.receive(on: DispatchQueue.main).assign(to: &$isAutomaticallyRecording)
 
         connectionService.$session
             .receive(on: DispatchQueue.main)

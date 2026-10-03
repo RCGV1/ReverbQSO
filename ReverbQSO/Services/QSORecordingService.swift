@@ -58,12 +58,42 @@ final class QSOAudioFileWriter {
     }
 }
 
+enum QSORecordingKind: String, Codable {
+    case clip
+    case qso
+}
+
 struct QSORecording: Identifiable, Codable, Equatable {
     let id: UUID
     let callsign: String
     let startedAt: Date
     var duration: TimeInterval
     let url: URL
+    let kind: QSORecordingKind
+
+    init(id: UUID, callsign: String, startedAt: Date, duration: TimeInterval, url: URL,
+         kind: QSORecordingKind = .qso) {
+        self.id = id
+        self.callsign = callsign
+        self.startedAt = startedAt
+        self.duration = duration
+        self.url = url
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, callsign, startedAt, duration, url, kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        callsign = try values.decode(String.self, forKey: .callsign)
+        startedAt = try values.decode(Date.self, forKey: .startedAt)
+        duration = try values.decode(TimeInterval.self, forKey: .duration)
+        url = try values.decode(URL.self, forKey: .url)
+        kind = try values.decodeIfPresent(QSORecordingKind.self, forKey: .kind) ?? .qso
+    }
 }
 
 @MainActor
@@ -84,7 +114,7 @@ final class QSORecordingService: ObservableObject {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ReverbQSO/Recordings/\(demo ? "Demo" : "QSOs")", isDirectory: true)
     }
-    func start(callsign: String) throws {
+    func start(callsign: String, kind: QSORecordingKind = .qso) throws {
         guard !isRecording else { return }
         errorMessage = nil
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -92,7 +122,8 @@ final class QSORecordingService: ObservableObject {
         let fileURL = folder.appendingPathComponent(id.uuidString + ".wav")
         let partial = folder.appendingPathComponent(id.uuidString + ".partial")
         writer = try QSOAudioFileWriter(url: partial)
-        current = QSORecording(id: id, callsign: callsign, startedAt: Date(), duration: 0, url: fileURL)
+        current = QSORecording(id: id, callsign: callsign, startedAt: Date(), duration: 0,
+                               url: fileURL, kind: kind)
         temporaryURL = partial
         isRecording = true
     }
@@ -127,7 +158,8 @@ final class QSORecordingService: ObservableObject {
                 guard let data = try? Data(contentsOf: url), var item = try? JSONDecoder().decode(QSORecording.self, from: data) else { return nil }
                 // Resolve inside our storage directory; app container paths change on upgrades.
                 item = QSORecording(id: item.id, callsign: item.callsign, startedAt: item.startedAt,
-                                    duration: item.duration, url: folder.appendingPathComponent(item.id.uuidString + ".wav"))
+                                    duration: item.duration, url: folder.appendingPathComponent(item.id.uuidString + ".wav"),
+                                    kind: item.kind)
                 return FileManager.default.fileExists(atPath: item.url.path) ? item : nil
             }.sorted { $0.startedAt > $1.startedAt }
     }

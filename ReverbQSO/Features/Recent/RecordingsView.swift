@@ -27,7 +27,15 @@ struct RecordingsView: View {
                         ? "Stop recording with \(recording.callsign)"
                         : "Play recording with \(recording.callsign)")
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(recording.callsign).font(.headline.monospaced())
+                        HStack(spacing: 6) {
+                            Text(recording.callsign).font(.headline.monospaced())
+                            Text(recording.kind == .clip ? "Clip" : "QSO")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(.secondary.opacity(0.12), in: Capsule())
+                        }
                         Text(recording.startedAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption).foregroundStyle(.secondary)
                         Text(Duration.seconds(recording.duration).formatted(.time(pattern: .minuteSecond)))

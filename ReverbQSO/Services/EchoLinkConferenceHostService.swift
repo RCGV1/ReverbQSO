@@ -34,39 +34,55 @@ final class EchoLinkConferenceHostService: ObservableObject {
         var timestamp: UInt32 = 0
     }
 
+    /// Manual clips and automatic QSO recordings share PCM, not their lifetime.
     @Published private(set) var isRecording = false
-    private var recordingService: QSORecordingService?
+    @Published private(set) var isAutomaticallyRecording = false
+    private var recordingCoordinator: QSORecordingCoordinator?
+    private let recordingDefaults: UserDefaults
+    private let recordingFolder: URL?
+    private var recordingPreferencesSubscription: AnyCancellable?
 
     func toggleRecording() {
-        if recordingService != nil { stopRecording(); return }
         guard sessions.contains(where: { $0.state == .active }) else { return }
-        let recorder = QSORecordingService(demo: isLocalDemo)
-        do {
-            try recorder.start(callsign: isPersonalMode ? (sessions.first?.callsign ?? localCallsign) : localCallsign)
-            recordingService = recorder
-            isRecording = true
-            let appendPCM: @MainActor ([Int16]) -> Void = { [weak self, weak recorder] samples in
-                recorder?.append(samples)
-                if recorder?.isRecording == false {
-                    self?.isRecording = false
-                    self?.errorMessage = recorder?.errorMessage
-                    self?.audioEngine.onRecordingPCM = nil
-                    self?.onUnmonitoredReceivedPCM = nil
-                    self?.recordingService = nil
-                }
-            }
-            audioEngine.onRecordingPCM = appendPCM
-            onUnmonitoredReceivedPCM = appendPCM
-        } catch { errorMessage = "Could not start recording: \(error.localizedDescription)" }
+        prepareSessionRecording()
+        recordingCoordinator?.toggleClip()
+        publishRecordingState()
+    }
+
+    private func prepareSessionRecording() {
+        guard recordingCoordinator == nil,
+              sessions.contains(where: { $0.state == .active }) else { return }
+        let coordinator = QSORecordingCoordinator(
+            folder: recordingFolder, demo: isLocalDemo, defaults: recordingDefaults
+        )
+        recordingCoordinator = coordinator
+        coordinator.startSession(callsign: isPersonalMode ? (sessions.first?.callsign ?? localCallsign) : localCallsign)
+        let appendPCM: @MainActor ([Int16]) -> Void = { [weak self] samples in
+            guard let self, self.isRecording || self.isAutomaticallyRecording else { return }
+            self.recordingCoordinator?.append(samples)
+            self.publishRecordingState()
+        }
+        audioEngine.onRecordingPCM = appendPCM
+        onUnmonitoredReceivedPCM = appendPCM
+        publishRecordingState()
+    }
+
+    private func publishRecordingState() {
+        let clip = recordingCoordinator?.isRecordingClip ?? false
+        let automatic = recordingCoordinator?.isAutomaticallyRecording ?? false
+        if isRecording != clip { isRecording = clip }
+        if isAutomaticallyRecording != automatic { isAutomaticallyRecording = automatic }
+        if let message = recordingCoordinator?.errorMessage { errorMessage = message }
     }
 
     private func stopRecording() {
-        recordingService?.stop()
-        if let message = recordingService?.errorMessage { errorMessage = message }
-        recordingService = nil
+        recordingCoordinator?.stopSession()
+        publishRecordingState()
+        recordingCoordinator = nil
         audioEngine.onRecordingPCM = nil
         onUnmonitoredReceivedPCM = nil
         isRecording = false
+        isAutomaticallyRecording = false
     }
 
     @Published private(set) var isRunning = false
@@ -121,10 +137,14 @@ final class EchoLinkConferenceHostService: ObservableObject {
 
     init(
         audioEngine injectedAudioEngine: AudioEngine? = nil,
-        prepareCaptureInput: (@MainActor () async -> Bool)? = nil
+        prepareCaptureInput: (@MainActor () async -> Bool)? = nil,
+        recordingDefaults: UserDefaults = .standard,
+        recordingFolder: URL? = nil
     ) {
         let audioEngine = injectedAudioEngine ?? AudioEngine()
         self.audioEngine = audioEngine
+        self.recordingDefaults = recordingDefaults
+        self.recordingFolder = recordingFolder
         self.prepareCaptureInput = prepareCaptureInput ?? { [audioEngine] in
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
             await audioEngine.prepareCaptureInput()
@@ -132,6 +152,12 @@ final class EchoLinkConferenceHostService: ObservableObject {
             true
 #endif
         }
+        recordingPreferencesSubscription = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.recordingCoordinator?.refreshAutomaticRecording()
+                self?.publishRecordingState()
+            }
         audioEngine.$inputLevel
             .receive(on: DispatchQueue.main)
             .assign(to: &$inputLevel)
@@ -848,8 +874,9 @@ final class EchoLinkConferenceHostService: ObservableObject {
     }
 
     private func publishSessions() {
-        if machine?.sessions.contains(where: { $0.state == .active }) != true { stopRecording() }
         sessions = machine?.sessions.filter { $0.state == .active } ?? []
+        if sessions.isEmpty { stopRecording() }
+        else { prepareSessionRecording() }
         let activeIDs = Set(sessions.map(\.id))
         peerAudioCodecs = peerAudioCodecs.filter { activeIDs.contains($0.key) }
         let admittedIDs = Set((machine?.sessions ?? []).map(\.id))

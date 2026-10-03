@@ -61,12 +61,14 @@
 		29BEA05925DAE8D131603FC5 /* oe_speex.c in Sources */ = {isa = PBXBuildFile; fileRef = BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */; };
 		2D7645E0823FA9017E7FC51C /* gsm_destroy.c in Sources */ = {isa = PBXBuildFile; fileRef = 4D9043D7B8497DCBA7B0A88E /* gsm_destroy.c */; };
 		2D7CEFB6051D9B1E705B4B0A /* gain_table_lbr.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C994F6CBD263D438531D247 /* gain_table_lbr.c */; };
+		2EEDA4577EB79A64D0560186 /* QSORecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDFB7C338CBA54A29D2B513F /* QSORecordingCoordinator.swift */; };
 		30157DE6EC53AF3B7A5CF8F9 /* ConferenceReceiveAudioCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5905F0C404FCEB7D4B845D6 /* ConferenceReceiveAudioCodec.swift */; };
 		32CA2D2D3313AAEA9BB0D581 /* AudioEngineMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7DCFBAA2398518405D9B3EF /* AudioEngineMeterTests.swift */; };
 		32F2A307A0BE7C5D08605CC4 /* QSOActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75ACD42FABF777BCD5F3E642 /* QSOActivityWidget.swift */; };
 		338F0F6E8D1BFDC1E20E402C /* table.c in Sources */ = {isa = PBXBuildFile; fileRef = 6E255B3BF91775C965FB1FF6 /* table.c */; };
 		347AF87AECDB052CAB3BD05E /* LocalDemoConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F06CE461936AB642879E5B8 /* LocalDemoConnectionTests.swift */; };
 		351FB9B783B28806EB7534D9 /* RecordingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC67AFDF8A99EB55D03939F /* RecordingsView.swift */; };
+		3653CABEFBAB6A5286539DE1 /* RecordingSettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F46B9DF9929FD7D44F824F /* RecordingSettingsRows.swift */; };
 		36AC9B6FB8B22CC91C6C646F /* bits.c in Sources */ = {isa = PBXBuildFile; fileRef = 2389A93C460281932BAF12B3 /* bits.c */; };
 		36DE69DE126CCD0AAC21B0C4 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 974F1A659815E325DADC68A2 /* LicensesView.swift */; };
 		37A348F9E3A0B98870A72F8D /* SvxLinkControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB9B23D4DBAC0A508F74AAF /* SvxLinkControlProtocol.swift */; };
@@ -136,6 +138,7 @@
 		6C5C6FC2276D6096820D256C /* GSMCodecStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376C2423E9F207C5AA18744 /* GSMCodecStreamingTests.swift */; };
 		6CC2DDE13F3E24FB40C6A8F4 /* exc_8_128_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 850E2724B4EA1B7110B85BCB /* exc_8_128_table.c */; };
 		6D9A9ECB82DFBDBE3F0D3F8C /* CallCQ.swift in Sources */ = {isa = PBXBuildFile; fileRef = D89EF774CA60188FC6106E2A /* CallCQ.swift */; };
+		6DCC6ADD211C255BC7D63752 /* SessionRecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */; };
 		6E23B4706FE4C0D253EA7B1D /* QSORecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */; };
 		6E87B621682DE1896EB42C79 /* long_term.c in Sources */ = {isa = PBXBuildFile; fileRef = 7FE4420220A9AF3ECCD84FDB /* long_term.c */; };
 		7114D4AC8A497D2C2F1723F7 /* exc_5_64_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 09A2E4FAB66390BE5E9512D2 /* exc_5_64_table.c */; };
@@ -170,6 +173,7 @@
 		88D3077F693C42A43BD5C244 /* EchoLinkProxyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F056559D3E04DA72FF6FDA /* EchoLinkProxyClient.swift */; };
 		8924175E608905519F1E20CB /* SvxLinkPTYTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DED06C2E2DB60658CC1AA2 /* SvxLinkPTYTransport.swift */; };
 		8AA96E887B61D0AE2D036852 /* InboundHostSessionMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FA40CA3FB11465D5ECAC9A /* InboundHostSessionMachine.swift */; };
+		8B893238E4554AFD84596CD0 /* QSORecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDFB7C338CBA54A29D2B513F /* QSORecordingCoordinator.swift */; };
 		8F08D59E2CA78A98A0CB1FC0 /* BoundUDPSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8AB645B1086D55A593508F7 /* BoundUDPSocketTests.swift */; };
 		8FF100F43D8401823EEBB2A3 /* CallCQService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */; };
 		90053FF31E51AD107054AF7F /* cb_search.c in Sources */ = {isa = PBXBuildFile; fileRef = 6F6B82FDD60798A38F9145E0 /* cb_search.c */; };
@@ -234,6 +238,7 @@
 		C5E80421B7EB42583CD19CD6 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF565DD4475E19F4A8C264C /* AudioEngine.swift */; };
 		C6ABFC8C479EB005CBD69933 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE902BACF5D5E9E9421692AA /* Network.framework */; };
 		C6DD77E5AE4984630CC2B51D /* gsm_decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 93304898C5B9D4B78B98237E /* gsm_decode.c */; };
+		C7CDA512BC745375966639BD /* RecordingSettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F46B9DF9929FD7D44F824F /* RecordingSettingsRows.swift */; };
 		C7E34A4B73A27839EAB76562 /* speex_callbacks.c in Sources */ = {isa = PBXBuildFile; fileRef = CB5E241E34C943B235347E15 /* speex_callbacks.c */; };
 		C82AD6645A5EB0147870744C /* ReverbQSOApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C38FC54681270081A0DD0F /* ReverbQSOApp.swift */; };
 		C8BA15F960E39C5FC451BCC6 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6D0EEB971EC92EB2FE7F099C /* Security.framework */; };
@@ -546,6 +551,7 @@
 		BB8A1DE4FA89DB9DCFC0DF96 /* ConferenceFloorRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceFloorRouterTests.swift; sourceTree = "<group>"; };
 		BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = oe_speex.c; sourceTree = "<group>"; };
 		BDC67AFDF8A99EB55D03939F /* RecordingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsView.swift; sourceTree = "<group>"; };
+		BDFB7C338CBA54A29D2B513F /* QSORecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSORecordingCoordinator.swift; sourceTree = "<group>"; };
 		BF2049383B9D05134465FD85 /* lpc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lpc.c; sourceTree = "<group>"; };
 		C0B083C35268C27C15951976 /* QSOSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOSession.swift; sourceTree = "<group>"; };
 		C2E30DB1AAC2A305A3F52652 /* cb_search.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search.h; sourceTree = "<group>"; };
@@ -556,9 +562,11 @@
 		C588F1C170C18D99070E65C1 /* _kiss_fft_guts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = _kiss_fft_guts.h; sourceTree = "<group>"; };
 		C5B801BC8CE57413932CAA3D /* hexc_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hexc_table.c; sourceTree = "<group>"; };
 		C71DD22FFDFBA509336DBD81 /* modes_wb.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = modes_wb.c; sourceTree = "<group>"; };
+		C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecordingTests.swift; sourceTree = "<group>"; };
 		C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		C8B202E231EC5BD0BBA49C12 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		C8E42AD9781FFBA40E131751 /* PTTIntentSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTTIntentSelectionTests.swift; sourceTree = "<group>"; };
+		C9F46B9DF9929FD7D44F824F /* RecordingSettingsRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSettingsRows.swift; sourceTree = "<group>"; };
 		CB00632BC7FE525A8838DB8C /* ActiveNodeParticipant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveNodeParticipant.swift; sourceTree = "<group>"; };
 		CB2EE327B18F5BB1536DCE6F /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
 		CB5E241E34C943B235347E15 /* speex_callbacks.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = speex_callbacks.c; sourceTree = "<group>"; };
@@ -674,6 +682,7 @@
 				FBC3E5EBB13F7438A00FE95E /* KeychainService.swift */,
 				CC13B0201548F1CD64A985FB /* MicrophoneAccess.swift */,
 				C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */,
+				BDFB7C338CBA54A29D2B513F /* QSORecordingCoordinator.swift */,
 				64E92CC74BFAC2DB7B0537EB /* QSORecordingService.swift */,
 				2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */,
 				37788FB35CAB5C96D4EE8EC9 /* VoiceDiagnosticLog.swift */,
@@ -722,6 +731,7 @@
 				641E5CA234459D7B966CA2A9 /* QSOHubTests.swift */,
 				DEF9EC01347B55DF2ED92158 /* QSORecordingTests.swift */,
 				31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */,
+				C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */,
 				0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */,
 				3AE78B9A116D6DBE0F596A80 /* SpeexTransmitConnectionTests.swift */,
 				87D626C16504AC800EB87B17 /* SpeexTransmitNegotiationTests.swift */,
@@ -1108,6 +1118,7 @@
 			children = (
 				4DD9CC149C9EF38AF97567B3 /* CallRestrictionsView.swift */,
 				974F1A659815E325DADC68A2 /* LicensesView.swift */,
+				C9F46B9DF9929FD7D44F824F /* RecordingSettingsRows.swift */,
 				7A88B9776F4DD27D96376EBF /* SettingsView.swift */,
 				5A522A7344F5E97A24AA170C /* SettingsViewModel.swift */,
 			);
@@ -1321,8 +1332,10 @@
 				7A0CE7B8A584C6106159E1E2 /* LocalDemoAudioBuffer.swift in Sources */,
 				084305E82CB9FE2F323033E7 /* MicrophoneAccess.swift in Sources */,
 				77BC96485A0B74950F76B150 /* PCMLinearResampler.swift in Sources */,
+				2EEDA4577EB79A64D0560186 /* QSORecordingCoordinator.swift in Sources */,
 				6E23B4706FE4C0D253EA7B1D /* QSORecordingService.swift in Sources */,
 				964ED6C4B640146A330F8523 /* QSOSession.swift in Sources */,
+				3653CABEFBAB6A5286539DE1 /* RecordingSettingsRows.swift in Sources */,
 				351FB9B783B28806EB7534D9 /* RecordingsView.swift in Sources */,
 				D338C344B04CE7447A030F54 /* SpeexCodec.swift in Sources */,
 				756761DE246C3DF2E3EC52FC /* Station+Location.swift in Sources */,
@@ -1437,6 +1450,7 @@
 				7D394FD29AD0E853B9D1C438 /* QSOHubTests.swift in Sources */,
 				ADBA33E5E994EABA9EEE8032 /* QSORecordingTests.swift in Sources */,
 				BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */,
+				6DCC6ADD211C255BC7D63752 /* SessionRecordingTests.swift in Sources */,
 				9ABC42B6BD501158C5BF9207 /* SpeexCodecTests.swift in Sources */,
 				67E687059396415808259B74 /* SpeexTransmitConnectionTests.swift in Sources */,
 				4A92643B26A065BEA12CE382 /* SpeexTransmitNegotiationTests.swift in Sources */,
@@ -1523,6 +1537,7 @@
 				033EC3ACFE2AC2C36CB42D0F /* QSOActivityAttributes.swift in Sources */,
 				73F0F50A3EA272CD87E3255E /* QSOActivityController.swift in Sources */,
 				D70F8F05F92EC9F779B04AEA /* QSOHub.swift in Sources */,
+				8B893238E4554AFD84596CD0 /* QSORecordingCoordinator.swift in Sources */,
 				C2CA22193ECBDFB9BC8ABE5A /* QSORecordingService.swift in Sources */,
 				53CF091FACA3C57AD7AFB2D8 /* QSOSession.swift in Sources */,
 				969EA72E52B7723F16B67150 /* QSOSharedPanels.swift in Sources */,
@@ -1531,6 +1546,7 @@
 				C239F7A64A0060C733F54887 /* RecentConnection.swift in Sources */,
 				C03632AC19A627B7CD4EDCCB /* RecentConnectionsService.swift in Sources */,
 				1A8D4FAB222FCEF64A269E5D /* RecentView.swift in Sources */,
+				C7CDA512BC745375966639BD /* RecordingSettingsRows.swift in Sources */,
 				C94AB257995CCD2E953202C7 /* RecordingsView.swift in Sources */,
 				C82AD6645A5EB0147870744C /* ReverbQSOApp.swift in Sources */,
 				AFACD13DAD8583A5F3A4A719 /* SettingsView.swift in Sources */,

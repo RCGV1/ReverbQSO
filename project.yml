@@ -76,6 +76,7 @@ targets:
     sources:
       - path: ReverbQSO/Features/Recent/RecordingsView.swift
       - path: ReverbQSO/Features/Settings/CallRestrictionsView.swift
+      - path: ReverbQSO/Features/Settings/RecordingSettingsRows.swift
       - path: Companions/Watch
         excludes:
           - WatchInfo.plist

@@ -187,8 +187,19 @@ struct ConferenceHostView: View {
             if host.isRunning && !host.sessions.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { host.toggleRecording() } label: {
-                        Label(host.isRecording ? "Stop Recording" : "Record QSO", systemImage: host.isRecording ? "stop.circle.fill" : "record.circle")
+                        Label(host.isRecording ? "Stop Clip" : "Record Clip", systemImage: host.isRecording ? "stop.circle.fill" : "record.circle")
                     }.tint(host.isRecording ? .red : .primary)
+                }
+                if host.isAutomaticallyRecording {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Label(host.isRecording ? "Automatically recording + clip" : "Automatically recording",
+                              systemImage: "record.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        #if !targetEnvironment(macCatalyst)
+                        .labelStyle(.iconOnly)
+                        #endif
+                    }
                 }
             }
         }

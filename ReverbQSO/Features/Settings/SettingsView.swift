@@ -34,6 +34,7 @@ struct SettingsView: View {
                 }
                 Section("Calls") { NavigationLink("Call Restrictions") { CallRestrictionsView(demo: appState.isDemoMode) } }
                 Section("Audio") { audioContent }
+                Section("Recording") { RecordingSettingsRows(demo: appState.isDemoMode) }
                 Section("Notifications") { notificationContent }
                 Section("Network") { connectionContent }
                 Section("About") { aboutContent }
@@ -53,7 +54,8 @@ struct SettingsView: View {
                         )
                     }
                     Section("Calls") { NavigationLink("Call Restrictions") { CallRestrictionsView(demo: appState.isDemoMode) } }
-                Section("Audio") { audioContent }
+                    Section("Audio") { audioContent }
+                    Section("Recording") { RecordingSettingsRows(demo: appState.isDemoMode) }
                     Section("Network") { connectionContent }
                     Section("About") { aboutContent }
                 }

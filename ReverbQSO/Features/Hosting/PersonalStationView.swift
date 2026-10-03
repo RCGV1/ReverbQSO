@@ -40,7 +40,7 @@ struct PersonalStationView: View {
             if activeCall != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { host.toggleRecording() } label: {
-                        Label(host.isRecording ? "Stop Recording" : "Record QSO",
+                        Label(host.isRecording ? "Stop Clip" : "Record Clip",
                               systemImage: host.isRecording ? "stop.circle.fill" : "record.circle")
                     }.tint(host.isRecording ? .red : .primary)
                 }
@@ -334,6 +334,17 @@ struct PersonalStationView: View {
                 Spacer()
                 Button("End Call", role: .destructive) { confirmsEndCall = true }
                     .buttonStyle(.bordered)
+            }
+
+            if host.isAutomaticallyRecording {
+                Label(host.isRecording ? "Automatically recording + clip" : "Automatically recording",
+                      systemImage: "record.circle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.red)
+            } else if host.isRecording {
+                Label("Recording clip", systemImage: "record.circle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.red)
             }
 
             HStack(spacing: 18) {

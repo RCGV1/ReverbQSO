@@ -56,11 +56,22 @@ struct QSOView: View {
             if viewModel.isConnected {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { viewModel.toggleRecording() } label: {
-                        Label(viewModel.isRecording ? "Stop Recording" : "Record QSO",
+                        Label(viewModel.isRecording ? "Stop Clip" : "Record Clip",
                               systemImage: viewModel.isRecording ? "stop.circle.fill" : "record.circle")
                     }
                     .tint(viewModel.isRecording ? .red : .primary)
-                    .accessibilityLabel(viewModel.isRecording ? "Stop recording contact" : "Record contact")
+                    .accessibilityLabel(viewModel.isRecording ? "Stop recording clip" : "Record clip")
+                }
+            }
+            if viewModel.isConnected && viewModel.isAutomaticallyRecording {
+                ToolbarItem(placement: .topBarLeading) {
+                    Label(viewModel.isRecording ? "Automatically recording + clip" : "Automatically recording",
+                          systemImage: "record.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        #if !targetEnvironment(macCatalyst)
+                        .labelStyle(.iconOnly)
+                        #endif
                 }
             }
             #if !targetEnvironment(macCatalyst)

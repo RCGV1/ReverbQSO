@@ -460,6 +460,9 @@ private struct WatchSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Recording") {
+                RecordingSettingsRows(demo: model.connectionService.isLocalDemoMode)
+            }
             Section("Calls") {
                 NavigationLink("Recordings") {
                     RecordingsView(demo: model.connectionService.isLocalDemoMode)
@@ -547,12 +550,23 @@ private struct WatchQSOView: View {
                 end: model.endPTT
             )
 
-            Button(service.isRecording ? "Stop Recording" : "Record QSO",
+            Button(service.isRecording ? "Stop Clip" : "Record Clip",
                    systemImage: service.isRecording ? "stop.circle.fill" : "record.circle") {
                 service.toggleRecording()
             }
             .font(.caption)
             .buttonStyle(.bordered)
+
+            if service.isAutomaticallyRecording {
+                Label(service.isRecording ? "Automatically recording + clip" : "Automatically recording",
+                      systemImage: "record.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            } else if service.isRecording {
+                Label("Recording clip", systemImage: "record.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
 
             if let message = service.audioStatusMessage {
                 Text(message).font(.caption2).foregroundStyle(.orange).lineLimit(2)

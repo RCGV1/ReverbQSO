@@ -514,38 +514,68 @@ final class EchoLinkConnectionService: ObservableObject {
 
     // MARK: - Published State
 
+    /// Manual clip state; automatic QSO recording runs independently.
     @Published private(set) var isRecording = false
-    private var recordingService: QSORecordingService?
+    @Published private(set) var isAutomaticallyRecording = false
+    private var recordingCoordinator: QSORecordingCoordinator?
+    private var recordingSessionID: UUID?
+    private let recordingDefaults: UserDefaults
+    private let recordingFolder: URL?
     var callAccessPolicyProvider: (() -> CallAccessPolicy)?
 
     func toggleRecording() {
-        if let recordingService {
-            recordingService.stop()
-            self.recordingService = nil
-            audioEngine.onRecordingPCM = nil
-            isRecording = false
-            if let message = recordingService.errorMessage { audioStatusMessage = message }
-            return
-        }
-        guard let session, session.state == .connected else { return }
-        let recorder = QSORecordingService(demo: isLocalDemoMode)
-        do {
-            try recorder.start(callsign: session.station.callsign)
-            recordingService = recorder
-            isRecording = true
-            audioEngine.onRecordingPCM = { [weak self, weak recorder] samples in
-                recorder?.append(samples)
-                if recorder?.isRecording == false {
-                    self?.isRecording = false
-                    self?.audioStatusMessage = recorder?.errorMessage
-                    self?.audioEngine.onRecordingPCM = nil
-                    self?.recordingService = nil
-                }
-            }
-        } catch { audioStatusMessage = "Could not start recording: \(error.localizedDescription)" }
+        guard session?.state == .connected else { return }
+        prepareSessionRecording()
+        recordingCoordinator?.toggleClip()
+        publishRecordingState()
     }
 
-    @Published var session: QSOSession?
+    private func prepareSessionRecording() {
+        guard let session, session.state == .connected,
+              recordingSessionID != session.id else { return }
+        stopSessionRecording()
+        let coordinator = QSORecordingCoordinator(
+            folder: recordingFolder, demo: isLocalDemoMode, defaults: recordingDefaults
+        )
+        recordingCoordinator = coordinator
+        recordingSessionID = session.id
+        coordinator.startSession(callsign: session.station.callsign)
+        audioEngine.onRecordingPCM = { [weak self] samples in
+            self?.appendRecordingPCM(samples)
+        }
+        publishRecordingState()
+    }
+
+    private func appendRecordingPCM(_ samples: [Int16]) {
+        guard isRecording || isAutomaticallyRecording else { return }
+        recordingCoordinator?.append(samples)
+        publishRecordingState()
+    }
+
+    private func publishRecordingState() {
+        let clip = recordingCoordinator?.isRecordingClip ?? false
+        let automatic = recordingCoordinator?.isAutomaticallyRecording ?? false
+        if isRecording != clip { isRecording = clip }
+        if isAutomaticallyRecording != automatic { isAutomaticallyRecording = automatic }
+        if let message = recordingCoordinator?.errorMessage { audioStatusMessage = message }
+    }
+
+    private func stopSessionRecording() {
+        recordingCoordinator?.stopSession()
+        publishRecordingState()
+        recordingCoordinator = nil
+        recordingSessionID = nil
+        audioEngine.onRecordingPCM = nil
+        isRecording = false
+        isAutomaticallyRecording = false
+    }
+
+    @Published var session: QSOSession? {
+        didSet {
+            if session?.state == .connected { prepareSessionRecording() }
+            else if session == nil || session?.state == .disconnected { stopSessionRecording() }
+        }
+    }
     @Published var incomingChatMessages: [ChatMessage] = []
     @Published var activeNodeParticipants: [ActiveNodeParticipant] = []
     @Published var error: Error?
@@ -688,15 +718,26 @@ final class EchoLinkConnectionService: ObservableObject {
         networkConfigurationProvider: @escaping @MainActor () -> EchoLinkProxyConfiguration = { EchoLinkProxyConfiguration.load() },
         localDemoPlayback: (@MainActor (Data) -> Void)? = nil,
         localDemoAnnouncement: @escaping @MainActor () -> [Data] = { LocalDemoAnnouncement.echoTestPackets() },
-        audioEngine injectedAudioEngine: AudioEngine? = nil
+        audioEngine injectedAudioEngine: AudioEngine? = nil,
+        recordingDefaults: UserDefaults = .standard,
+        recordingFolder: URL? = nil
     ) {
         self.audioEngine = injectedAudioEngine ?? AudioEngine()
+        self.recordingDefaults = recordingDefaults
+        self.recordingFolder = recordingFolder
         self.remoteVoiceActivityHold = remoteVoiceActivityHold
         self.relayClientFactory = relayClientFactory
         self.selectedRelayClientFactory = selectedRelayClientFactory
         self.networkConfigurationProvider = networkConfigurationProvider
         self.localDemoPlayback = localDemoPlayback
         self.localDemoAnnouncement = localDemoAnnouncement
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.recordingCoordinator?.refreshAutomaticRecording()
+                self?.publishRecordingState()
+            }
+            .store(in: &cancellables)
         audioEngine.$inputLevel
             .receive(on: DispatchQueue.main)
             .assign(to: &$inputLevel)
@@ -2293,9 +2334,9 @@ final class EchoLinkConnectionService: ObservableObject {
             audioStatusMessage = nil
             incomingVoicePackets += 1
             guard !currentSession.isMuted && !isBackgroundMuted else {
-                if Self.hasVoiceEnergy(mutedActivityCodec.decodePacket(payload)) {
-                    noteIncomingAudioActivity()
-                }
+                let samples = mutedActivityCodec.decodePacket(payload)
+                appendRecordingPCM(samples)
+                if Self.hasVoiceEnergy(samples) { noteIncomingAudioActivity() }
                 return
             }
             let diagnoseFirstRX = logNextVoiceAfterPTT
@@ -2314,6 +2355,7 @@ final class EchoLinkConnectionService: ObservableObject {
             audioStatusMessage = nil
             incomingVoicePackets += 1
             guard !currentSession.isMuted && !isBackgroundMuted else {
+                appendRecordingPCM(samples)
                 if Self.hasVoiceEnergy(samples) { noteIncomingAudioActivity() }
                 return
             }
@@ -2337,6 +2379,7 @@ final class EchoLinkConnectionService: ObservableObject {
             audioStatusMessage = nil
             incomingVoicePackets += 1
             guard !currentSession.isMuted && !isBackgroundMuted else {
+                appendRecordingPCM(samples)
                 if Self.hasVoiceEnergy(samples) { noteIncomingAudioActivity() }
                 return
             }
@@ -2445,10 +2488,7 @@ final class EchoLinkConnectionService: ObservableObject {
         remoteVoiceActivityTask = nil
         isRemoteTransmitting = false
 
-        recordingService?.stop()
-        recordingService = nil
-        audioEngine.onRecordingPCM = nil
-        isRecording = false
+        stopSessionRecording()
         audioEngine.onCapturedAudio = nil
         capturePreparationTask?.cancel()
         capturePreparationTask = nil
