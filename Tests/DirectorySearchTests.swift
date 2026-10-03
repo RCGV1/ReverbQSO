@@ -6,6 +6,64 @@ import XCTest
 @MainActor
 final class DirectorySearchTests: XCTestCase {
 
+    func testFilterSummaryReflectsEffectiveFiltersWhenBrowsingPeople() {
+        let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
+        viewModel.typeFilter = .repeater
+        XCTAssertTrue(viewModel.hasActiveFilters)
+        XCTAssertEqual(viewModel.filterSummary, "Repeaters · All countries")
+
+        viewModel.browseGroup = .people
+        XCTAssertFalse(viewModel.hasActiveFilters)
+        XCTAssertEqual(viewModel.filterSummary, "People · All countries")
+
+        viewModel.countryFilter = "AU"
+        XCTAssertTrue(viewModel.hasActiveFilters)
+        XCTAssertEqual(viewModel.countryFilterTitle, Locale.current.localizedString(forRegionCode: "AU"))
+        viewModel.browseGroup = .nodes
+        XCTAssertTrue(viewModel.filterSummary.hasPrefix("Repeaters · "))
+    }
+
+    func testCountryChoicesFollowBrowseScopeAndKeepSelectedCountry() {
+        let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
+        viewModel.ingest([
+            Station(callsign: "VK2ABC", ipAddress: "192.0.2.1", type: .user),
+            Station(callsign: "F4ABC-R", ipAddress: "192.0.2.2", type: .repeater),
+            Station(callsign: "K6ABC-L", ipAddress: "192.0.2.3", type: .link)
+        ])
+        XCTAssertEqual(Set(viewModel.availableCountries.map(\.code)), ["FR", "US"])
+        viewModel.typeFilter = .repeater
+        XCTAssertEqual(viewModel.availableCountries.map(\.code), ["FR"])
+        viewModel.countryFilter = "FR"
+        viewModel.browseGroup = .people
+        XCTAssertEqual(Set(viewModel.availableCountries.map(\.code)), ["AU", "FR"])
+        viewModel.clearFilters()
+        XCTAssertEqual(viewModel.availableCountries.map(\.code), ["AU"])
+        viewModel.browseGroup = .nodes
+        XCTAssertEqual(viewModel.typeFilter, .repeater)
+        XCTAssertEqual(viewModel.availableCountries.map(\.code), ["FR"])
+    }
+
+    func testClearFiltersRestoresMatchesAndPreservesSearchAndSort() {
+        let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
+        viewModel.ingest([
+            Station(callsign: "VK2ABC-L", description: "Hilltop", ipAddress: "192.0.2.1", type: .link, nodeNumber: 2),
+            Station(callsign: "F4ABC-R", description: "Hilltop", ipAddress: "192.0.2.2", type: .repeater, nodeNumber: 1)
+        ])
+        viewModel.searchText = "Hilltop"
+        viewModel.sortOrder = .nodeNumber
+        viewModel.typeFilter = .repeater
+        viewModel.countryFilter = "AU"
+        XCTAssertTrue(viewModel.stations.isEmpty)
+
+        viewModel.clearFilters()
+        XCTAssertFalse(viewModel.hasActiveFilters)
+        XCTAssertNil(viewModel.typeFilter)
+        XCTAssertEqual(viewModel.countryFilter, "")
+        XCTAssertEqual(viewModel.searchText, "Hilltop")
+        XCTAssertEqual(viewModel.sortOrder, .nodeNumber)
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["F4ABC-R", "VK2ABC-L"])
+    }
+
     func testSupersededRefreshDoesNotReportSuccessOrExposeOldStationsForReconnect() async {
         let firstStarted = expectation(description: "first refresh started")
         let secondStarted = expectation(description: "second refresh started")

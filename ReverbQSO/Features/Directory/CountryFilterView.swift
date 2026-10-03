@@ -20,37 +20,30 @@ struct CountryFilterView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                Button {
-                    selectedCode = ""
-                    dismiss()
-                } label: {
-                    selectionRow(title: "All countries", code: "")
-                }
-                .foregroundStyle(.primary)
-
-                Section("Countries") {
-                    ForEach(filteredCountries) { country in
-                        Button {
-                            selectedCode = country.code
-                            dismiss()
-                        } label: {
-                            selectionRow(title: country.name, code: country.code)
-                        }
-                        .foregroundStyle(.primary)
-                    }
-                }
+        List {
+            Button {
+                selectedCode = ""
+                dismiss()
+            } label: {
+                selectionRow(title: "All countries", code: "")
             }
-            .navigationTitle("Country")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Country name or code")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+            .foregroundStyle(.primary)
+
+            Section("Countries") {
+                ForEach(filteredCountries) { country in
+                    Button {
+                        selectedCode = country.code
+                        dismiss()
+                    } label: {
+                        selectionRow(title: country.name, code: country.code)
+                    }
+                    .foregroundStyle(.primary)
                 }
             }
         }
+        .navigationTitle("Country")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Country name or code")
     }
 
     private func selectionRow(title: String, code: String) -> some View {
@@ -64,5 +57,6 @@ struct CountryFilterView: View {
             }
         }
         .contentShape(Rectangle())
+        .accessibilityAddTraits(selectedCode == code ? .isSelected : [])
     }
 }

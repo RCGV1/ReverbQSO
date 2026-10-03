@@ -252,6 +252,7 @@
 		D5B6057F855E93BC29452054 /* EchoLinkAudioPacketCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD9C77E7FE189E57217A4471 /* EchoLinkAudioPacketCodec.swift */; };
 		D6DCE1805CD24A9BF307C4F4 /* window.c in Sources */ = {isa = PBXBuildFile; fileRef = 3B33841C21AE763BB44093FA /* window.c */; };
 		D70F8F05F92EC9F779B04AEA /* QSOHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7BB94D5DD2FD18660428C1 /* QSOHub.swift */; };
+		D7503222355E97C444B21B97 /* DirectoryFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A8BB2A9098C9F867857B3B /* DirectoryFiltersView.swift */; };
 		D779D1CAC42370718379092D /* Station+Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16252E19E45B823180D32398 /* Station+Location.swift */; };
 		D7A301772D3C88F82035FCA0 /* EchoLinkRelayConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD741F40E453F9281698051 /* EchoLinkRelayConnectionTests.swift */; };
 		D9B0C5FBA9E29A6221DA832A /* CallCQService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */; };
@@ -481,6 +482,7 @@
 		85EA15343F2892B2CDF4D408 /* EchoLinkAutomaticDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAutomaticDirectoryTests.swift; sourceTree = "<group>"; };
 		8794B05E140F9A7E6B8CAA55 /* preprocess.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = preprocess.c; sourceTree = "<group>"; };
 		87D626C16504AC800EB87B17 /* SpeexTransmitNegotiationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeexTransmitNegotiationTests.swift; sourceTree = "<group>"; };
+		88A8BB2A9098C9F867857B3B /* DirectoryFiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryFiltersView.swift; sourceTree = "<group>"; };
 		8920A84CAF5C5910BE79D7B5 /* vq.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = vq.c; sourceTree = "<group>"; };
 		8C72D8DEA106DEFAD2868625 /* decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = decode.c; sourceTree = "<group>"; };
 		8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectCQSocketPair.swift; sourceTree = "<group>"; };
@@ -1037,6 +1039,7 @@
 			children = (
 				E46B3D0B9DD67B5D3E0B1EE5 /* CallCQView.swift */,
 				9E19CFA9864CE55BB358E5E7 /* CountryFilterView.swift */,
+				88A8BB2A9098C9F867857B3B /* DirectoryFiltersView.swift */,
 				6190CABA5CE02F9171FB0509 /* DirectoryView.swift */,
 				D316A96EFBFAF3D90B8F217E /* DirectoryViewModel.swift */,
 				43631BB64688D1A3FC8A1AB0 /* StationDetailSheet.swift */,
@@ -1480,6 +1483,7 @@
 				F212550C88F1C3BC34A17611 /* DemoCallCQBackend.swift in Sources */,
 				4C92B055EFCC52B7E4F057BF /* DirectCQSocketPair.swift in Sources */,
 				9442B2A6A3AB309FA32C3B53 /* DirectoryClient.swift in Sources */,
+				D7503222355E97C444B21B97 /* DirectoryFiltersView.swift in Sources */,
 				9332E43BFAB873AB64A6573E /* DirectoryView.swift in Sources */,
 				0B47D13DCD497D5497506E7A /* DirectoryViewModel.swift in Sources */,
 				D5B6057F855E93BC29452054 /* EchoLinkAudioPacketCodec.swift in Sources */,

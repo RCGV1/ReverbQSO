@@ -39,10 +39,10 @@ final class DirectoryViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var selectedStation: Station?
     @Published var browseGroup: BrowseGroup = .nodes {
-        didSet { applyLocalFilter() }
+        didSet { rebuildAvailableCountries(); applyLocalFilter() }
     }
     @Published var typeFilter: Station.StationType? {
-        didSet { applyLocalFilter() }
+        didSet { rebuildAvailableCountries(); applyLocalFilter() }
     }
     /// Empty means all countries. Values are ISO 3166 codes derived from the
     /// station callsign's ITU allocation, matching EchoLink's Locations list.
@@ -86,6 +86,35 @@ final class DirectoryViewModel: ObservableObject {
     }
 
     // MARK: - Actions
+
+    var hasActiveFilters: Bool {
+        !countryFilter.isEmpty || (browseGroup == .nodes && typeFilter != nil)
+    }
+
+    var countryFilterTitle: String {
+        countryFilter.isEmpty ? "All countries" :
+            (availableCountries.first { $0.code == countryFilter }?.name ?? countryFilter)
+    }
+
+    var filterSummary: String {
+        let group: String
+        if browseGroup == .people {
+            group = "People"
+        } else {
+            switch typeFilter {
+            case .link: group = "Links"
+            case .repeater: group = "Repeaters"
+            case .conference: group = "Conferences"
+            default: group = "All nodes"
+            }
+        }
+        return "\(group) · \(countryFilterTitle)"
+    }
+
+    func clearFilters() {
+        if browseGroup == .nodes { typeFilter = nil }
+        countryFilter = ""
+    }
 
     func refresh() async {
         if await directoryService.refresh() {
@@ -261,6 +290,12 @@ final class DirectoryViewModel: ObservableObject {
 
     private func rebuildAvailableCountries() {
         var namesByCode = indexedStations.reduce(into: [String: String]()) { result, indexed in
+            if browseGroup == .people {
+                guard indexed.station.type == .user else { return }
+            } else {
+                guard indexed.station.type != .user else { return }
+                if let typeFilter, indexed.station.type != typeFilter { return }
+            }
             guard let code = indexed.countryCode, let name = indexed.countryName else { return }
             result[code] = name
         }

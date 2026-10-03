@@ -5,7 +5,7 @@ import SwiftUI
 /// The main directory view showing all EchoLink stations.
 struct DirectoryView: View {
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject var connectionService: EchoLinkConnectionService
     @StateObject private var viewModel: DirectoryViewModel
@@ -13,7 +13,7 @@ struct DirectoryView: View {
 
     @State private var detailStation: Station?
     @State private var callCQService: CallCQService?
-    @State private var showingCountryFilter = false
+    @State private var showingFilters = false
 
     init(directoryService: EchoLinkDirectoryService) {
         _viewModel = StateObject(wrappedValue: DirectoryViewModel(directoryService: directoryService))
@@ -31,38 +31,7 @@ struct DirectoryView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                HStack(spacing: 12) {
-                    if viewModel.browseGroup == .nodes {
-                        typeFilterPicker
-                    }
-                    Button { showingCountryFilter = true } label: {
-                        if horizontalSizeClass == .compact {
-                            Label(countryFilterTitle, systemImage: "globe").labelStyle(.iconOnly)
-                        } else {
-                            Label(countryFilterTitle, systemImage: "globe").lineLimit(1)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(viewModel.countryFilter.isEmpty ? Color.primary : .accentColor)
-                    .accessibilityLabel("Country: \(countryFilterTitle)")
-                    Spacer()
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("Refreshing directory")
-                    }
-                    Picker(selection: $viewModel.sortOrder) {
-                        ForEach(DirectoryViewModel.SortOrder.allCases) { order in
-                            Text(order.rawValue).tag(order)
-                        }
-                    } label: {
-                        Label(viewModel.sortOrder.rawValue, systemImage: "arrow.up.arrow.down")
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityLabel("Sort stations")
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                filterBar
 
                 stationList
             }
@@ -125,11 +94,8 @@ struct DirectoryView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingCountryFilter) {
-                CountryFilterView(
-                    countries: viewModel.availableCountries,
-                    selectedCode: $viewModel.countryFilter
-                )
+            .sheet(isPresented: $showingFilters) {
+                DirectoryFiltersView(viewModel: viewModel)
             }
             .alert("Error", isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
@@ -142,24 +108,36 @@ struct DirectoryView: View {
         }
     }
 
-    private var countryFilterTitle: String {
-        viewModel.countryFilter.isEmpty ? "All countries" :
-            (viewModel.availableCountries.first { $0.code == viewModel.countryFilter }?.name ?? viewModel.countryFilter)
-    }
+    private var filterBar: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            Button { showingFilters = true } label: {
+                Label("Filters", systemImage: viewModel.hasActiveFilters
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+            }
+            .controlSize(.large)
+            .buttonStyle(.bordered)
+            .fixedSize()
+            .accessibilityValue(viewModel.filterSummary)
+            .accessibilityIdentifier("directory-filters")
 
-    // MARK: - Type Filter Picker
+            Text(viewModel.filterSummary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
 
-    private var typeFilterPicker: some View {
-        Picker(selection: $viewModel.typeFilter) {
-            Text("All nodes").tag(Station.StationType?.none)
-            Text("Links").tag(Station.StationType?.some(.link))
-            Text("Repeaters").tag(Station.StationType?.some(.repeater))
-            Text("Conferences").tag(Station.StationType?.some(.conference))
-        } label: {
-            Label(viewModel.typeFilter?.displayName ?? "All nodes", systemImage: "line.3.horizontal.decrease")
+            if viewModel.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Refreshing directory")
+            }
         }
-        .pickerStyle(.menu)
-        .accessibilityLabel("Filter stations by type")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Station List
@@ -194,17 +172,26 @@ struct DirectoryView: View {
                     .foregroundStyle(.secondary)
             }
         } else if !viewModel.searchText.isEmpty && viewModel.stations.isEmpty {
-            ContentUnavailableView.search(text: viewModel.searchText)
+            VStack {
+                ContentUnavailableView.search(text: viewModel.searchText)
+                if viewModel.hasActiveFilters {
+                    Button("Clear Filters") { viewModel.clearFilters() }
+                        .buttonStyle(.bordered)
+                }
+            }
         } else if viewModel.stations.isEmpty {
-            ContentUnavailableView(
-                viewModel.browseGroup == .nodes ? "No Nodes" : "No People",
-                systemImage: viewModel.browseGroup == .nodes
-                    ? "antenna.radiowaves.left.and.right.slash"
-                    : "person.slash",
-                description: Text(viewModel.browseGroup == .nodes
-                    ? "Try a different node filter or pull down to refresh."
-                    : "Pull down to refresh the operator directory.")
-            )
+            ContentUnavailableView {
+                Label(viewModel.browseGroup == .nodes ? "No Nodes" : "No People",
+                      systemImage: viewModel.browseGroup == .nodes
+                          ? "antenna.radiowaves.left.and.right.slash" : "person.slash")
+            } description: {
+                Text(viewModel.hasActiveFilters ? "No matches for these filters." : "Pull down to refresh.")
+            } actions: {
+                if viewModel.hasActiveFilters {
+                    Button("Clear Filters") { viewModel.clearFilters() }
+                        .buttonStyle(.bordered)
+                }
+            }
         }
     }
 
