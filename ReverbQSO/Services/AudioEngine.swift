@@ -275,6 +275,39 @@ final class AudioEngine: ObservableObject {
         playerNode.volume = muted ? 0 : 1
     }
     private var playerNode = AVAudioPlayerNode()
+#if DEBUG
+    private var auditScheduledSamples = 0
+    private var auditTrimCount = 0
+    private var auditTrimmedSamples = 0
+    private var auditScheduleEvents: [[String: Double]] = []
+
+    var auditPlaybackSnapshot: [String: Int] {
+        ["scheduledSamples": auditScheduledSamples, "backlogTrims": auditTrimCount,
+         "trimmedSamples": auditTrimmedSamples, "playoutDiscardedPackets": receivePlayout.discardedPackets,
+         "remainingSamples": remainingPlaybackSamples, "running": isRunning ? 1 : 0]
+    }
+
+    var auditPlaybackSchedule: [[String: Double]] { auditScheduleEvents }
+
+    func beginAuditRenderCapture(url: URL) throws -> AudioAuditRenderCapture {
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1", engine.isRunning else {
+            throw CocoaError(.featureUnsupported)
+        }
+        auditScheduledSamples = 0
+        auditTrimCount = 0
+        auditTrimmedSamples = 0
+        auditScheduleEvents.removeAll()
+        let mixer = engine.mainMixerNode
+        let capture = try AudioAuditRenderCapture(url: url, format: mixer.outputFormat(forBus: 0))
+        mixer.installTap(onBus: 0, bufferSize: 1024, format: nil, block: capture.makeTap())
+        return capture
+    }
+
+    func endAuditRenderCapture(_ capture: AudioAuditRenderCapture) async -> [String: Double] {
+        engine.mainMixerNode.removeTap(onBus: 0)
+        return await capture.finish()
+    }
+#endif
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "AudioEngine")
     private var isConfigured = false
     private var tapInstalled = false
@@ -388,6 +421,7 @@ final class AudioEngine: ObservableObject {
     private let channelCount: AVAudioChannelCount = 1
     private var playbackGain = ReceivePlaybackGain()
     private var playbackQueue = ReceivePlaybackQueue()
+    private var playbackHistory = ReceivePlaybackHistory()
     private let receiveClock = ReceiveClockCompensator()
     private let receiveSpeech = ReceiveSpeechSmoother()
     private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
@@ -463,28 +497,33 @@ final class AudioEngine: ObservableObject {
         guard !isCaptureReady else { return true }
         guard requestPermission || MicrophoneAccess.status == .granted else { return false }
         guard !isPreparingCapture else { return false }
+        let preparationGeneration = inputPreparationGeneration
         isPreparingCapture = true
         capturePreparationFailed = false
-        defer { isPreparingCapture = false }
+        defer {
+            if inputPreparationGeneration == preparationGeneration { isPreparingCapture = false }
+        }
 
         for attempt in 0..<3 {
-            guard !Task.isCancelled else { return false }
+            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
             if tapInstalled { stopCaptureTap(preservingIntent: false) }
             let installed = await startCapture(requestPermission: requestPermission)
-            guard !Task.isCancelled else { return false }
+            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
             captureRequested = false
             if installed {
                 for _ in 0..<20 {
+                    guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
                     if isCaptureReady { return true }
-                    guard !Task.isCancelled else { return false }
                     try? await Task.sleep(for: .milliseconds(50))
                 }
             }
+            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
             VoiceDiagnosticLog.record("capture preparation attempt=\(attempt + 1) inputCallback=\(isCaptureReady)")
             stopCaptureTap(preservingIntent: false)
-            guard !Task.isCancelled else { return false }
+            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
             try? await Task.sleep(for: .milliseconds(500))
         }
+        guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
         capturePreparationFailed = true
         return false
 #endif
@@ -711,19 +750,35 @@ final class AudioEngine: ObservableObject {
         audioDeviceRecoveryTask?.cancel()
         audioDeviceRecoveryTask = nil
         isDeviceRecovering = false
-        RecordingAudioSession.shared.endLiveAudio(owner: self)
         rxWindowActive = false
+        inputPreparationGeneration &+= 1
         prepareCaptureTask?.cancel()
         prepareCaptureTask = nil
+        isPreparingCapture = false
         isCaptureReady = false
         capturePreparationFailed = false
         invalidateCaptureStart(preservingIntent: false)
         captureRecoveryFailureCount = 0
         stopPlaybackTimeline()
-        if isRunning {
-            engine.stop()
+        engine.stop()
+        if engine.attachedNodes.contains(playerNode) {
+            engine.detach(playerNode)
         }
+        for token in sessionObservers {
+            NotificationCenter.default.removeObserver(token.rawValue)
+        }
+        sessionObservers.removeAll()
+        hasInstalledSessionObservers = false
+        // Discard the stopped I/O graph without touching a fresh input node.
+        // The next connection builds its hardware graph after activation.
+        engine = AVAudioEngine()
+        playerNode = AVAudioPlayerNode()
+        playerNode.volume = receiveOutputMuted ? 0 : 1
+        isConfigured = false
         isRunning = false
+        // Deactivate only after taps and I/O are stopped. The shared owner
+        // coordinator leaves the session active for another live radio.
+        RecordingAudioSession.shared.endLiveAudio(owner: self)
         outputLevelDecayTask?.cancel()
         outputLevelDecayTask = nil
         outputLevel = 0
@@ -1038,20 +1093,74 @@ final class AudioEngine: ObservableObject {
     }
 
     private func schedulePlaybackBuffer(_ buffer: AVAudioPCMBuffer) {
-        let count = Int(buffer.frameLength)
-        if playbackQueue.needsReset(adding: count, remainingSamples: remainingPlaybackSamples) {
-            // A stalled route must not turn into seconds of old speech.
-            trimPlaybackTimeline()
-            logger.debug("Trimmed receive playback backlog to current speech")
+        let incomingCount = Int(buffer.frameLength)
+        guard let incomingData = buffer.floatChannelData else { return }
+        let incomingSamples = Array(UnsafeBufferPointer(start: incomingData[0], count: incomingCount))
+        let renderedSnapshot = renderedPlaybackSampleTime
+        if let rendered = renderedSnapshot { playbackHistory.prune(renderedSampleTime: rendered) }
+        let remaining = playbackHistory.remainingSamples(renderedSampleTime: renderedSnapshot)
+        var start = max(playbackEndSampleTime, max(0, renderedSnapshot ?? 0))
+        var scheduledBuffer = buffer
+        var scheduledSamples = incomingSamples
+#if DEBUG
+        let auditEventIndex = auditScheduleEvents.count
+        if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" {
+            auditScheduledSamples += incomingCount
+            auditScheduleEvents.append(["time": ProcessInfo.processInfo.systemUptime,
+                "rendered": Double(renderedSnapshot ?? -1),
+                "priorEnd": Double(playbackEndSampleTime), "count": Double(incomingCount)])
         }
-        let rendered = renderedPlaybackSampleTime ?? 0
-        playbackEndSampleTime = max(playbackEndSampleTime, rendered) + Int64(count)
+#endif
+        if playbackQueue.needsReset(adding: incomingCount, remainingSamples: remaining) {
+            let replacement = playbackHistory.boundedReplacement(adding: incomingSamples, maximumSamples: playbackQueue.recoverySamples)
+            guard let combined = playbackBuffer(fromProcessedSamples: replacement.samples, format: buffer.format) else { return }
+#if DEBUG
+            auditTrimCount += 1
+            auditTrimmedSamples += replacement.discardedSamples
+            if auditScheduleEvents.count > auditEventIndex {
+                auditScheduleEvents[auditEventIndex]["discardedSamples"] = Double(replacement.discardedSamples)
+                auditScheduleEvents[auditEventIndex]["retainedSamples"] = Double(max(0, replacement.samples.count - incomingCount))
+            }
+#endif
+            // Preserve recent unrendered speech, discarding only the excess.
+            trimPlaybackTimeline()
+            // stop() resets the player timeline; lastRenderTime can still
+            // expose the previous generation's cursor until rendering resumes.
+            start = 0
+            scheduledBuffer = combined
+            scheduledSamples = replacement.samples
+            logger.debug("Trimmed receive playback backlog to bounded recent speech")
+        }
+        let count = scheduledSamples.count
+        playbackEndSampleTime = start + Int64(count)
+        playbackHistory.append(scheduledSamples, startingAt: start)
+#if DEBUG
+        if auditScheduleEvents.count > auditEventIndex {
+            auditScheduleEvents[auditEventIndex]["scheduledCount"] = Double(count)
+            auditScheduleEvents[auditEventIndex]["scheduledStart"] = Double(start)
+            auditScheduleEvents[auditEventIndex]["generation"] = Double(playbackQueue.generation)
+        }
+#endif
+        let end = playbackEndSampleTime
         let token = playbackQueue.reserve(count)
-        playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+        playerNode.scheduleBuffer(scheduledBuffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.playbackQueue.complete(count, generation: token)
+                guard let self, self.playbackQueue.generation == token else { return }
+                self.playbackQueue.complete(count, generation: token)
+                self.playbackHistory.prune(renderedSampleTime: end)
             }
         }
+    }
+
+    private func playbackBuffer(fromProcessedSamples samples: [Float], format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard !samples.isEmpty,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+              let channels = buffer.floatChannelData else { return nil }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        for channel in 0..<Int(format.channelCount) {
+            for index in samples.indices { channels[channel][index] = samples[index] }
+        }
+        return buffer
     }
 
     private var renderedPlaybackSampleTime: Int64? {
@@ -1061,12 +1170,12 @@ final class AudioEngine: ObservableObject {
     }
 
     private var remainingPlaybackSamples: Int {
-        guard let rendered = renderedPlaybackSampleTime else { return playbackQueue.queuedSamples }
-        return max(0, Int(playbackEndSampleTime - rendered))
+        playbackHistory.remainingSamples(renderedSampleTime: renderedPlaybackSampleTime)
     }
 
     private func trimPlaybackTimeline() {
         playbackQueue.reset()
+        playbackHistory.reset()
         playbackEndSampleTime = 0
         receiveClock.reset()
         playerNode.stop()

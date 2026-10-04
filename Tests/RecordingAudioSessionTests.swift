@@ -64,6 +64,48 @@ final class RecordingAudioSessionTests: XCTestCase {
         XCTAssertEqual(deactivations, 1)
     }
 
+    func testFinalLiveOwnerDeactivatesSessionExactlyOnce() {
+        var deactivations = 0
+        let audio = RecordingAudioSession(activate: {}, deactivate: { deactivations += 1 })
+        let first = NSObject(), second = NSObject()
+        audio.beginLiveAudio(owner: first)
+        audio.beginLiveAudio(owner: second)
+        audio.endLiveAudio(owner: first)
+        XCTAssertEqual(deactivations, 0, "Another QSO or host still owns live audio")
+        audio.endLiveAudio(owner: second)
+        XCTAssertEqual(deactivations, 1, "Disconnect must release the microphone route")
+        audio.endLiveAudio(owner: second)
+        audio.endLiveAudio(owner: NSObject())
+        XCTAssertEqual(deactivations, 1)
+    }
+
+    func testStaleLiveReleaseCannotDeactivateSavedRecordingPlayback() throws {
+        var deactivations = 0
+        let audio = RecordingAudioSession(activate: {}, deactivate: { deactivations += 1 })
+        let owner = NSObject()
+        audio.beginLiveAudio(owner: owner)
+        audio.endLiveAudio(owner: owner)
+        XCTAssertEqual(deactivations, 1)
+        let playbackID = UUID()
+        try audio.beginPlayback(id: playbackID, onStop: {})
+        audio.endLiveAudio(owner: owner)
+        XCTAssertEqual(deactivations, 1, "Saved recording retains session ownership")
+        audio.endPlayback(id: playbackID)
+        XCTAssertEqual(deactivations, 2)
+    }
+
+    func testExpiredOtherLiveOwnerDoesNotPreventFinalSessionRelease() {
+        var deactivations = 0
+        let audio = RecordingAudioSession(activate: {}, deactivate: { deactivations += 1 })
+        var expired: NSObject? = NSObject()
+        let remaining = NSObject()
+        audio.beginLiveAudio(owner: expired!)
+        audio.beginLiveAudio(owner: remaining)
+        expired = nil
+        audio.endLiveAudio(owner: remaining)
+        XCTAssertEqual(deactivations, 1)
+    }
+
     func testFailedSessionActivationDoesNotLeavePlaybackOwner() {
         var deactivations = 0
         let audio = RecordingAudioSession(activate: { throw CocoaError(.fileReadUnknown) },

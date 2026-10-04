@@ -8,12 +8,16 @@ import XCTest
 final class EchoLinkConferenceHostServiceTests: XCTestCase {
     private enum TestTimeout: Error { case expired }
 
+    private static func directConfiguration() -> EchoLinkProxyConfiguration {
+        EchoLinkProxyConfiguration(mode: .direct, host: "", port: 8100, password: "")
+    }
+
     func testGlobalCallRestrictionRejectsVerifiedCallerBeforeRinging() async throws {
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: {
             [Station(callsign: "N0AAA", ipAddress: "127.0.0.1")]
         })
         directory.isLoggedIn = true
-        let host = EchoLinkConferenceHostService()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
         host.callAccessPolicyProvider = {
             var policy = CallAccessPolicy()
             policy.blockedCountries = ["US"]
@@ -38,7 +42,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
     func testReleasedPTTDuringInputPreparationDoesNotReportStaleFailure() async throws {
         let preparing = expectation(description: "host preparing microphone")
         var finishPreparation: CheckedContinuation<Bool, Never>?
-        let host = EchoLinkConferenceHostService(prepareCaptureInput: {
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration, prepareCaptureInput: {
             preparing.fulfill()
             return await withCheckedContinuation { finishPreparation = $0 }
         })
@@ -71,6 +75,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { stations })
         directory.isLoggedIn = true
         let host = EchoLinkConferenceHostService(
+            configurationProvider: Self.directConfiguration,
             audioEngine: audioEngine,
             prepareCaptureInput: {
                 try? await Task.sleep(for: .seconds(60))
@@ -156,6 +161,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [station] })
         directory.isLoggedIn = true
         let host = EchoLinkConferenceHostService(
+            configurationProvider: Self.directConfiguration,
             audioEngine: audioEngine,
             prepareCaptureInput: {
                 try? await Task.sleep(for: .seconds(60))
@@ -210,6 +216,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [station] })
         directory.isLoggedIn = true
         let host = EchoLinkConferenceHostService(
+            configurationProvider: Self.directConfiguration,
             audioEngine: audioEngine,
             prepareCaptureInput: {
                 try? await Task.sleep(for: .seconds(60))
@@ -262,7 +269,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         ]
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { stations })
         directory.isLoggedIn = true
-        let host = EchoLinkConferenceHostService()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
         let audioPort = try availablePort()
         let controlPort = try availablePort()
         await host.startPersonal(
@@ -304,7 +311,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         ]
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { stations })
         directory.isLoggedIn = true
-        let host = EchoLinkConferenceHostService()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
         let audioPort = try availablePort()
         let controlPort = try availablePort()
         await host.startPersonal(
@@ -335,7 +342,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         let station = Station(callsign: "N0AAA", ipAddress: "127.0.0.1")
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [station] })
         directory.isLoggedIn = true
-        let host = EchoLinkConferenceHostService()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
         let audioPort = try availablePort()
         let controlPort = try availablePort()
         await host.startPersonal(callsign: "W6HOST", directory: directory,
@@ -363,7 +370,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
     func testPersonalCallRejectsRepeaterIdentity() async throws {
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [] })
         directory.isLoggedIn = true
-        let host = EchoLinkConferenceHostService()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
         await host.startPersonal(callsign: "W6HOST-R", directory: directory,
                                  outbound: EchoLinkConnectionService(), monitorAudio: false)
         XCTAssertFalse(host.isRunning)
@@ -386,7 +393,7 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { stations })
         directory.isLoggedIn = true
         let outbound = EchoLinkConnectionService()
-        let host = EchoLinkConferenceHostService()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
 
         let audioPort = try availablePort()
         let controlPort = try availablePort()

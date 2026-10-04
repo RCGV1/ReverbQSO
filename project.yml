@@ -115,6 +115,7 @@ targets:
   ReverbQSOTests:
     type: bundle.unit-test
     platform: iOS
+    supportedDestinations: [iOS, macCatalyst]
     deploymentTarget: "17.0"
     sources:
       - path: Tests
@@ -126,6 +127,7 @@ targets:
         PRODUCT_MODULE_NAME: ReverbQSOTests
         PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLinkTests
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/ReverbQSO.app/ReverbQSO
+        "TEST_HOST[sdk=macosx*]": $(BUILT_PRODUCTS_DIR)/ReverbQSO.app/Contents/MacOS/ReverbQSO
         BUNDLE_LOADER: $(TEST_HOST)
     dependencies:
       - target: ReverbQSO

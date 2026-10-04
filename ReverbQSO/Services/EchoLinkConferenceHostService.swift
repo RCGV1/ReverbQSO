@@ -130,12 +130,14 @@ final class EchoLinkConferenceHostService: ObservableObject {
     private var speexCapablePeerIDs: Set<UUID> = []
     private var activeLocalTransmitCodecs: [UUID: EchoLinkVoiceCodec] = [:]
     private var transmissionGeneration: UInt64 = 0
+    private let configurationProvider: @MainActor () -> EchoLinkProxyConfiguration
     private let prepareCaptureInput: @MainActor () async -> Bool
     private var isLocalDemo = false
     private var localDemoIncomingTask: Task<Void, Never>?
     private var localDemoStation: Station?
 
     init(
+        configurationProvider: @escaping @MainActor () -> EchoLinkProxyConfiguration = { EchoLinkProxyConfiguration.load() },
         audioEngine injectedAudioEngine: AudioEngine? = nil,
         prepareCaptureInput: (@MainActor () async -> Bool)? = nil,
         recordingDefaults: UserDefaults = .standard,
@@ -143,6 +145,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
     ) {
         let audioEngine = injectedAudioEngine ?? AudioEngine()
         self.audioEngine = audioEngine
+        self.configurationProvider = configurationProvider
         self.recordingDefaults = recordingDefaults
         self.recordingFolder = recordingFolder
         self.prepareCaptureInput = prepareCaptureInput ?? { [audioEngine] in
@@ -233,7 +236,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
             errorMessage = "Sign in with a personal callsign to receive individual calls."
             return
         }
-        guard (directory.effectiveTransport?.configuration.mode ?? EchoLinkProxyConfiguration.load().mode) == .direct else {
+        guard (directory.effectiveTransport?.configuration.mode ?? configurationProvider().mode) == .direct else {
             errorMessage = "Select Direct in Network Settings to receive incoming calls on UDP 5198 and 5199."
             return
         }

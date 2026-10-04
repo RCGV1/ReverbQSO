@@ -24,7 +24,7 @@ struct ReceiveAdaptivePlayoutBuffer {
     mutating func enqueue(_ input: [Int16], networkSampleCount: Int? = nil, playbackQueuedSamples: Int? = nil, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard !input.isEmpty, now.isFinite else { return }
         let samples = Array(input.suffix(1920))
-        if let lastArrival, now - lastArrival < max(0.160, previousDuration * 2), now >= lastArrival {
+        if let lastArrival, now - lastArrival < 0.5, now >= lastArrival {
             let variation = abs((now - lastArrival) - previousDuration)
             jitter += (min(0.1, variation) - jitter) / 16
             targetDelay = min(0.100, max(0.040, 0.040 + 4 * jitter))
@@ -34,10 +34,14 @@ struct ReceiveAdaptivePlayoutBuffer {
             lastDeadline = nil
             hasStarted = false
         }
-        // Add protection only while the actual playback lead is below target.
+        // Match the codec/clock talkspurt timeout: a delayed continuous packet
+        // must not pay startup buffering again merely because it arrived late.
+        // Grow protection only while existing rendered lead covers the wait.
+        // Waiting with depleted playback would add silence to the late packet.
         // Clock correction releases excess lead gently as target delay recovers.
         let missingLead = playbackQueuedSamples.map { max(0, targetDelay - Double($0) / 8000) } ?? targetDelay
-        let adjustment = min(0.010, min(missingLead, max(0, targetDelay - previousTarget)))
+        let availableLead = playbackQueuedSamples.map { max(0, Double($0) / 8000) } ?? 0.010
+        let adjustment = min(availableLead, min(0.010, min(missingLead, max(0, targetDelay - previousTarget))))
         let nominal = hasStarted ? now + max(0, adjustment) : (lastDeadline ?? (now + targetDelay))
         let deadline = max(now, nominal)
         packets.append(Packet(samples: samples, receivedAt: now, deadline: deadline))

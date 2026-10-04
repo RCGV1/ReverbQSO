@@ -645,6 +645,45 @@ final class EchoLinkConnectionService: ObservableObject {
     private var pendingOutgoingGSMPayload = Data()
     private var voicePacketsQueued = 0
     private var voicePacketsSent = 0
+#if DEBUG
+    var onAuditIncomingDatagram: (@MainActor (Data) -> Void)?
+    var onAuditAcceptedPacket: (@MainActor (EchoLinkVoicePacketMetadata?) -> Void)?
+
+    var auditTransportSnapshot: [String: Int] {
+        ["queued": voicePacketsQueued, "sent": voicePacketsSent,
+         "txDiscarded": queuedOutgoingAudioPackets.discardedCount,
+         "rxDatagrams": incomingAudioDatagrams, "rxAccepted": incomingVoicePackets]
+    }
+
+    /// Explicit live-test seam: known PCM replaces the physical microphone,
+    /// while the production packet builder, queue, transport and RX stay active.
+    func beginEchoTestAuditTransmission(codec: EchoLinkVoiceCodec) -> Bool {
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1",
+              var current = session, current.state == .connected,
+              current.station.callsign.uppercased() == "*ECHOTEST*",
+              !isRemoteTransmitting, !current.isPTTActive,
+              codec == .gsm || transmitCodec == .speex else { return false }
+        activeTransmitCodec = codec
+        pendingOutgoingGSMPayload.removeAll()
+        voicePacketsQueued = 0
+        voicePacketsSent = 0
+        current.isPTTActive = true
+        session = current
+        return true
+    }
+
+    func endEchoTestAuditTransmission() async {
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
+        for _ in 0..<100 {
+            if audioSendDrainTask == nil { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        if var current = session {
+            current.isPTTActive = false
+            session = current
+        }
+    }
+#endif
     private var incomingAudioDatagrams = 0
     private var incomingVoicePackets = 0
     private var logNextVoiceAfterPTT = false
@@ -2371,6 +2410,9 @@ final class EchoLinkConnectionService: ObservableObject {
             logger.debug("Dropped non-audio UDP packet on audio port size=\(data.count)")
             return
         }
+#if DEBUG
+        onAuditIncomingDatagram?(data)
+#endif
 
         guard let currentSession = session,
               currentSession.state == .connected else { return }
@@ -2422,6 +2464,9 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
+#if DEBUG
+            onAuditAcceptedPacket?(datagram.metadata)
+#endif
             let forwarded = forwardReceiveToWatch(data, session: currentSession)
             guard !currentSession.isMuted && !isBackgroundMuted && !forwarded else {
                 let samples = mutedActivityCodec.decodePacket(payload)
@@ -2445,6 +2490,9 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
+#if DEBUG
+            onAuditAcceptedPacket?(datagram.metadata)
+#endif
             let forwarded = forwardReceiveToWatch(data, session: currentSession)
             guard !currentSession.isMuted && !isBackgroundMuted && !forwarded else {
                 appendRecordingPCM(samples)
@@ -2474,6 +2522,9 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
+#if DEBUG
+            onAuditAcceptedPacket?(datagram.metadata)
+#endif
             let forwarded = forwardReceiveToWatch(data, session: currentSession)
             guard !currentSession.isMuted && !isBackgroundMuted && !forwarded else {
                 appendRecordingPCM(samples)

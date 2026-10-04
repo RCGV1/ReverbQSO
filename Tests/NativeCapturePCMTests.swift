@@ -156,7 +156,9 @@ final class NativeCapturePCMTests: XCTestCase {
             let pointer = buffer.floatChannelData![buffer.format.isInterleaved ? 0 : channel]
             for index in samples.indices { pointer[index * stride + offset] = samples[index] }
         case .pcmFormatFloat64:
-            let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+            let buffersOffset = MemoryLayout<AudioBufferList>.offset(of: \.mBuffers)!
+            let audioBuffers = UnsafeMutableRawPointer(buffer.mutableAudioBufferList)
+                .advanced(by: buffersOffset).assumingMemoryBound(to: AudioBuffer.self)
             let audioBuffer = audioBuffers[buffer.format.isInterleaved ? 0 : channel]
             let pointer = audioBuffer.mData!.assumingMemoryBound(to: Double.self)
             for index in samples.indices { pointer[index * stride + offset] = Double(samples[index]) }

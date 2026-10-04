@@ -20,6 +20,10 @@ struct ReceivePlaybackQueue {
     private(set) var queuedSamples = 0
     private(set) var generation: UInt64 = 0
     let maximumSamples = 1_936 // 242 ms (includes up to 0.5% clock correction) at 8 kHz
+    // A stopped player needs preroll before it can consume the replacement.
+    // Leave a full 80 ms packet of headroom so that packet cannot immediately
+    // stop the player again while its render cursor is still zero/negative.
+    let recoverySamples = 1_280 // 160 ms recovery low water
     /// Completion callbacks can arrive after the player has rendered their audio.
     /// Use the render timeline when available so delayed callbacks cannot stop
     /// healthy playback and discard speech that is still scheduled.
@@ -35,4 +39,43 @@ struct ReceivePlaybackQueue {
         queuedSamples = max(0, queuedSamples - count)
     }
     mutating func reset() { generation &+= 1; queuedSamples = 0 }
+}
+
+/// Retains the already processed mono audio still waiting for the player.
+/// The render cursor can be negative during output preroll; that is latency,
+/// not additional audio. Overflow keeps only the newest unrendered samples.
+struct ReceivePlaybackHistory {
+    private(set) var samples: [Float] = []
+    private(set) var startSampleTime: Int64 = 0
+
+    func remainingSamples(renderedSampleTime: Int64?) -> Int {
+        guard let renderedSampleTime else { return samples.count }
+        let consumed = max(0, min(Int64(samples.count), max(0, renderedSampleTime) - startSampleTime))
+        return samples.count - Int(consumed)
+    }
+
+    mutating func prune(renderedSampleTime: Int64) {
+        let remaining = remainingSamples(renderedSampleTime: renderedSampleTime)
+        let consumed = samples.count - remaining
+        guard consumed > 0 else { return }
+        samples.removeFirst(consumed)
+        startSampleTime += Int64(consumed)
+    }
+
+    mutating func append(_ input: [Float], startingAt sampleTime: Int64) {
+        if samples.isEmpty { startSampleTime = max(0, sampleTime) }
+        samples.append(contentsOf: input)
+    }
+
+    func boundedReplacement(adding input: [Float], maximumSamples: Int) -> (samples: [Float], discardedSamples: Int) {
+        let capacity = max(0, maximumSamples)
+        let newestInput = Array(input.suffix(capacity))
+        let retained = samples.suffix(max(0, capacity - newestInput.count))
+        return (Array(retained) + newestInput, samples.count + input.count - retained.count - newestInput.count)
+    }
+
+    mutating func reset() {
+        samples.removeAll(keepingCapacity: true)
+        startSampleTime = 0
+    }
 }

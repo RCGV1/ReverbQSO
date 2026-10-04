@@ -48,14 +48,14 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         XCTAssertNil(buffer.nextDeadline)
     }
 
-    func testShortPauseStartsWithFreshJitterProtection() {
+    func testTalkSpurtPauseStartsWithFreshJitterProtection() {
         var buffer = ReceiveAdaptivePlayoutBuffer()
         let packet = [Int16](repeating: 99, count: 640)
         buffer.enqueue(packet, now: 0)
         _ = buffer.drain(now: 0.04)
-        buffer.enqueue(packet, now: 0.3)
-        XCTAssertTrue(buffer.drain(now: 0.339).isEmpty)
-        XCTAssertEqual(buffer.drain(now: 0.341), [packet])
+        buffer.enqueue(packet, now: 0.6)
+        XCTAssertTrue(buffer.drain(now: 0.639).isEmpty)
+        XCTAssertEqual(buffer.drain(now: 0.641), [packet])
     }
     func testConcealmentDoesNotChangeNetworkPacketDuration() {
         var buffer = ReceiveAdaptivePlayoutBuffer()
@@ -111,4 +111,33 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         buffer.enqueue([4, 5, 6], now: 1)
         XCTAssertEqual(buffer.drain(now: 1.041), [[4, 5, 6]])
     }
+    func testContinuousPacketAfter160MillisecondsDoesNotRestartStartupDelay() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0)
+        XCTAssertEqual(buffer.drain(now: 0.04), [packet])
+        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0.161)
+        XCTAssertEqual(buffer.drain(now: 0.161), [packet])
+        XCTAssertGreaterThan(buffer.targetDelay, 0.04)
+    }
+
+    func testJitterGrowthDoesNotDelaySpeechWhenPlaybackIsDepleted() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0)
+        _ = buffer.drain(now: 0.04)
+        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0.145)
+        XCTAssertGreaterThan(buffer.targetDelay, 0.04)
+        XCTAssertEqual(buffer.drain(now: 0.145), [packet])
+    }
+
+    func testJitterGrowthWaitDoesNotExceedExistingPlaybackCoverage() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0)
+        _ = buffer.drain(now: 0.04)
+        buffer.enqueue(packet, playbackQueuedSamples: 16, now: 0.145)
+        XCTAssertLessThanOrEqual(buffer.nextDeadline ?? .infinity, 0.147)
+    }
+
 }

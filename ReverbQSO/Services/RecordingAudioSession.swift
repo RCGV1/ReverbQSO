@@ -36,7 +36,11 @@ final class RecordingAudioSession {
     }
 
     func endLiveAudio(owner: AnyObject) {
-        liveOwners.removeValue(forKey: ObjectIdentifier(owner))
+        // The owner must stop its audio graph before releasing this claim.
+        // Ignore repeated/unknown releases, including stale disconnect callbacks.
+        guard liveOwners.removeValue(forKey: ObjectIdentifier(owner)) != nil else { return }
+        liveOwners = liveOwners.filter { $0.value.value != nil }
+        if liveOwners.isEmpty, recordingID == nil { deactivate() }
     }
 
     func beginPlayback(id: UUID, onStop: @escaping () -> Void) throws {

@@ -15,6 +15,7 @@ final class WatchReceiveAudioPlayer {
 
     private static let sampleRate = 8_000.0
     private static let maximumQueuedSamples = 1_936 // 242 ms including clock correction at 8 kHz
+    private static let recoveryQueuedSamples = 1_280 // Leave one packet of output-preroll headroom.
 
     private var engine = AVAudioEngine()
     private var playerNode = AVAudioPlayerNode()
@@ -29,10 +30,10 @@ final class WatchReceiveAudioPlayer {
     )!
 
     private var isConfigured = false
-    private var ownsPlaybackSession = false
     private var queuedSampleCount = 0
     private var playbackGeneration: UInt64 = 0
     private var playbackGain = ReceivePlaybackGain()
+    private var playbackHistory = ReceivePlaybackHistory()
     private let receiveClock = ReceiveClockCompensator()
     private let receiveSpeech = ReceiveSpeechSmoother()
     private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
@@ -121,26 +122,41 @@ final class WatchReceiveAudioPlayer {
             guard let self, !Task.isCancelled, self.playbackGeneration == generation else { return }
             self.playoutTask = nil
             for packet in self.receivePlayout.drain() {
-                let corrected = self.receiveClock.process(packet, queuedSamples: self.remainingPlaybackSamples,
+                let renderedSnapshot = self.renderedPlaybackSampleTime
+                if let rendered = renderedSnapshot { self.playbackHistory.prune(renderedSampleTime: rendered) }
+                let remaining = self.playbackHistory.remainingSamples(renderedSampleTime: renderedSnapshot)
+                let corrected = self.receiveClock.process(packet, queuedSamples: remaining,
                     targetQueuedSamples: Int(self.receivePlayout.targetDelay * 8000))
-                guard let buffer = self.makeBuffer(corrected) else { continue }
-                // Played-buffer callbacks can lag behind rendered audio.
-                // Bound the live render lead so delayed callbacks cannot trim speech.
-                if self.remainingPlaybackSamples + corrected.count > Self.maximumQueuedSamples {
+                guard let buffer = self.makeBuffer(corrected), let data = buffer.floatChannelData else { continue }
+                let incoming = Array(UnsafeBufferPointer(start: data[0], count: Int(buffer.frameLength)))
+                var start = max(self.playbackEndSampleTime, max(0, renderedSnapshot ?? 0))
+                var scheduledBuffer = buffer
+                var scheduledSamples = incoming
+                if remaining + incoming.count > Self.maximumQueuedSamples {
+                    let replacement = self.playbackHistory.boundedReplacement(adding: incoming, maximumSamples: Self.recoveryQueuedSamples)
+                    guard let combined = self.makeProcessedBuffer(replacement.samples) else { continue }
                     self.playbackGeneration &+= 1
                     self.playerNode.stop()
                     self.queuedSampleCount = 0
                     self.playbackEndSampleTime = 0
+                    self.playbackHistory.reset()
                     self.receiveClock.reset()
+                    // Ignore any render cursor retained from the stopped generation.
+                    start = 0
+                    scheduledBuffer = combined
+                    scheduledSamples = replacement.samples
                 }
                 let token = self.playbackGeneration
-                let count = corrected.count
-                self.playbackEndSampleTime = max(self.playbackEndSampleTime, self.renderedPlaybackSampleTime ?? 0) + Int64(count)
+                let count = scheduledSamples.count
+                self.playbackEndSampleTime = start + Int64(count)
+                self.playbackHistory.append(scheduledSamples, startingAt: start)
+                let end = self.playbackEndSampleTime
                 self.queuedSampleCount += count
-                self.playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                self.playerNode.scheduleBuffer(scheduledBuffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                     Task { @MainActor [weak self] in
                         guard let self, self.playbackGeneration == token else { return }
                         self.queuedSampleCount = max(0, self.queuedSampleCount - count)
+                        self.playbackHistory.prune(renderedSampleTime: end)
                     }
                 }
                 if !self.playerNode.isPlaying { self.playerNode.play() }
@@ -154,16 +170,21 @@ final class WatchReceiveAudioPlayer {
         playbackRequested = false
         resumeAfterInterruption = false
         automaticPlaybackAllowed = true
-        RecordingAudioSession.shared.endLiveAudio(owner: self)
         discardBufferedReceive()
         playbackGain.reset()
         engine.stop()
+        RecordingAudioSession.shared.endLiveAudio(owner: self)
         gsmCodec.resetAll()
         speexCodec.reset()
-        if ownsPlaybackSession {
-            ownsPlaybackSession = false
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
+    }
+
+    private func makeProcessedBuffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+        guard !samples.isEmpty,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+              let data = buffer.floatChannelData else { return nil }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        for index in samples.indices { data[0][index] = samples[index] }
+        return buffer
     }
 
     private var renderedPlaybackSampleTime: Int64? {
@@ -172,18 +193,17 @@ final class WatchReceiveAudioPlayer {
         return playerTime.sampleTime
     }
     private var remainingPlaybackSamples: Int {
-        guard let rendered = renderedPlaybackSampleTime else { return queuedSampleCount }
-        return max(0, Int(playbackEndSampleTime - rendered))
+        playbackHistory.remainingSamples(renderedSampleTime: renderedPlaybackSampleTime)
     }
 
     private func startIfNeeded() -> Bool {
         guard !isInterrupted, automaticPlaybackAllowed else { return false }
         if engine.isRunning { return true }
+        RecordingAudioSession.shared.beginLiveAudio(owner: self)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
-            ownsPlaybackSession = true
 
             if !isConfigured {
                 engine.attach(playerNode)
@@ -193,14 +213,12 @@ final class WatchReceiveAudioPlayer {
             if !engine.isRunning {
                 try engine.start()
             }
-            RecordingAudioSession.shared.beginLiveAudio(owner: self)
             return true
         } catch {
             logger.error("Watch receive playback could not start error='\(error.localizedDescription, privacy: .public)'")
-            if ownsPlaybackSession {
-                ownsPlaybackSession = false
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            }
+            discardBufferedReceive()
+            engine.stop()
+            RecordingAudioSession.shared.endLiveAudio(owner: self)
             return false
         }
     }
@@ -209,6 +227,7 @@ final class WatchReceiveAudioPlayer {
         playbackGeneration &+= 1
         queuedSampleCount = 0
         playbackEndSampleTime = 0
+        playbackHistory.reset()
         lastReceiveArrival = -Double.infinity
         playoutTask?.cancel()
         playoutTask = nil
@@ -352,7 +371,6 @@ final class WatchReceiveAudioPlayer {
         engine = AVAudioEngine()
         playerNode = AVAudioPlayerNode()
         isConfigured = false
-        ownsPlaybackSession = false
         installEngineConfigurationObserver()
     }
 
