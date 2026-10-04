@@ -4,6 +4,47 @@ import XCTest
 @testable import ReverbQSO
 
 final class EchoLinkProxySendLifecycleTests: XCTestCase {
+    func testVoiceUsesMediaFreshnessDeadlineWhileControlKeepsTransportDeadline() {
+        XCTAssertEqual(
+            EchoLinkProxyClient.sendTimeout(for: .udpData, isVoicePayload: true),
+            .milliseconds(240)
+        )
+        XCTAssertEqual(EchoLinkProxyClient.sendTimeout(for: .udpControl, isVoicePayload: true), .seconds(3))
+        for type in [
+            EchoLinkProxyMessage.MessageType.udpData,
+            EchoLinkProxyMessage.MessageType.udpControl,
+            .tcpOpen, .tcpData, .tcpClose
+        ] {
+            XCTAssertEqual(
+                EchoLinkProxyClient.sendTimeout(for: type, isVoicePayload: false),
+                .seconds(3)
+            )
+        }
+    }
+
+    func testStalledVoiceDeadlineRetiresOnceAndDoesNotWaitForCompletion() async {
+        let probe = SendProbe()
+        let began = ContinuousClock.now
+        do {
+            try await EchoLinkProxySendLifecycle.run(
+                timeout: EchoLinkProxyClient.sendTimeout(for: .udpData, isVoicePayload: true),
+                start: probe.start,
+                retire: probe.retire
+            )
+            XCTFail("Expected voice send timeout")
+        } catch EchoLinkProxyClient.ClientError.sendTimedOut {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(probe.startCount, 1)
+        XCTAssertEqual(probe.retireCount, 1)
+        XCTAssertLessThan(began.duration(to: .now), .milliseconds(800))
+        probe.complete()
+        XCTAssertEqual(probe.retireCount, 1)
+    }
+
     func testSuccessfulSendDoesNotRetireConnection() async throws {
         let probe = SendProbe()
         let task = Task {

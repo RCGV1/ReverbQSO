@@ -24,6 +24,8 @@ struct QSOAudioDiagnosticsSnapshot {
     var rxQueuedPackets = 0
     var playbackBufferedMilliseconds = 0.0
     var startupBufferMilliseconds = 0.0
+    var playbackSpeedPercent = 100.0
+    var deviceOutputDelayMilliseconds = 0.0
 
     var estimatedRXLossPercent: Double? {
         let expected = sequencedRXPackets + missingRXPackets

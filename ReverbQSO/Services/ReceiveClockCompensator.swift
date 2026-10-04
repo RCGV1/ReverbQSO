@@ -9,9 +9,17 @@ final class ReceiveClockCompensator {
     private static let queueErrorForMaximumCorrection = 240.0
     private static let maximumCorrection = 0.005
     private static let feedbackSmoothing = 0.02
+    // Clock drift needs tiny corrections. A burst needs faster recovery so
+    // extra speech does not remain queued for tens of seconds. Taper catch-up
+    // near the jitter target and keep total sample shortening within 3%.
+    private static let catchupDeadbandSamples = 128.0 // 16 ms
+    private static let catchupRangeSamples = 640.0 // 80 ms
+    private static let maximumCatchup = 0.025
+    private static let catchupSmoothing = 0.08
 
     private var smoothedQueueError = 0.0
     private var fractionalOutputSamples = 0.0
+    private var catchupCorrection = 0.0
 
     private(set) var correctionRatio = 1.0
 
@@ -26,7 +34,15 @@ final class ReceiveClockCompensator {
             min(1, queueError / Self.queueErrorForMaximumCorrection)
         )
         smoothedQueueError += Self.feedbackSmoothing * (normalizedError - smoothedQueueError)
-        correctionRatio = 1 - (Self.maximumCorrection * smoothedQueueError)
+        let excess = max(0, queueError - Self.catchupDeadbandSamples)
+        let desiredCatchup = Self.maximumCatchup * min(1, excess / Self.catchupRangeSamples)
+        if queueError <= 0 {
+            // A stalled/depleted renderer needs lead, not residual catch-up.
+            catchupCorrection = 0
+        } else {
+            catchupCorrection += Self.catchupSmoothing * (desiredCatchup - catchupCorrection)
+        }
+        correctionRatio = 1 - (Self.maximumCorrection * smoothedQueueError) - catchupCorrection
 
         let exactOutputCount = Double(samples.count) * correctionRatio
             + fractionalOutputSamples
@@ -53,6 +69,7 @@ final class ReceiveClockCompensator {
     func reset() {
         smoothedQueueError = 0
         fractionalOutputSamples = 0
+        catchupCorrection = 0
         correctionRatio = 1
     }
 }

@@ -61,8 +61,8 @@ final class ReceiveClockCompensatorTests: XCTestCase {
         _ = compensator.process(packet, queuedSamples: 640)
         let output = compensator.process(packet, queuedSamples: 1_920)
 
-        XCTAssertGreaterThan(compensator.correctionRatio, 0.999)
-        XCTAssertGreaterThanOrEqual(output.count, 639)
+        XCTAssertGreaterThan(compensator.correctionRatio, 0.997)
+        XCTAssertGreaterThanOrEqual(output.count, 638)
     }
 
     func testInterpolationPreservesConstantWaveformWhenLengthChanges() {
@@ -112,5 +112,85 @@ final class ReceiveClockCompensatorTests: XCTestCase {
 
         XCTAssertEqual(compensator.correctionRatio, 1, accuracy: 0.000_001)
         XCTAssertEqual(compensator.process(packet, queuedSamples: 640), packet)
+    }
+
+    func testBurstCatchupIsBoundedAndPreservesConstantWaveform() {
+        let compensator = ReceiveClockCompensator()
+        let packet = [Int16](repeating: -12_345, count: 640)
+        for _ in 0..<400 {
+            let output = compensator.process(packet, queuedSamples: 2_000, targetQueuedSamples: 320)
+            XCTAssertGreaterThanOrEqual(compensator.correctionRatio, 0.97)
+            XCTAssertTrue(output.allSatisfy { $0 == -12_345 })
+        }
+        XCTAssertLessThan(compensator.correctionRatio, 0.975)
+        compensator.reset()
+        XCTAssertEqual(compensator.process(packet, queuedSamples: 320, targetQueuedSamples: 320), packet)
+        XCTAssertEqual(compensator.correctionRatio, 1)
+    }
+
+    func testDepletionImmediatelyReleasesBurstCatchup() {
+        let compensator = ReceiveClockCompensator()
+        let packet = [Int16](repeating: 1_000, count: 640)
+        for _ in 0..<100 {
+            _ = compensator.process(packet, queuedSamples: 1_920, targetQueuedSamples: 320)
+        }
+        XCTAssertLessThan(compensator.correctionRatio, 0.975)
+        let output = compensator.process(packet, queuedSamples: 0, targetQueuedSamples: 320)
+        XCTAssertGreaterThanOrEqual(compensator.correctionRatio, 0.995)
+        XCTAssertGreaterThanOrEqual(output.count, 636)
+    }
+
+    func testFourPacketBurstClearsExcessDelayWithinTenSecondsWithoutDroppingSpeech() {
+        var playout = ReceiveAdaptivePlayoutBuffer()
+        let compensator = ReceiveClockCompensator()
+        let maximumSamples = ReceivePlaybackQueue().maximumSamples
+        var nativeEnd = 0.0
+        var wake: Double?
+        var delays: [Double] = []
+        var scheduled = 0
+
+        func nativeRemaining(_ now: Double) -> Int {
+            max(0, Int(((nativeEnd - now) * 8_000).rounded()))
+        }
+        func drain(_ now: Double) {
+            let capacity = max(0, maximumSamples - nativeRemaining(now))
+            for packet in playout.drain(now: now, maximumSamples: Int(Double(capacity) / 1.005)) {
+                let corrected = compensator.process(packet, queuedSamples: nativeRemaining(now),
+                    targetQueuedSamples: Int(playout.targetDelay * 8_000))
+                XCTAssertLessThanOrEqual(nativeRemaining(now) + corrected.count, maximumSamples)
+                let start = max(now, nativeEnd)
+                let id = Int(packet[0])
+                let arrival = id < 4 ? 0 : Double(id - 3) * 0.080
+                delays.append(start - arrival)
+                nativeEnd = start + Double(corrected.count) / 8_000
+                scheduled += 1
+            }
+        }
+        func arm(_ now: Double) {
+            guard wake == nil, let deadline = playout.nextDeadline else { return }
+            wake = deadline > now ? deadline : now + 0.010
+        }
+        for tick in 0...10_000 {
+            let now = Double(tick) / 1_000
+            let ids = tick == 0 ? [0, 1, 2, 3] : tick.isMultiple(of: 80) ? [3 + tick / 80] : []
+            for id in ids {
+                drain(now)
+                playout.enqueue([Int16](repeating: Int16(id), count: 640), now: now,
+                    rendererLeadSamples: nativeRemaining(now))
+                drain(now)
+                arm(now)
+            }
+            if let deadline = wake, deadline <= now + 0.000_000_1 {
+                wake = nil
+                drain(now)
+                arm(now)
+            }
+        }
+        let recent = Array(delays.suffix(10))
+        XCTAssertLessThan(recent.reduce(0, +) / Double(recent.count), 0.100,
+            "A burst must not leave hundreds of milliseconds of sticky playback delay")
+        XCTAssertEqual(scheduled, 129)
+        XCTAssertEqual(playout.discardedPackets, 0)
+        XCTAssertEqual(playout.recoveryCount, 0)
     }
 }

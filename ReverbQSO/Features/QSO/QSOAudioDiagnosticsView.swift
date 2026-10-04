@@ -24,6 +24,8 @@ struct QSOAudioDiagnosticsView: View {
                 } ?? "—")
                 metric("Buffered audio", milliseconds(snapshot.playbackBufferedMilliseconds))
                 metric("Startup buffer", milliseconds(snapshot.startupBufferMilliseconds))
+                metric("Playback speed", String(format: "%.1f%%", snapshot.playbackSpeedPercent))
+                metric("Device output delay", milliseconds(snapshot.deviceOutputDelayMilliseconds))
             } header: {
                 Text("Live")
             } footer: {

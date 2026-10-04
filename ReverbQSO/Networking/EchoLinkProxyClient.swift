@@ -8,6 +8,7 @@ final class EchoLinkProxyClient: @unchecked Sendable {
     static let defaultSetupTimeout: Int = 10
     static let defaultAuthenticationTimeout: TimeInterval = 10
     static let defaultSendTimeout: Duration = .seconds(3)
+    static let audioSendTimeout: Duration = .milliseconds(240)
 
     enum ClientError: Swift.Error, LocalizedError {
         case invalidPort(UInt16)
@@ -222,13 +223,25 @@ final class EchoLinkProxyClient: @unchecked Sendable {
     ) async throws {
         let frame = try EchoLinkProxyProtocol.encode(type: type, remoteHost: remoteHost, payload: data)
         logger.info("Proxy outbound type=\(type.rawValue) payloadBytes=\(data.count)")
-        try await sendRaw(frame)
+        let isVoicePayload = type == .udpData &&
+            LiveTransportAudioPortPayloadKind.classify(data) == .voice
+        try await sendRaw(
+            frame,
+            timeout: Self.sendTimeout(for: type, isVoicePayload: isVoicePayload)
+        )
     }
 
-    private func sendRaw(_ data: Data) async throws {
+    static func sendTimeout(
+        for type: EchoLinkProxyMessage.MessageType,
+        isVoicePayload: Bool
+    ) -> Duration {
+        type == .udpData && isVoicePayload ? audioSendTimeout : defaultSendTimeout
+    }
+
+    private func sendRaw(_ data: Data, timeout: Duration = defaultSendTimeout) async throws {
         let expectedConnection = connection
         try await EchoLinkProxySendLifecycle.run(
-            timeout: Self.defaultSendTimeout,
+            timeout: timeout,
             start: { completion in
                 expectedConnection.send(content: data, completion: .contentProcessed { error in
                     completion(error)

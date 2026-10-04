@@ -303,11 +303,13 @@ final class AudioEngine: ObservableObject {
     private var diagnosticsPlaybackDiscardBaseline = 0
     private var diagnosticsPlaybackRecoveryBaseline = 0
 
-    var livePlaybackDiagnostics: (bufferedMilliseconds: Double, startupMilliseconds: Double, droppedPackets: Int, refills: Int) {
+    var livePlaybackDiagnostics: (bufferedMilliseconds: Double, startupMilliseconds: Double, droppedPackets: Int, refills: Int, speedPercent: Double, deviceDelayMilliseconds: Double) {
         (Double(remainingPlaybackSamples + receivePlayout.pendingSampleCount) / 8,
          receivePlayout.targetDelay * 1000,
          diagnosticsPlaybackOverflowDrops + max(0, receivePlayout.discardedPackets - diagnosticsPlaybackDiscardBaseline),
-         max(0, receivePlayout.recoveryCount - diagnosticsPlaybackRecoveryBaseline))
+         max(0, receivePlayout.recoveryCount - diagnosticsPlaybackRecoveryBaseline),
+         100 / receiveClock.correctionRatio,
+         AVAudioSession.sharedInstance().outputLatency * 1000)
     }
 #if DEBUG
     private var auditScheduledSamples = 0
