@@ -695,6 +695,8 @@ final class EchoLinkConnectionService: ObservableObject {
 #if DEBUG
     var onAuditIncomingDatagram: (@MainActor (Data) -> Void)?
     var onAuditAcceptedPacket: (@MainActor (EchoLinkVoicePacketMetadata?) -> Void)?
+    var onAuditOutgoingDatagramSent: (@MainActor () async -> Void)?
+    var auditAudioSendDrainTask: Task<Void, Never>? { audioSendDrainTask }
 
     var auditTransportSnapshot: [String: Int] {
         ["queued": voicePacketsQueued, "sent": voicePacketsSent,
@@ -1982,6 +1984,12 @@ final class EchoLinkConnectionService: ObservableObject {
                 } else {
                     throw ConnectionError.notConnected
                 }
+#if DEBUG
+                if let observer = onAuditOutgoingDatagramSent { await observer() }
+#endif
+                guard !Task.isCancelled,
+                      audioSendDrainGeneration == generation,
+                      session?.id == queuedPacket.sessionID else { return }
                 voicePacketsSent += 1
                 audioDiagnosticsTotals.txPackets += 1
                 audioDiagnosticsTotals.txPayloadBytes += max(0, queuedPacket.data.count - EchoLinkAudioPacketCodec.legacyVoiceHeaderLength)
@@ -2560,10 +2568,28 @@ final class EchoLinkConnectionService: ObservableObject {
             playIncomingAudioDatagram(data, datagram: datagram)
             return
         }
-        if case .speex(let payload) = datagram.packet,
-           receiveSpeexValidator.decodePacket(payload) == nil {
+        // Validate complete voice payloads before they can consume an RTP
+        // sequence, refresh peer liveness, or reach recording/forwarding.
+        let validPayload: Bool
+        switch datagram.packet {
+        case .gsm(let payload):
+            validPayload = !payload.isEmpty && payload.count <= 4 * GSMCodec.encodedFrameSize
+                && payload.count.isMultiple(of: GSMCodec.encodedFrameSize)
+                && stride(from: 0, to: payload.count, by: GSMCodec.encodedFrameSize).allSatisfy {
+                    payload[payload.startIndex + $0] & 0xF0 == 0xD0
+                }
+        case .pcm(let samples):
+            // G.711 packets contain 10 ms blocks at 8 kHz, up to the
+            // client's 80 ms voice packet duration.
+            validPayload = !samples.isEmpty && samples.count <= 640 && samples.count.isMultiple(of: 80)
+        case .speex(let payload):
+            validPayload = receiveSpeexValidator.decodePacket(payload) != nil
+        case .unsupportedPayloadType:
+            validPayload = false
+        }
+        guard validPayload else {
             audioDiagnosticsTotals.invalidRXPackets += 1
-            logger.debug("Dropped malformed Speex before receive sequence admission")
+            logger.debug("Dropped malformed voice payload before receive sequence admission")
             return
         }
         let ready = receiveReorderBuffer.insert(data, metadata: datagram.metadata)

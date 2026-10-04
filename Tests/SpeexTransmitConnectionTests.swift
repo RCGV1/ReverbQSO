@@ -15,6 +15,52 @@ final class SpeexTransmitConnectionTests: XCTestCase {
         try await exerciseTransmission(speexPeer: false)
     }
 
+    func testOldSendCompletionCannotChangeReplacementSessionCounters() async throws {
+        let relay = try BoundUDPSocket(localPort: 0)
+        defer { relay.close() }
+        let engine = AudioEngine()
+        let service = EchoLinkConnectionService(
+            relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            audioEngine: engine)
+        service.authenticatedCallsign = "N0TST"
+        service.callAccessPolicyProvider = { CallAccessPolicy() }
+        let server = Task {
+            let registration = try await relay.receive()
+            try await relay.send(Data([4, 0, 0, 0, 0, 0, 0, 0, 0]),
+                                 to: registration.sourceHost, port: registration.sourcePort)
+            _ = try await relay.receive()
+            let response = EchoLinkControlPacketCodec.buildSDESPacket(callsign: "K1MOCK", advertiseSpeex: false)
+            try await relay.send(Data([1, 198, 51, 100, 10, 0xC3, 0x50, 0x14, 0x4F]) + response,
+                                 to: registration.sourceHost, port: registration.sourcePort)
+        }
+        defer { server.cancel() }
+        await service.connect(to: Station(callsign: "K1MOCK", ipAddress: "198.51.100.10"))
+        XCTAssertEqual(service.session?.state, .connected)
+        let paused = expectation(description: "Actual voice datagram sent before completion")
+        let gate = SendCompletionPause()
+        defer { gate.resume() }
+        service.onAuditOutgoingDatagramSent = {
+            paused.fulfill()
+            await gate.pause()
+        }
+        service.sendPTT(active: true)
+        engine.encodeTransmitPCM(Array(repeating: Int16(1_000), count: 640))
+        await fulfillment(of: [paused], timeout: 3)
+        let oldDrain = try XCTUnwrap(service.auditAudioSendDrainTask)
+        await service.disconnect()
+        service.installSimulatorDemoSession(station: Station(callsign: "NEXT", ipAddress: "192.0.2.2"))
+        let replacementID = service.session?.id
+        service.onAuditOutgoingDatagramSent = nil
+        gate.resume()
+        await oldDrain.value
+        let diagnostics = await service.audioDiagnosticsSnapshot()
+        XCTAssertEqual(service.session?.id, replacementID)
+        XCTAssertEqual(diagnostics.txPackets, 0)
+        XCTAssertEqual(diagnostics.txPayloadBytes, 0)
+        await service.disconnect()
+    }
+
     func testCapabilityIsStickyButResetsOnDisconnectAndMediaDoesNotEnableIt() async throws {
         let engine = AudioEngine()
         let service = EchoLinkConnectionService(audioEngine: engine)
@@ -103,5 +149,17 @@ final class SpeexTransmitConnectionTests: XCTestCase {
         }
         await service.disconnect()
         XCTAssertEqual(service.transmitCodec, .gsm)
+    }
+}
+
+@MainActor
+private final class SendCompletionPause {
+    private var continuation: CheckedContinuation<Void, Never>?
+    func pause() async {
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }

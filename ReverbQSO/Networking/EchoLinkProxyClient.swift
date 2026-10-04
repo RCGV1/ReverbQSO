@@ -7,6 +7,7 @@ import os
 final class EchoLinkProxyClient: @unchecked Sendable {
     static let defaultSetupTimeout: Int = 10
     static let defaultAuthenticationTimeout: TimeInterval = 10
+    static let defaultSendTimeout: Duration = .seconds(3)
 
     enum ClientError: Swift.Error, LocalizedError {
         case invalidPort(UInt16)
@@ -17,6 +18,7 @@ final class EchoLinkProxyClient: @unchecked Sendable {
         case unexpectedSystemEvent(UInt8)
         case allCandidatesFailed([String])
         case authenticationTimedOut
+        case sendTimedOut
 
         /// SYSTEM errors describe this proxy's password/ACL, not the directory account.
         var isCandidateRejection: Bool {
@@ -38,6 +40,8 @@ final class EchoLinkProxyClient: @unchecked Sendable {
                 return "Could not connect to an EchoLink Proxy. " + failures.joined(separator: " ")
             case .authenticationTimedOut:
                 return "The EchoLink Proxy did not send an authentication challenge in time."
+            case .sendTimedOut:
+                return "The EchoLink Proxy stopped accepting outbound data."
             }
         }
     }
@@ -222,14 +226,27 @@ final class EchoLinkProxyClient: @unchecked Sendable {
     }
 
     private func sendRaw(_ data: Data) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error {
-                    continuation.resume(throwing: ClientError.connectionFailed(error.localizedDescription))
-                } else {
-                    continuation.resume()
-                }
-            })
+        let expectedConnection = connection
+        try await EchoLinkProxySendLifecycle.run(
+            timeout: Self.defaultSendTimeout,
+            start: { completion in
+                expectedConnection.send(content: data, completion: .contentProcessed { error in
+                    completion(error)
+                })
+            },
+            retire: { [weak self, weak expectedConnection] in
+                guard let self, let expectedConnection else { return }
+                self.retireConnectionIfCurrent(expectedConnection)
+            }
+        )
+    }
+
+    private func retireConnectionIfCurrent(_ expectedConnection: NWConnection) {
+        queue.async {
+            guard self.connection === expectedConnection, !self.isClosed else { return }
+            self.isClosed = true
+            self.connection.cancel()
+            self.messageBuffer.finish(throwing: ClientError.connectionClosed)
         }
     }
 
@@ -288,6 +305,88 @@ final class EchoLinkProxyClient: @unchecked Sendable {
         isClosed = true
         connection.cancel()
         messageBuffer.finish(throwing: error)
+    }
+}
+
+enum EchoLinkProxySendLifecycle {
+    typealias Start = (@escaping @Sendable (Error?) -> Void) -> Void
+
+    static func run(
+        timeout: Duration,
+        start: Start,
+        retire: @escaping @Sendable () -> Void
+    ) async throws {
+        let gate = ProxySendGate(retire: retire)
+        let timeoutTask = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            gate.resolve(
+                .failure(EchoLinkProxyClient.ClientError.sendTimedOut),
+                shouldRetire: true
+            )
+        }
+        defer { timeoutTask.cancel() }
+
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { continuation in
+                guard gate.install(continuation) else { return }
+                start { error in
+                    if let error {
+                        gate.resolve(
+                            .failure(
+                                EchoLinkProxyClient.ClientError.connectionFailed(
+                                    error.localizedDescription
+                                )
+                            )
+                        )
+                    } else {
+                        gate.resolve(.success(()))
+                    }
+                }
+            }
+        } onCancel: {
+            gate.resolve(.failure(CancellationError()), shouldRetire: true)
+        }
+    }
+}
+
+private final class ProxySendGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let retire: @Sendable () -> Void
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var result: Result<Void, Error>?
+
+    init(retire: @escaping @Sendable () -> Void) {
+        self.retire = retire
+    }
+
+    @discardableResult
+    func install(_ continuation: CheckedContinuation<Void, Error>) -> Bool {
+        lock.lock()
+        if let result {
+            lock.unlock()
+            continuation.resume(with: result)
+            return false
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+            return true
+        }
+    }
+
+    func resolve(_ result: Result<Void, Error>, shouldRetire: Bool = false) {
+        lock.lock()
+        guard self.result == nil else {
+            lock.unlock()
+            return
+        }
+        self.result = result
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+
+        if shouldRetire { retire() }
+        continuation?.resume(with: result)
     }
 }
 

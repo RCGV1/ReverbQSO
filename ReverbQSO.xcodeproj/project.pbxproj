@@ -68,6 +68,7 @@
 		298D5E24ED9F44CFC007D8F6 /* EchoTestWelcome.gsm in Resources */ = {isa = PBXBuildFile; fileRef = E4FDCD1D3602EA1229B2E5CB /* EchoTestWelcome.gsm */; };
 		29BEA05925DAE8D131603FC5 /* oe_speex.c in Sources */ = {isa = PBXBuildFile; fileRef = BD9B3B696F43E3EFB05C8C90 /* oe_speex.c */; };
 		2B3E1D515F1E3A5022E27A27 /* WatchAudioForwarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AB37D3D1056CE6168F5BB0 /* WatchAudioForwarding.swift */; };
+		2D12759EE9DC0146967CE406 /* EchoLinkProxySendLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BA939C542EC900BB7E94A2E /* EchoLinkProxySendLifecycleTests.swift */; };
 		2D7645E0823FA9017E7FC51C /* gsm_destroy.c in Sources */ = {isa = PBXBuildFile; fileRef = 4D9043D7B8497DCBA7B0A88E /* gsm_destroy.c */; };
 		2D7CEFB6051D9B1E705B4B0A /* gain_table_lbr.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C994F6CBD263D438531D247 /* gain_table_lbr.c */; };
 		2EEDA4577EB79A64D0560186 /* QSORecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDFB7C338CBA54A29D2B513F /* QSORecordingCoordinator.swift */; };
@@ -549,6 +550,7 @@
 		684E37027F559B5EF9AA9458 /* lsp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lsp.h; sourceTree = "<group>"; };
 		6984D2E0F76B21B22FB57A57 /* EchoLinkAudioReorderBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkAudioReorderBufferTests.swift; sourceTree = "<group>"; };
 		69BA3B025A12811D1FA4D19B /* CallCQWireTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQWireTests.swift; sourceTree = "<group>"; };
+		6BA939C542EC900BB7E94A2E /* EchoLinkProxySendLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkProxySendLifecycleTests.swift; sourceTree = "<group>"; };
 		6D0EEB971EC92EB2FE7F099C /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		6E255B3BF91775C965FB1FF6 /* table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = table.c; sourceTree = "<group>"; };
 		6E357E23B6E8B4CDB554D59F /* WatchPTTIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPTTIntent.swift; sourceTree = "<group>"; };
@@ -849,6 +851,7 @@
 				9A365293C9B8CE2A7F3ABF64 /* EchoLinkDTMFToneGeneratorTests.swift */,
 				A551210CAF19BE6A4905217B /* EchoLinkParticipantParserTests.swift */,
 				C46FE451B3C6D89DD6CA5AAD /* EchoLinkProxyProtocolTests.swift */,
+				6BA939C542EC900BB7E94A2E /* EchoLinkProxySendLifecycleTests.swift */,
 				2018F4783A7484CCB5D36ECD /* EchoLinkPTTTransitionTests.swift */,
 				90ABBDD741C05A2804F8184B /* EchoLinkPublicProxyListTests.swift */,
 				E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */,
@@ -1624,6 +1627,7 @@
 				3FB5A94BC3790CC5427E4EA3 /* EchoLinkPTTTransitionTests.swift in Sources */,
 				EFABEC182E686CF6977500C9 /* EchoLinkParticipantParserTests.swift in Sources */,
 				5988D1BA00954DDC4615D1C5 /* EchoLinkProxyProtocolTests.swift in Sources */,
+				2D12759EE9DC0146967CE406 /* EchoLinkProxySendLifecycleTests.swift in Sources */,
 				40BFCE014EECF551CED7CC4D /* EchoLinkPublicProxyListTests.swift in Sources */,
 				B6C59E9D05F8742F2242028E /* EchoLinkRegistrationClientTests.swift in Sources */,
 				4E213BDDBEC38BC37D07903D /* EchoLinkRelayClientTests.swift in Sources */,

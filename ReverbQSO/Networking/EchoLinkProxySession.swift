@@ -162,7 +162,13 @@ actor EchoLinkProxySession {
         do {
             let response = try await awaitDirectoryResponse(payload, boundary: boundary, timeout: timeout)
             do {
-                try await client.closeTCP()
+                // The transaction is committed once TCP_OPEN succeeds. A UI
+                // task may be canceled while its bounded response is draining,
+                // but the shared tunnel still needs TCP_CLOSE. Run that final
+                // framed send outside the canceled caller; sendRaw retains its
+                // own deadline and retires the tunnel if the close really stalls.
+                let client = self.client
+                try await Task { try await client.closeTCP() }.value
             } catch {
                 // Without a confirmed TCP_CLOSE send, the proxy may keep its
                 // directory stream open and route later data into the next

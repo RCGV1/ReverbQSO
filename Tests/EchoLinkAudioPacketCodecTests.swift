@@ -4,6 +4,16 @@ import XCTest
 @testable import ReverbQSO
 
 final class EchoLinkAudioPacketCodecTests: XCTestCase {
+    func testValidRawGSMIsNotMisreadAsLegacyRTPWithAnExtension() {
+        let frame = Data([0xD0] + Array(repeating: UInt8(0), count: 32))
+        for raw in [frame, frame + frame] {
+            let parsed = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(raw)
+            XCTAssertEqual(parsed?.packet, .gsm(raw))
+            XCTAssertNil(parsed?.metadata)
+        }
+        let slice = (Data(repeating: 0xFF, count: 17) + frame).dropFirst(17)
+        XCTAssertEqual(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(slice)?.packet, .gsm(frame))
+    }
 
     func testParseSlicedLegacyVoicePacketPreservesPayloadAndMetadata() {
         let payload = Data(repeating: 0x22, count: GSMCodec.encodedFrameSize)
@@ -34,6 +44,17 @@ final class EchoLinkAudioPacketCodecTests: XCTestCase {
         XCTAssertEqual(parsed?.metadata?.sequenceNumber, 0x1234)
         XCTAssertEqual(parsed?.metadata?.timestamp, 0x01020304)
         XCTAssertEqual(parsed?.metadata?.ssrc, 0x05060708)
+    }
+
+    func testCompleteExtendedLegacyRTPWinsOverCoincidentalRawGSMMagic() {
+        var bytes = [UInt8](repeating: 0, count: 132)
+        bytes[0] = 0xD0
+        bytes[3] = 7
+        bytes[15] = 9 // Nine extension words: payload starts at byte 52.
+        for offset in [33, 66, 99] { bytes[offset] = 0xD0 }
+        let parsed = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(Data(bytes))
+        XCTAssertEqual(parsed?.metadata?.sequenceNumber, 7)
+        XCTAssertEqual(parsed?.packet, .pcm(bytes.dropFirst(52).map(EchoLinkAudioPacketCodec.decodeMuLaw)))
     }
 
     func testParseLegacyBEEFHeaderAsGSM() {

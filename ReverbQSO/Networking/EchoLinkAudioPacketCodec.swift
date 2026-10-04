@@ -90,6 +90,38 @@ enum EchoLinkAudioPacketCodec {
             return ParsedIncomingAudioDatagram(packet: .gsm(stripped), metadata: nil)
         }
 
+        // A GSM frame starts with 0xD, which also looks like legacy RTP
+        // with an extension. Recognize complete raw frames before RTP parsing.
+        if isFrameAlignedGSM(data),
+           stride(from: 0, to: data.count, by: GSMCodec.encodedFrameSize).allSatisfy({
+               data[data.startIndex + $0] & 0xF0 == 0xD0
+           }) {
+            // Extended RTP v3 can also satisfy the raw frame markers. Prefer
+            // RTP only when its payload is a complete supported voice packet.
+            if let rtp = parseRTPPayload(from: data) {
+                let packet = decodePayload(rtp.payload, payloadType: rtp.payloadType)
+                let validPayload: Bool
+                switch packet {
+                case .gsm(let payload):
+                    validPayload = isFrameAlignedGSM(payload)
+                        && payload.count <= 4 * GSMCodec.encodedFrameSize
+                        && stride(from: 0, to: payload.count, by: GSMCodec.encodedFrameSize).allSatisfy {
+                            payload[payload.startIndex + $0] & 0xF0 == 0xD0
+                        }
+                case .pcm(let samples):
+                    validPayload = samples.count >= 80 && samples.count <= 640 && samples.count.isMultiple(of: 80)
+                case .speex(let payload):
+                    validPayload = SpeexCodec().decodePacket(payload) != nil
+                case .unsupportedPayloadType:
+                    validPayload = false
+                }
+                if validPayload {
+                    return ParsedIncomingAudioDatagram(packet: packet, metadata: rtp.metadata)
+                }
+            }
+            return ParsedIncomingAudioDatagram(packet: .gsm(data), metadata: nil)
+        }
+
         if data.count >= legacyVoiceHeaderLength, data[data.startIndex] == 0xC0 {
             // Legacy peers use 0x96 for Speex. For standard payload types,
             // the high bit is the RTP marker flag, not part of the codec ID.

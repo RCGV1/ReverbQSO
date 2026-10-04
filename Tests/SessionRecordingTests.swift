@@ -26,7 +26,8 @@ final class SessionRecordingTests: XCTestCase {
         service.toggleRecording()
         XCTAssertTrue(service.isRecording)
         service.setBackgroundMuted(true)
-        let voice = Data([0xC0, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x00, 0xFF])
+        let voice = Data([0xC0, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+            + Data(repeating: 0x80, count: 160)
         await service.handleAudioData(voice)
         await service.handleAudioData(voice)
         service.toggleRecording()
@@ -40,10 +41,10 @@ final class SessionRecordingTests: XCTestCase {
         let full = try XCTUnwrap(recordings.first { $0.kind == .qso })
         let clip = try XCTUnwrap(recordings.first { $0.kind == .clip })
         XCTAssertEqual(recordings.count, 2)
-        XCTAssertEqual(full.duration, 6.0 / 8000)
-        XCTAssertEqual(clip.duration, 3.0 / 8000)
-        XCTAssertEqual(try Data(contentsOf: full.url).count, 44 + 12)
-        XCTAssertEqual(try Data(contentsOf: clip.url).count, 44 + 6)
+        XCTAssertEqual(full.duration, 163.0 / 8000)
+        XCTAssertEqual(clip.duration, 160.0 / 8000)
+        XCTAssertEqual(try Data(contentsOf: full.url).count, 44 + 326)
+        XCTAssertEqual(try Data(contentsOf: clip.url).count, 44 + 320)
     }
 
     func testLivePreferenceChangeStartsAutomaticRecordingWithoutEndingClip() async throws {
