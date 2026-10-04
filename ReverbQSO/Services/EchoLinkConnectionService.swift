@@ -572,6 +572,13 @@ final class EchoLinkConnectionService: ObservableObject {
 
     @Published var session: QSOSession? {
         didSet {
+            if let waiter = handshakeWaiter {
+                if session?.id != waiter.sessionID || session?.state == .disconnecting || session?.state == .disconnected {
+                    completeHandshakeWaiter(id: waiter.id, result: .failure(CancellationError()))
+                } else if session?.state == .connected {
+                    completeHandshakeWaiter(id: waiter.id, result: .success(true))
+                }
+            }
             if session?.state == .connected { prepareSessionRecording() }
             else if session == nil || session?.state == .disconnected { stopSessionRecording() }
         }
@@ -780,9 +787,11 @@ final class EchoLinkConnectionService: ObservableObject {
 
     private static let audioPort: UInt16 = 5198
     private static let controlPort: UInt16 = 5199
-    private static let handshakeAttemptCount = 5
-    private static let handshakePollInterval = Duration.milliseconds(100)
-    private static let handshakePollsPerAttempt = 100
+    // Retry early packet loss at 1 and 3 seconds, retaining the original
+    // 10-second retries and total 50-second (20-second relay) wait budget.
+    private static let handshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7), .seconds(10), .seconds(10), .seconds(10), .seconds(10)]
+    private static let relayHandshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7), .seconds(10)]
+    private var handshakeWaiter: (sessionID: UUID, id: UUID, continuation: CheckedContinuation<Bool, Error>)?
     private static let keepAliveInterval = Duration.seconds(10)
     private static let peerTimeoutInterval = Duration.seconds(50)
 
@@ -1153,7 +1162,7 @@ final class EchoLinkConnectionService: ObservableObject {
             do {
                 try await awaitRemoteHandshakeAcknowledgement(
                     sessionID: sessionID,
-                    attempts: storedProxyConfiguration.mode == .relay ? 2 : Self.handshakeAttemptCount
+                    retryIntervals: storedProxyConfiguration.mode == .relay ? Self.relayHandshakeRetryIntervals : Self.handshakeRetryIntervals
                 )
             } catch ConnectionError.handshakeTimedOut where storedProxyConfiguration.mode == .relay {
                 throw ConnectionError.connectionFailed(
@@ -1801,36 +1810,57 @@ final class EchoLinkConnectionService: ObservableObject {
 
     private func awaitRemoteHandshakeAcknowledgement(
         sessionID: UUID,
-        attempts: Int = handshakeAttemptCount
+        retryIntervals: [Duration] = handshakeRetryIntervals
     ) async throws {
-        for attempt in 1...attempts {
+        for (index, timeout) in retryIntervals.enumerated() {
             try Task.checkCancellation()
             try requireCurrentSession(sessionID)
+            if session?.state == .connected { return }
             let sdes = buildSDESPacket(callsign: localCallsign)
             let info = EchoLinkControlPacketCodec.buildNDATAInfoPacket(
                 message: "Station \(localCallsign)\r\n"
             )
-            logger.debug("Sending EchoLink handshake attempt=\(attempt)")
+            logger.debug("Sending EchoLink handshake attempt=\(index + 1)")
             try await sendControl(data: sdes)
             try await sendAudioPortControl(data: sdes)
             try await sendNDATA(data: info)
 
-            for _ in 0..<Self.handshakePollsPerAttempt {
-                try Task.checkCancellation()
-                try requireCurrentSession(sessionID)
-                switch session?.state {
-                case .connected:
-                    return
-                case .disconnected, .disconnecting, .none:
-                    throw CancellationError()
-                case .connecting:
-                    break
-                }
-                try await Task.sleep(for: Self.handshakePollInterval)
-            }
+            if try await waitForHandshakeAcknowledgement(sessionID: sessionID, timeout: timeout) { return }
         }
 
         throw ConnectionError.handshakeTimedOut
+    }
+
+    private func waitForHandshakeAcknowledgement(sessionID: UUID, timeout: Duration) async throws -> Bool {
+        try requireCurrentSession(sessionID)
+        if session?.state == .connected { return true }
+        guard session?.state == .connecting else { throw CancellationError() }
+        let id = UUID()
+        var deadlineTask: Task<Void, Never>?
+        defer { deadlineTask?.cancel() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                handshakeWaiter = (sessionID, id, continuation)
+                deadlineTask = Task { @MainActor [weak self] in
+                    do { try await Task.sleep(for: timeout) } catch { return }
+                    self?.completeHandshakeWaiter(id: id, result: .success(false))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.completeHandshakeWaiter(id: id, result: .failure(CancellationError()))
+            }
+        }
+    }
+
+    private func completeHandshakeWaiter(id: UUID, result: Result<Bool, Error>) {
+        guard let waiter = handshakeWaiter, waiter.id == id else { return }
+        handshakeWaiter = nil
+        waiter.continuation.resume(with: result)
     }
 
     // MARK: - Packet Builders
@@ -2776,6 +2806,9 @@ final class EchoLinkConnectionService: ObservableObject {
     private func tearDown(expectedSessionID: UUID? = nil) {
         if let expectedSessionID, session?.id != expectedSessionID {
             return
+        }
+        if let waiter = handshakeWaiter {
+            completeHandshakeWaiter(id: waiter.id, result: .failure(CancellationError()))
         }
         setWatchAudioOutput(false)
         cancelLocalDemoPlayback()

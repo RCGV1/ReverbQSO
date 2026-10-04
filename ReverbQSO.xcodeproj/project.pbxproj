@@ -176,6 +176,7 @@
 		76DEAADC0DC96FE7A7CEFB1C /* EchoLinkProxyProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F349C56B39473A8B9FF00620 /* EchoLinkProxyProtocol.swift */; };
 		76DFFE0CB6E660E39AC753A5 /* gsm_create.c in Sources */ = {isa = PBXBuildFile; fileRef = 5A9FEC91B610C26333F3E8E5 /* gsm_create.c */; };
 		77BC96485A0B74950F76B150 /* PCMLinearResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F2964466EAB6B5B3DA690E /* PCMLinearResampler.swift */; };
+		7827572377796553683F3791 /* StationConnectionLatencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 171D7ADEDC662E22507AEDB6 /* StationConnectionLatencyTests.swift */; };
 		786A4982842FEF5BE7357BDD /* ReceivePacketLossConcealerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AEF457974E361D5EFA03F7 /* ReceivePacketLossConcealerTests.swift */; };
 		78D9109A4261B6485AF2EDB7 /* QSOAudioDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C760FA93A5C115BDFCA039E6 /* QSOAudioDiagnosticsTests.swift */; };
 		793CE5F371DFA0BBCB61D10A /* DirectorySearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD466FE90495150F47D7079 /* DirectorySearchTests.swift */; };
@@ -457,6 +458,7 @@
 		0FDEFFA1ED6CFF1B015D7658 /* QSOAudioDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOAudioDiagnostics.swift; sourceTree = "<group>"; };
 		13AECC454C0E3A6C130018BA /* RecentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentView.swift; sourceTree = "<group>"; };
 		16252E19E45B823180D32398 /* Station+Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Station+Location.swift"; sourceTree = "<group>"; };
+		171D7ADEDC662E22507AEDB6 /* StationConnectionLatencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationConnectionLatencyTests.swift; sourceTree = "<group>"; };
 		1772D228B4CB8B1F1BB95A54 /* filters_sse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = filters_sse.h; sourceTree = "<group>"; };
 		17B4BCA1BC6FDFFA893EA6C5 /* WatchAudioRoutingConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAudioRoutingConnectionTests.swift; sourceTree = "<group>"; };
 		18704A39DC9EB635C80C43DC /* CallAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAccessPolicyTests.swift; sourceTree = "<group>"; };
@@ -892,6 +894,7 @@
 				31BDE607C823AD1DDADDC9E1 /* SpeexReceiveStreamDecoderTests.swift */,
 				3AE78B9A116D6DBE0F596A80 /* SpeexTransmitConnectionTests.swift */,
 				87D626C16504AC800EB87B17 /* SpeexTransmitNegotiationTests.swift */,
+				171D7ADEDC662E22507AEDB6 /* StationConnectionLatencyTests.swift */,
 				3ED33A0FCE92FF8ECD1BBBE1 /* StationLocationTests.swift */,
 				6588487C3BF2989B9C82C3F0 /* StationParserTests.swift */,
 				B522515CD21BF1C4241AE397 /* SvxLinkControlProtocolTests.swift */,
@@ -1667,6 +1670,7 @@
 				44AB3F65122999E723DFD4AC /* SpeexReceiveStreamDecoderTests.swift in Sources */,
 				67E687059396415808259B74 /* SpeexTransmitConnectionTests.swift in Sources */,
 				4A92643B26A065BEA12CE382 /* SpeexTransmitNegotiationTests.swift in Sources */,
+				7827572377796553683F3791 /* StationConnectionLatencyTests.swift in Sources */,
 				7A98D19FE19268F42BC57C38 /* StationLocationTests.swift in Sources */,
 				686E4FD292C9858CDE7A37A5 /* StationParserTests.swift in Sources */,
 				9948946693DC2FCDF73DD80F /* SvxLinkControlProtocolTests.swift in Sources */,
