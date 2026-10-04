@@ -78,6 +78,10 @@ final class SpeexTransmitConnectionTests: XCTestCase {
             return try await group.next()!
         }
         let decoder = SpeexCodec()
+        let diagnostics = await service.audioDiagnosticsSnapshot()
+        XCTAssertEqual(diagnostics.txCodec, speexPeer ? "Speex" : "GSM")
+        XCTAssertEqual(diagnostics.txPackets, packets.count)
+        XCTAssertEqual(diagnostics.txPayloadBytes, packets.reduce(0) { $0 + $1.count - 12 })
         var previous: EchoLinkVoicePacketMetadata?
         for packet in packets {
             XCTAssertEqual(packet[1], speexPeer ? 0x96 : 3)

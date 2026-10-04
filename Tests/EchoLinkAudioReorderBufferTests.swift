@@ -10,6 +10,8 @@ final class EchoLinkAudioReorderBufferTests: XCTestCase {
         XCTAssertEqual(buffer.insert(packet(12), metadata: metadata(12), now: 0.001), [])
         XCTAssertEqual(buffer.insert(packet(11), metadata: metadata(11), now: 0.002), [packet(11), packet(12)])
         XCTAssertNil(buffer.nextDeadline)
+        XCTAssertEqual(buffer.missingPacketCount, 0)
+        XCTAssertEqual(buffer.deliveredSequencedPacketCount, 3)
     }
 
     func testMissingPacketExpiresAfterFortyMilliseconds() {
@@ -21,6 +23,8 @@ final class EchoLinkAudioReorderBufferTests: XCTestCase {
         XCTAssertEqual(buffer.drain(now: 1.049), [])
         XCTAssertEqual(buffer.drain(now: 1.05), [packet(12)])
         XCTAssertNil(buffer.nextDeadline)
+        XCTAssertEqual(buffer.missingPacketCount, 1)
+        XCTAssertEqual(buffer.deliveredSequencedPacketCount, 2)
     }
 
     func testDuplicateAndLatePacketsAreDiscardedAfterGapFlush() {
@@ -32,6 +36,8 @@ final class EchoLinkAudioReorderBufferTests: XCTestCase {
         XCTAssertEqual(buffer.drain(now: 0.06), [packet(12)])
         XCTAssertEqual(buffer.insert(packet(11), metadata: metadata(11), now: 0.07), [])
         XCTAssertEqual(buffer.insert(packet(12), metadata: metadata(12), now: 0.08), [])
+        XCTAssertEqual(buffer.duplicateOrLatePacketCount, 3)
+        XCTAssertEqual(buffer.missingPacketCount, 1)
     }
 
     func testSequenceNumbersWrap() {
@@ -40,6 +46,8 @@ final class EchoLinkAudioReorderBufferTests: XCTestCase {
         XCTAssertEqual(buffer.insert(packet(1), metadata: metadata(.max), now: 0), [packet(1)])
         XCTAssertEqual(buffer.insert(packet(3), metadata: metadata(1), now: 0.01), [])
         XCTAssertEqual(buffer.insert(packet(2), metadata: metadata(0), now: 0.02), [packet(2), packet(3)])
+        XCTAssertEqual(buffer.missingPacketCount, 0)
+        XCTAssertEqual(buffer.deliveredSequencedPacketCount, 3)
     }
 
     func testInactiveStreamStartsANewTalkSpurt() {
@@ -48,6 +56,7 @@ final class EchoLinkAudioReorderBufferTests: XCTestCase {
         XCTAssertEqual(buffer.insert(packet(1), metadata: metadata(100), now: 0), [packet(1)])
         XCTAssertEqual(buffer.insert(packet(2), metadata: metadata(90), now: 1), [])
         XCTAssertEqual(buffer.insert(packet(3), metadata: metadata(90), now: 2), [packet(3)])
+        XCTAssertEqual(buffer.missingPacketCount, 0)
     }
 
     func testStreamsReorderIndependently() {
@@ -66,7 +75,9 @@ final class EchoLinkAudioReorderBufferTests: XCTestCase {
         _ = buffer.insert(packet(1), metadata: metadata(10), now: 0)
         _ = buffer.insert(packet(2), metadata: metadata(12), now: 0.01)
         buffer.reset()
-
+        XCTAssertEqual(buffer.missingPacketCount, 0)
+        XCTAssertEqual(buffer.duplicateOrLatePacketCount, 0)
+        XCTAssertEqual(buffer.deliveredSequencedPacketCount, 0)
         XCTAssertNil(buffer.nextDeadline)
         XCTAssertEqual(buffer.drain(now: 1), [])
         XCTAssertEqual(buffer.insert(packet(3), metadata: metadata(5), now: 1), [packet(3)])

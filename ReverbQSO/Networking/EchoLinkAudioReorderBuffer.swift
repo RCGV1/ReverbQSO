@@ -22,6 +22,9 @@ struct EchoLinkAudioReorderBuffer {
     }
 
     private var streamsBySSRC: [UInt32: StreamState] = [:]
+    private(set) var missingPacketCount = 0
+    private(set) var duplicateOrLatePacketCount = 0
+    private(set) var deliveredSequencedPacketCount = 0
 
     var nextDeadline: TimeInterval? {
         streamsBySSRC.values.compactMap { stream in
@@ -44,6 +47,7 @@ struct EchoLinkAudioReorderBuffer {
 
         if var stream = streamsBySSRC[metadata.ssrc] {
             if now - stream.lastActivityAt >= Self.restartInactivityInterval {
+                deliveredSequencedPacketCount += 1
                 streamsBySSRC[metadata.ssrc] = StreamState(
                     lastDeliveredSequence: metadata.sequenceNumber,
                     lastActivityAt: now
@@ -52,11 +56,15 @@ struct EchoLinkAudioReorderBuffer {
             }
 
             let distance = Int(metadata.sequenceNumber &- stream.lastDeliveredSequence)
-            guard distance != 0, distance < 0x8000 else { return [] }
-            guard stream.pending[metadata.sequenceNumber] == nil else { return [] }
+            guard distance != 0, distance < 0x8000,
+                  stream.pending[metadata.sequenceNumber] == nil else {
+                duplicateOrLatePacketCount += 1
+                return []
+            }
             stream.lastActivityAt = now
 
             if distance == 1 {
+                deliveredSequencedPacketCount += 1
                 stream.lastDeliveredSequence = metadata.sequenceNumber
                 var output = [data]
                 output.append(contentsOf: releaseContiguousPackets(from: &stream))
@@ -74,6 +82,7 @@ struct EchoLinkAudioReorderBuffer {
         }
 
         evictStreamIfNeeded()
+        deliveredSequencedPacketCount += 1
         streamsBySSRC[metadata.ssrc] = StreamState(
             lastDeliveredSequence: metadata.sequenceNumber,
             lastActivityAt: now
@@ -103,24 +112,30 @@ struct EchoLinkAudioReorderBuffer {
 
     mutating func reset() {
         streamsBySSRC.removeAll(keepingCapacity: true)
+        missingPacketCount = 0
+        duplicateOrLatePacketCount = 0
+        deliveredSequencedPacketCount = 0
     }
 
-    private func releaseContiguousPackets(from stream: inout StreamState) -> [Data] {
+    private mutating func releaseContiguousPackets(from stream: inout StreamState) -> [Data] {
         var output: [Data] = []
         while let packet = stream.pending.removeValue(forKey: stream.lastDeliveredSequence &+ 1) {
             stream.lastDeliveredSequence &+= 1
+            deliveredSequencedPacketCount += 1
             output.append(packet.data)
         }
         return output
     }
 
-    private func skipGapAndRelease(from stream: inout StreamState) -> [Data] {
+    private mutating func skipGapAndRelease(from stream: inout StreamState) -> [Data] {
         guard let nextSequence = stream.pending.keys.min(by: {
             ($0 &- stream.lastDeliveredSequence) < ($1 &- stream.lastDeliveredSequence)
         }), let packet = stream.pending.removeValue(forKey: nextSequence) else {
             return []
         }
 
+        missingPacketCount += max(0, Int(nextSequence &- stream.lastDeliveredSequence) - 1)
+        deliveredSequencedPacketCount += 1
         stream.lastDeliveredSequence = nextSequence
         var output = [packet.data]
         output.append(contentsOf: releaseContiguousPackets(from: &stream))

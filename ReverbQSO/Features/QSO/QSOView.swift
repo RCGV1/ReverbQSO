@@ -1191,8 +1191,15 @@ struct QSOView: View {
                     }
                 }
 #endif
+                Section {
+                    NavigationLink {
+                        QSOAudioDiagnosticsView(connectionService: connectionService)
+                    } label: {
+                        Label("Diagnostics", systemImage: "waveform.path.ecg")
+                    }
+                }
             }
-            .navigationTitle("Audio Devices")
+            .navigationTitle("Audio")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

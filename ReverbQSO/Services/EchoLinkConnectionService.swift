@@ -646,6 +646,52 @@ final class EchoLinkConnectionService: ObservableObject {
     private var pendingOutgoingGSMPayload = Data()
     private var voicePacketsQueued = 0
     private var voicePacketsSent = 0
+    private var audioDiagnosticsTotals = QSOAudioDiagnosticsSnapshot()
+    private var audioDiagnosticsTXDropBaseline = 0
+
+    /// Read only when the diagnostics view is visible; no per-packet UI updates.
+    func audioDiagnosticsSnapshot() async -> QSOAudioDiagnosticsSnapshot {
+        var snapshot = audioDiagnosticsTotals
+        snapshot.sampledAt = ProcessInfo.processInfo.systemUptime
+        snapshot.sessionID = session?.id
+        snapshot.transport = isLocalDemoMode ? "Local demo"
+            : proxySession != nil ? "Proxy" : relayClient != nil ? "Relay"
+            : audioSocket != nil ? "Direct" : "—"
+        snapshot.txCodec = (session?.isPTTActive == true ? activeTransmitCodec : transmitCodec) == .speex
+            ? "Speex" : "GSM"
+        snapshot.sequencedRXPackets = receiveReorderBuffer.deliveredSequencedPacketCount
+        snapshot.missingRXPackets = receiveReorderBuffer.missingPacketCount
+        snapshot.duplicateOrLateRXPackets = receiveReorderBuffer.duplicateOrLatePacketCount
+        snapshot.txQueueDrops = max(0, queuedOutgoingAudioPackets.discardedCount - audioDiagnosticsTXDropBaseline)
+        snapshot.txQueuedPackets = queuedOutgoingAudioPackets.count
+        snapshot.rxQueuedPackets = receiveReorderBuffer.pendingPacketCount
+        let playback = audioEngine.livePlaybackDiagnostics
+        snapshot.playbackBufferedMilliseconds = playback.bufferedMilliseconds
+        snapshot.startupBufferMilliseconds = playback.startupMilliseconds
+        snapshot.playbackRXDrops = playback.droppedPackets
+        let transportMetrics: [LiveTransportMessageBufferMetrics]
+        if let proxySession {
+            let metrics = await proxySession.inboundAudioMetrics
+            transportMetrics = Array(metrics.values)
+        } else if let relayClient { transportMetrics = [await relayClient.inboundAudioMetrics] }
+        else { transportMetrics = [] }
+        snapshot.transportRXDrops = transportMetrics.reduce(0) {
+            $0 + $1.capacityDroppedVoiceMessages + $1.ageDroppedVoiceMessages
+        }
+        return snapshot
+    }
+
+    private func resetAudioDiagnostics() {
+        audioDiagnosticsTotals = QSOAudioDiagnosticsSnapshot()
+        audioDiagnosticsTXDropBaseline = queuedOutgoingAudioPackets.discardedCount
+        receiveReorderBuffer.reset()
+    }
+
+    private func recordReceivedAudio(codec: String, payloadBytes: Int) {
+        audioDiagnosticsTotals.rxCodec = codec
+        audioDiagnosticsTotals.rxPackets += 1
+        audioDiagnosticsTotals.rxPayloadBytes += payloadBytes
+    }
 #if DEBUG
     var onAuditIncomingDatagram: (@MainActor (Data) -> Void)?
     var onAuditAcceptedPacket: (@MainActor (EchoLinkVoicePacketMetadata?) -> Void)?
@@ -1005,6 +1051,7 @@ final class EchoLinkConnectionService: ObservableObject {
         let station = resolvedStation
         logger.info("Connecting station=\(station.callsign, privacy: .public) host=\(station.ipAddress, privacy: .public) as=\(self.localCallsign, privacy: .public)")
         let newSession = QSOSession(station: station)
+        resetAudioDiagnostics()
         let sessionID = newSession.id
         session = newSession
         outboundConnectionAttemptID = sessionID
@@ -1564,6 +1611,7 @@ final class EchoLinkConnectionService: ObservableObject {
             return
         }
         cancelLocalDemoPlayback()
+        resetAudioDiagnostics()
         localDemoAudio.clear()
         audioEngine.resetCodecState()
         let messages = LocalDemoAccount.messages(for: fixture, account: localCallsign)
@@ -1680,6 +1728,7 @@ final class EchoLinkConnectionService: ObservableObject {
 
 #if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
     func installSimulatorDemoSession(station: Station) {
+        resetAudioDiagnostics()
         session = QSOSession(
             station: station,
             startTime: Date().addingTimeInterval(-384),
@@ -1934,6 +1983,8 @@ final class EchoLinkConnectionService: ObservableObject {
                     throw ConnectionError.notConnected
                 }
                 voicePacketsSent += 1
+                audioDiagnosticsTotals.txPackets += 1
+                audioDiagnosticsTotals.txPayloadBytes += max(0, queuedPacket.data.count - EchoLinkAudioPacketCodec.legacyVoiceHeaderLength)
                 if voicePacketsSent == 1 {
                     VoiceDiagnosticLog.record("first voice packet sent bytes=\(queuedPacket.data.count)")
                 }
@@ -2505,11 +2556,13 @@ final class EchoLinkConnectionService: ObservableObject {
               currentSession.state == .connected else { return }
 
         if case .unsupportedPayloadType = datagram.packet {
+            audioDiagnosticsTotals.invalidRXPackets += 1
             playIncomingAudioDatagram(data, datagram: datagram)
             return
         }
         if case .speex(let payload) = datagram.packet,
            receiveSpeexValidator.decodePacket(payload) == nil {
+            audioDiagnosticsTotals.invalidRXPackets += 1
             logger.debug("Dropped malformed Speex before receive sequence admission")
             return
         }
@@ -2551,6 +2604,7 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
+            recordReceivedAudio(codec: "GSM", payloadBytes: payload.count)
 #if DEBUG
             onAuditAcceptedPacket?(datagram.metadata)
 #endif
@@ -2577,6 +2631,9 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
+            let wireCodec = datagram.metadata?.payloadType == 8 ? "G.711 A-law"
+                : datagram.metadata?.payloadType == 0 ? "G.711 µ-law" : "G.711 µ-law (inferred)"
+            recordReceivedAudio(codec: wireCodec, payloadBytes: samples.count)
 #if DEBUG
             onAuditAcceptedPacket?(datagram.metadata)
 #endif
@@ -2601,6 +2658,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 return
             }
             guard let decoded = audioEngine.decodeReceivedSpeex(payload, metadata: datagram.metadata) else {
+                audioDiagnosticsTotals.invalidRXPackets += 1
                 logger.debug("Dropped malformed EchoLink Speex audio packet")
                 return
             }
@@ -2609,6 +2667,7 @@ final class EchoLinkConnectionService: ObservableObject {
             resetPeerTimeout(sessionID: currentSession.id)
             audioStatusMessage = nil
             incomingVoicePackets += 1
+            recordReceivedAudio(codec: "Speex", payloadBytes: payload.count)
 #if DEBUG
             onAuditAcceptedPacket?(datagram.metadata)
 #endif

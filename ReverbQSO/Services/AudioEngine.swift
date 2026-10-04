@@ -299,6 +299,14 @@ final class AudioEngine: ObservableObject {
         playerNode.volume = muted ? 0 : 1
     }
     private var playerNode = AVAudioPlayerNode()
+    private var diagnosticsPlaybackOverflowDrops = 0
+    private var diagnosticsPlaybackDiscardBaseline = 0
+
+    var livePlaybackDiagnostics: (bufferedMilliseconds: Double, startupMilliseconds: Double, droppedPackets: Int) {
+        (Double(remainingPlaybackSamples + receivePlayout.pendingSampleCount) / 8,
+         receivePlayout.targetDelay * 1000,
+         diagnosticsPlaybackOverflowDrops + max(0, receivePlayout.discardedPackets - diagnosticsPlaybackDiscardBaseline))
+    }
 #if DEBUG
     private var auditScheduledSamples = 0
     private var auditTrimCount = 0
@@ -894,6 +902,8 @@ final class AudioEngine: ObservableObject {
     /// Call at the start of a new QSO session to ensure no stale
     /// encoder/decoder state leaks across connections.
     func resetCodecState() {
+        diagnosticsPlaybackOverflowDrops = 0
+        diagnosticsPlaybackDiscardBaseline = receivePlayout.discardedPackets
         codec.resetAll()
         speexCodec.reset()
         speexReceiveDecoder.reset()
@@ -1295,6 +1305,7 @@ final class AudioEngine: ObservableObject {
         }
 #endif
         if playbackQueue.wouldOverflow(adding: incomingCount, remainingSamples: remaining) {
+            diagnosticsPlaybackOverflowDrops += 1
             // Preserve scheduled speech and the native render clock. Restarting
             // the player here adds preroll and can cascade into further losses.
 #if DEBUG
