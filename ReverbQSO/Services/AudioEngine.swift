@@ -942,7 +942,7 @@ final class AudioEngine: ObservableObject {
             playbackSamples = Array(retained) + samples
         } else { playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now) }
         drainReceivePlayout()
-        receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
+        receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, now: now)
         drainReceivePlayout()
         scheduleReceivePlayout()
     }

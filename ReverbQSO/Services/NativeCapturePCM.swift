@@ -18,6 +18,13 @@ final class NativeCapturePCM {
     private var converter: AVAudioConverter?
     private var sourceFormat: AVAudioFormat?
     private var destinationFormat: AVAudioFormat?
+    // The owning capture DSP queue serializes conversion. Retain only the
+    // current format's buffers and grow them when a hardware chunk grows.
+    private var inputBuffer: AVAudioPCMBuffer?
+    private var outputBuffer: AVAudioPCMBuffer?
+#if DEBUG
+    private(set) var auditBufferAllocationCount = 0
+#endif
 
     /// Selects one physical input channel. Mixing microphone channels can
     /// cancel speech when their signals have different phase or delay.
@@ -85,13 +92,21 @@ final class NativeCapturePCM {
         }
 
         try prepareConverter(sourceSampleRate: sourceSampleRate)
-        guard let converter, let sourceFormat, let destinationFormat,
-              let input = AVAudioPCMBuffer(
-                pcmFormat: sourceFormat,
-                frameCapacity: AVAudioFrameCount(samples.count)) else {
+        guard let converter, let sourceFormat, let destinationFormat else {
             throw ConversionError.formatUnavailable
         }
-        input.frameLength = AVAudioFrameCount(samples.count)
+        let inputCapacity = AVAudioFrameCount(samples.count)
+        if (inputBuffer?.frameCapacity ?? 0) < inputCapacity {
+            guard let replacement = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: inputCapacity) else {
+                throw ConversionError.formatUnavailable
+            }
+            inputBuffer = replacement
+#if DEBUG
+            auditBufferAllocationCount += 1
+#endif
+        }
+        guard let input = inputBuffer else { throw ConversionError.formatUnavailable }
+        input.frameLength = inputCapacity
         guard let inputData = input.floatChannelData?[0] else {
             throw ConversionError.formatUnavailable
         }
@@ -101,11 +116,18 @@ final class NativeCapturePCM {
         }
 
         let expectedFrames = Int(ceil(Double(samples.count) * Self.targetSampleRate / sourceSampleRate))
-        guard let output = AVAudioPCMBuffer(
-            pcmFormat: destinationFormat,
-            frameCapacity: AVAudioFrameCount(max(1, expectedFrames + 32))) else {
-            throw ConversionError.formatUnavailable
+        let outputCapacity = AVAudioFrameCount(max(1, expectedFrames + 32))
+        if (outputBuffer?.frameCapacity ?? 0) < outputCapacity {
+            guard let replacement = AVAudioPCMBuffer(pcmFormat: destinationFormat, frameCapacity: outputCapacity) else {
+                throw ConversionError.formatUnavailable
+            }
+            outputBuffer = replacement
+#if DEBUG
+            auditBufferAllocationCount += 1
+#endif
         }
+        guard let output = outputBuffer else { throw ConversionError.formatUnavailable }
+        output.frameLength = 0
 
         var suppliedInput = false
         var conversionError: NSError?
@@ -132,6 +154,8 @@ final class NativeCapturePCM {
         converter = nil
         sourceFormat = nil
         destinationFormat = nil
+        inputBuffer = nil
+        outputBuffer = nil
     }
 
     private func prepareConverter(sourceSampleRate: Double) throws {

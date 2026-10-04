@@ -113,7 +113,7 @@ final class WatchReceiveAudioPlayer {
             playbackSamples = Array(retained) + samples
         }
         else { playbackSamples = receiveSpeech.process(samples, metadata: parsed.metadata, now: now) }
-        receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
+        receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, now: now)
         schedulePlayout()
         return true
     }

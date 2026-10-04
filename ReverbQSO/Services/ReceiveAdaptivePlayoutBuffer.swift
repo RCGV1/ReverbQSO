@@ -18,7 +18,6 @@ struct ReceiveAdaptivePlayoutBuffer {
     private var previousDuration = 0.08
     private var lastDeadline: TimeInterval?
     private var jitter = 0.0
-    private var previousTarget = 0.040
     private var hasStarted = false
     private(set) var targetDelay = 0.040
     private(set) var discardedPackets = 0
@@ -28,7 +27,7 @@ struct ReceiveAdaptivePlayoutBuffer {
     var pendingSampleCount: Int { packets.reduce(0) { $0 + $1.samples.count } }
     var nextDeadline: TimeInterval? { packets.first?.deadline }
 
-    mutating func enqueue(_ input: [Int16], networkSampleCount: Int? = nil, playbackQueuedSamples: Int? = nil, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+    mutating func enqueue(_ input: [Int16], networkSampleCount: Int? = nil, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard !input.isEmpty, now.isFinite else { return }
         let samples = Array(input.suffix(1920))
         if let lastArrival, now - lastArrival < 0.5, now >= lastArrival {
@@ -41,15 +40,11 @@ struct ReceiveAdaptivePlayoutBuffer {
             lastDeadline = nil
             hasStarted = false
         }
-        // Match the codec/clock talkspurt timeout: a delayed continuous packet
-        // must not pay startup buffering again merely because it arrived late.
-        // Grow protection only while existing rendered lead covers the wait.
-        // Waiting with depleted playback would add silence to the late packet.
-        // Clock correction releases excess lead gently as target delay recovers.
-        let missingLead = playbackQueuedSamples.map { max(0, targetDelay - Double($0) / 8000) } ?? targetDelay
-        let availableLead = playbackQueuedSamples.map { max(0, Double($0) / 8000) } ?? 0.010
-        let adjustment = min(availableLead, min(0.010, min(missingLead, max(0, targetDelay - previousTarget))))
-        let nominal = hasStarted ? now + max(0, adjustment) : (lastDeadline ?? (now + targetDelay))
+        // Once a talkspurt starts, feed fresh packets directly to native FIFO
+        // output. Sleeping while native lead plays cannot build more lead and
+        // even a tiny deadline adjustment introduces scheduler wakeup latency.
+        // Startup jitter protection and bounded renderer admission still apply.
+        let nominal = hasStarted ? now : (lastDeadline ?? (now + targetDelay))
         let deadline = max(now, nominal)
         packets.append(Packet(samples: samples, receivedAt: now, deadline: deadline))
         while pendingSampleCount > Self.maximumPendingSamples {
@@ -65,7 +60,6 @@ struct ReceiveAdaptivePlayoutBuffer {
         lastDeadline = packets.last?.deadline
         self.lastArrival = now
         previousDuration = Double(max(1, networkSampleCount ?? samples.count)) / 8000
-        previousTarget = targetDelay
     }
 
     /// Leave ready speech here until the renderer has room. Draining into a
@@ -100,6 +94,5 @@ struct ReceiveAdaptivePlayoutBuffer {
         previousDuration = 0.080
         jitter = 0
         targetDelay = 0.040
-        previousTarget = 0.040
     }
 }

@@ -118,6 +118,78 @@ final class NativeCapturePCMTests: XCTestCase {
         }
     }
 
+    func testGrowingAndShrinkingChunksMatchFreshOneShotConversion() throws {
+        let rate = 48_000.0
+        let input = sine(frequency: 1_700, sampleRate: rate, duration: 0.18)
+        let expected = try NativeCapturePCM().resample(input, sourceSampleRate: rate)
+        let converter = NativeCapturePCM()
+        var actual: [Float] = []
+        var offset = 0
+        for size in [960, 480, 1_920, 120, 960, 60].cycled(while: { offset < input.count }) {
+            let end = min(input.count, offset + size)
+            actual += try converter.resample(Array(input[offset..<end]), sourceSampleRate: rate)
+            offset = end
+        }
+        XCTAssertEqual(actual.count, expected.count)
+        XCTAssertLessThan(rmsDifference(actual, expected), 0.002,
+                          "A shorter reused buffer must not expose old trailing frames")
+    }
+
+    func testHardwareRateChangesAndExplicitResetMatchFreshConverter() throws {
+        let converter = NativeCapturePCM()
+        for rate in [48_000.0, 96_000.0, 8_000.0, 44_100.0, 48_000.0] {
+            let input = sine(frequency: 900, sampleRate: rate, duration: 0.02)
+            let actual = try converter.resample(input, sourceSampleRate: rate)
+            let expected = try NativeCapturePCM().resample(input, sourceSampleRate: rate)
+            XCTAssertEqual(actual.count, expected.count)
+            XCTAssertLessThan(rmsDifference(actual, expected), 0.000_001,
+                              "Old format or converter state leaked into rate \(rate)")
+        }
+        converter.reset()
+        let silent = try converter.resample([Float](repeating: 0, count: 480), sourceSampleRate: 48_000)
+        XCTAssertEqual(silent.count, 80)
+        XCTAssertEqual(rms(silent), 0)
+    }
+
+#if DEBUG
+    func testNativeBufferAllocationsStopAfterCapacityWarmup() throws {
+        let converter = NativeCapturePCM()
+        let input = [Float](repeating: 0.25, count: 960)
+        _ = try converter.resample(input, sourceSampleRate: 48_000)
+        let warmAllocations = converter.auditBufferAllocationCount
+        XCTAssertEqual(warmAllocations, 2)
+        for _ in 0..<100 { _ = try converter.resample(input, sourceSampleRate: 48_000) }
+        XCTAssertEqual(converter.auditBufferAllocationCount, warmAllocations,
+                       "Steady 20 ms capture must reuse native conversion buffers")
+        _ = try converter.resample([Float](repeating: 0, count: 1_920), sourceSampleRate: 48_000)
+        XCTAssertEqual(converter.auditBufferAllocationCount, warmAllocations + 2)
+        _ = try converter.resample([Float](repeating: 0, count: 480), sourceSampleRate: 48_000)
+        XCTAssertEqual(converter.auditBufferAllocationCount, warmAllocations + 2,
+                       "Shrinking chunks must reuse their larger capacity")
+        converter.reset()
+        _ = try converter.resample(input, sourceSampleRate: 48_000)
+        XCTAssertEqual(converter.auditBufferAllocationCount, warmAllocations + 4)
+    }
+#endif
+
+    func testPerformanceWarmedTwentyMillisecondNativeConversion() throws {
+        let converter = NativeCapturePCM()
+        let input = sine(frequency: 1_000, sampleRate: 48_000, duration: 0.02)
+        for _ in 0..<10 { _ = try converter.resample(input, sourceSampleRate: 48_000) }
+        var outputCount = 0
+        measure {
+            outputCount = 0
+            do {
+                for _ in 0..<1_000 {
+                    outputCount += try converter.resample(input, sourceSampleRate: 48_000).count
+                }
+            } catch {
+                XCTFail("Native conversion failed: \(error)")
+            }
+        }
+        XCTAssertEqual(outputCount, 160_000)
+    }
+
     func testResetDropsPriorConverterState() throws {
         let converter = NativeCapturePCM()
         _ = try converter.resample([Float](repeating: 1, count: 4_800), sourceSampleRate: 48_000)

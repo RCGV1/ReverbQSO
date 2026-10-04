@@ -118,7 +118,7 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         for tick in 0...8300 {
             let now = Double(tick) / 1000
             while received < arrivals.count && arrivals[received] <= now + 0.0000001 {
-                buffer.enqueue(packet, playbackQueuedSamples: Int(max(0, renderEnd - now) * 8000), now: now)
+                buffer.enqueue(packet, now: now)
                 receivedTimes.append(now)
                 received += 1
             }
@@ -146,9 +146,9 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
     func testContinuousPacketAfter160MillisecondsDoesNotRestartStartupDelay() {
         var buffer = ReceiveAdaptivePlayoutBuffer()
         let packet = [Int16](repeating: 100, count: 640)
-        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0)
+        buffer.enqueue(packet, now: 0)
         XCTAssertEqual(buffer.drain(now: 0.04), [packet])
-        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0.161)
+        buffer.enqueue(packet, now: 0.161)
         XCTAssertEqual(buffer.drain(now: 0.161), [packet])
         XCTAssertGreaterThan(buffer.targetDelay, 0.04)
     }
@@ -156,9 +156,22 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
     func testJitterGrowthDoesNotDelaySpeechWhenPlaybackIsDepleted() {
         var buffer = ReceiveAdaptivePlayoutBuffer()
         let packet = [Int16](repeating: 100, count: 640)
-        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0)
+        buffer.enqueue(packet, now: 0)
         _ = buffer.drain(now: 0.04)
-        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0.145)
+        buffer.enqueue(packet, now: 0.145)
+        XCTAssertGreaterThan(buffer.targetDelay, 0.04)
+        XCTAssertEqual(buffer.drain(now: 0.145), [packet])
+    }
+
+    func testContinuousSpeechSchedulesImmediatelyEvenAsJitterGrows() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, now: 0)
+        XCTAssertEqual(buffer.drain(now: 0.039), [])
+        XCTAssertEqual(buffer.drain(now: 0.040), [packet])
+        // Continuing speech must not be deferred onto a timer just because
+        // its arrival interval increased the jitter estimate.
+        buffer.enqueue(packet, now: 0.145)
         XCTAssertGreaterThan(buffer.targetDelay, 0.04)
         XCTAssertEqual(buffer.drain(now: 0.145), [packet])
     }
@@ -166,9 +179,9 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
     func testJitterGrowthWaitDoesNotExceedExistingPlaybackCoverage() {
         var buffer = ReceiveAdaptivePlayoutBuffer()
         let packet = [Int16](repeating: 100, count: 640)
-        buffer.enqueue(packet, playbackQueuedSamples: 0, now: 0)
+        buffer.enqueue(packet, now: 0)
         _ = buffer.drain(now: 0.04)
-        buffer.enqueue(packet, playbackQueuedSamples: 16, now: 0.145)
+        buffer.enqueue(packet, now: 0.145)
         XCTAssertLessThanOrEqual(buffer.nextDeadline ?? .infinity, 0.147)
     }
 
