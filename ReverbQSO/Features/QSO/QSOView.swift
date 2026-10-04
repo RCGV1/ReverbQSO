@@ -22,6 +22,7 @@ struct QSOView: View {
     @FocusState private var isChatFocused: Bool
     #if targetEnvironment(macCatalyst)
     @State private var showDesktopStationInfo = false
+    @State private var showAudioDiagnostics = false
     @State private var participantSearch = ""
     @FocusState private var isRadioFocused: Bool
     @FocusState private var isParticipantSearchFocused: Bool
@@ -517,6 +518,10 @@ struct QSOView: View {
                 isRadioFocused = true
             }
         }
+        .onChange(of: showAudioDiagnostics) { _, shown in
+            if shown { releaseSpacePTT() }
+            else if !isChatFocused && !isParticipantSearchFocused { isRadioFocused = true }
+        }
     }
 
     private var desktopHeader: some View {
@@ -594,6 +599,24 @@ struct QSOView: View {
                         showAudioRoutes = true
                     } label: {
                         Label("Audio", systemImage: "airplayaudio")
+                    }
+                    Button {
+                        showAudioDiagnostics = true
+                    } label: {
+                        Label("Audio Stats", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("qso-audio-stats")
+                    .help("Audio codec, bitrate, packet loss, and buffering")
+                    .popover(isPresented: $showAudioDiagnostics) {
+                        NavigationStack {
+                            QSOAudioDiagnosticsView(connectionService: connectionService)
+                                .toolbar {
+                                    ToolbarItem(placement: .topBarTrailing) {
+                                        Button("Done") { showAudioDiagnostics = false }
+                                    }
+                                }
+                        }
+                        .frame(width: 440, height: 600)
                     }
                     if supportsRemotePad {
                         Button {
@@ -1049,7 +1072,7 @@ struct QSOView: View {
 
     #if targetEnvironment(macCatalyst)
     private var canStartSpacePTT: Bool {
-        isSpacePTTVisible && scenePhase == .active && !showChat && !showAudioRoutes
+        isSpacePTTVisible && scenePhase == .active && !showChat && !showAudioRoutes && !showAudioDiagnostics
             && !showDTMF && !showStationActivity && !showParticipants
             && !showDisconnectConfirmation && viewModel.errorMessage == nil
             && !isChatFocused && !isParticipantSearchFocused
@@ -1195,7 +1218,7 @@ struct QSOView: View {
                     NavigationLink {
                         QSOAudioDiagnosticsView(connectionService: connectionService)
                     } label: {
-                        Label("Diagnostics", systemImage: "waveform.path.ecg")
+                        Label("Audio Stats", systemImage: "waveform.path.ecg")
                     }
                 }
             }

@@ -19,7 +19,10 @@ struct ReceiveAdaptivePlayoutBuffer {
     private var lastDeadline: TimeInterval?
     private var jitter = 0.0
     private var hasStarted = false
+    private var recoveryDeadline: TimeInterval?
+    private var recoveryArmed = true
     private(set) var targetDelay = 0.040
+    private(set) var recoveryCount = 0
     private(set) var discardedPackets = 0
     private(set) var capacityDiscardedPackets = 0
     private(set) var expiredDiscardedPackets = 0
@@ -27,7 +30,9 @@ struct ReceiveAdaptivePlayoutBuffer {
     var pendingSampleCount: Int { packets.reduce(0) { $0 + $1.samples.count } }
     var nextDeadline: TimeInterval? { packets.first?.deadline }
 
-    mutating func enqueue(_ input: [Int16], networkSampleCount: Int? = nil, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+    mutating func enqueue(_ input: [Int16], networkSampleCount: Int? = nil,
+                          now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+                          rendererLeadSamples: Int? = nil) {
         guard !input.isEmpty, now.isFinite else { return }
         let samples = Array(input.suffix(1920))
         if let lastArrival, now - lastArrival < 0.5, now >= lastArrival {
@@ -39,12 +44,21 @@ struct ReceiveAdaptivePlayoutBuffer {
             targetDelay = 0.040
             lastDeadline = nil
             hasStarted = false
+            recoveryDeadline = nil
+            recoveryArmed = true
+        }
+        if let rendererLeadSamples, rendererLeadSamples > 0 {
+            recoveryArmed = true
+        } else if rendererLeadSamples == 0, hasStarted,
+                  recoveryDeadline == nil, recoveryArmed {
+            recoveryDeadline = now + targetDelay
+            recoveryArmed = false
+            recoveryCount += 1
         }
         // Once a talkspurt starts, feed fresh packets directly to native FIFO
-        // output. Sleeping while native lead plays cannot build more lead and
-        // even a tiny deadline adjustment introduces scheduler wakeup latency.
-        // Startup jitter protection and bounded renderer admission still apply.
-        let nominal = hasStarted ? now : (lastDeadline ?? (now + targetDelay))
+        // output while it has lead. A confirmed depletion gets one shared,
+        // bounded refill deadline; later packets do not extend that wait.
+        let nominal = recoveryDeadline ?? (hasStarted ? now : (lastDeadline ?? (now + targetDelay)))
         let deadline = max(now, nominal)
         packets.append(Packet(samples: samples, receivedAt: now, deadline: deadline))
         while pendingSampleCount > Self.maximumPendingSamples {
@@ -83,6 +97,17 @@ struct ReceiveAdaptivePlayoutBuffer {
             ready.append(first.samples)
             hasStarted = true
         }
+        if let recoveryDeadline, recoveryDeadline <= now {
+            if !ready.isEmpty {
+                // A completed refill protects a new depletion even if the
+                // next arrival comes after this speech has fully rendered.
+                self.recoveryDeadline = nil
+                recoveryArmed = true
+            } else if packets.isEmpty {
+                // Expired speech does not establish native output lead.
+                self.recoveryDeadline = nil
+            }
+        }
         return ready
     }
 
@@ -91,6 +116,8 @@ struct ReceiveAdaptivePlayoutBuffer {
         lastArrival = nil
         hasStarted = false
         lastDeadline = nil
+        recoveryDeadline = nil
+        recoveryArmed = true
         previousDuration = 0.080
         jitter = 0
         targetDelay = 0.040

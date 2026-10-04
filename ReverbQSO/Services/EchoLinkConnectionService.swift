@@ -676,6 +676,7 @@ final class EchoLinkConnectionService: ObservableObject {
         snapshot.playbackBufferedMilliseconds = playback.bufferedMilliseconds
         snapshot.startupBufferMilliseconds = playback.startupMilliseconds
         snapshot.playbackRXDrops = playback.droppedPackets
+        snapshot.playbackRefills = playback.refills
         let transportMetrics: [LiveTransportMessageBufferMetrics]
         if let proxySession {
             let metrics = await proxySession.inboundAudioMetrics

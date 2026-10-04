@@ -43,18 +43,20 @@ struct QSOAudioDiagnosticsView: View {
             Section {
                 count("TX queue drops", snapshot.txQueueDrops)
                 count("RX playback drops", snapshot.playbackRXDrops)
+                count("Playback refills", snapshot.playbackRefills)
                 count("Transport buffer drops", snapshot.transportRXDrops)
                 count("TX queued", snapshot.txQueuedPackets)
                 count("RX awaiting reordering", snapshot.rxQueuedPackets)
             } header: {
                 Text("Local buffers")
             } footer: {
+                Text("Refills rebuild a small audio buffer after playback runs empty.")
                 if snapshot.transport == "Proxy" {
                     Text("Transport buffer counts cover the shared proxy connection.")
                 }
             }
         }
-        .navigationTitle("Audio Diagnostics")
+        .navigationTitle("Audio Stats")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             while !Task.isCancelled {

@@ -19,6 +19,7 @@ struct QSOAudioDiagnosticsSnapshot {
     var txQueueDrops = 0
     var transportRXDrops = 0
     var playbackRXDrops = 0
+    var playbackRefills = 0
     var txQueuedPackets = 0
     var rxQueuedPackets = 0
     var playbackBufferedMilliseconds = 0.0

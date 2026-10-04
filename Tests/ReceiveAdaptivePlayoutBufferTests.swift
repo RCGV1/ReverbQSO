@@ -185,4 +185,85 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         XCTAssertLessThanOrEqual(buffer.nextDeadline ?? .infinity, 0.147)
     }
 
+    func testDepletedRendererRefillsOnceThenBalancedJitterDoesNotAddAnotherGap() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, now: 0)
+        XCTAssertEqual(buffer.drain(now: 0.040), [packet])
+
+        // The initial packet ends at 120 ms. A late arrival observes the native
+        // renderer empty and starts one bounded refill using the measured jitter.
+        buffer.enqueue(packet, now: 0.145, rendererLeadSamples: 0)
+        let refillDeadline = buffer.nextDeadline ?? .infinity
+        XCTAssertGreaterThan(refillDeadline, 0.145)
+        XCTAssertLessThanOrEqual(refillDeadline - 0.145, 0.100)
+        XCTAssertEqual(buffer.recoveryCount, 1)
+        XCTAssertTrue(buffer.drain(now: refillDeadline - 0.001).isEmpty)
+
+        // A compensating early packet joins the existing refill instead of
+        // moving its deadline or starting another recovery.
+        buffer.enqueue(packet, now: 0.160, rendererLeadSamples: 0)
+        XCTAssertEqual(buffer.nextDeadline, refillDeadline)
+        XCTAssertEqual(buffer.recoveryCount, 1)
+        XCTAssertEqual(buffer.drain(now: refillDeadline), [packet, packet])
+
+        var renderEnd = refillDeadline + 0.160
+        for arrival in [0.305, 0.320, 0.465, 0.480] {
+            XCTAssertLessThanOrEqual(arrival, renderEnd, "Balanced jitter must not deplete the refilled renderer")
+            let lead = max(1, Int((renderEnd - arrival) * 8_000))
+            buffer.enqueue(packet, now: arrival, rendererLeadSamples: lead)
+            let ready = buffer.drain(now: arrival)
+            XCTAssertEqual(ready, [packet])
+            renderEnd += 0.080
+        }
+        XCTAssertEqual(buffer.recoveryCount, 1)
+        XCTAssertGreaterThanOrEqual(renderEnd, 0.640)
+    }
+
+    func testRendererLeadPreventsRecoveryDelay() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, now: 0)
+        _ = buffer.drain(now: 0.040)
+
+        buffer.enqueue(packet, now: 0.145, rendererLeadSamples: 1)
+
+        XCTAssertEqual(buffer.drain(now: 0.145), [packet])
+        XCTAssertEqual(buffer.recoveryCount, 0)
+    }
+
+    func testSuccessfulRefillProtectsAnotherDepletionBeforeAnyPositiveLeadObservation() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, now: 0)
+        _ = buffer.drain(now: 0.040)
+        buffer.enqueue(packet, now: 0.145, rendererLeadSamples: 0)
+        let firstDeadline = buffer.nextDeadline ?? .infinity
+        XCTAssertEqual(buffer.drain(now: firstDeadline), [packet])
+
+        // The renderer plays the entire refill before the next packet arrives.
+        let nextArrival = firstDeadline + 0.100
+        buffer.enqueue(packet, now: nextArrival, rendererLeadSamples: 0)
+        let nextDeadline = buffer.nextDeadline ?? .infinity
+        XCTAssertGreaterThan(nextDeadline, nextArrival)
+        XCTAssertLessThanOrEqual(nextDeadline - nextArrival, 0.100)
+        XCTAssertEqual(buffer.recoveryCount, 2)
+        XCTAssertEqual(buffer.drain(now: nextDeadline), [packet])
+    }
+
+    func testRefillWaitingForNativeCapacityKeepsItsDeadline() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, now: 0)
+        _ = buffer.drain(now: 0.040)
+        buffer.enqueue(packet, now: 0.145, rendererLeadSamples: 0)
+        let deadline = buffer.nextDeadline ?? .infinity
+        XCTAssertTrue(buffer.drain(now: deadline, maximumSamples: 0).isEmpty)
+
+        buffer.enqueue(packet, now: deadline + 0.010, rendererLeadSamples: 0)
+        XCTAssertEqual(buffer.nextDeadline, deadline)
+        XCTAssertEqual(buffer.recoveryCount, 1)
+        XCTAssertEqual(buffer.drain(now: deadline + 0.010), [packet, packet])
+    }
+
 }
