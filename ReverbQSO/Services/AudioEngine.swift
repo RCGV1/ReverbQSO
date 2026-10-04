@@ -800,7 +800,7 @@ final class AudioEngine: ObservableObject {
     /// Stop the input tap, process callbacks already handed off by AVAudioEngine,
     /// then emit the final zero-padded four-frame voice payload.
     @discardableResult
-    func stopCaptureAndFlushPendingBuffers() async -> Data {
+    func stopCaptureAndFlushPendingBuffers() async -> [Data] {
         let generation = captureGeneration
         let barrier = captureTapGate.deactivate() ?? captureBufferBarrier
         captureRequested = false
@@ -814,11 +814,24 @@ final class AudioEngine: ObservableObject {
         await barrier.sealAndWait()
         VoiceDiagnosticLog.record("capture admission rejected=\(barrier.snapshot.rejectedBuffers)")
         guard captureGeneration == generation,
-              captureDrainGeneration == generation else { return Data() }
+              captureDrainGeneration == generation else { return [] }
 
-        let finalAudio = nativeCaptureGeneration == generation
-            ? await captureDSP.flush(generation: generation) : flushCaptureEncoderToPacketBoundary()
-        guard captureGeneration == generation, captureDrainGeneration == generation else { return Data() }
+        let finalPackets: [Data]
+        let tailPCM: [Int16]
+        if nativeCaptureGeneration == generation {
+            let flushed = await captureDSP.flush(generation: generation)
+            finalPackets = flushed.encodedPackets
+            tailPCM = flushed.transmittedPCM
+        } else {
+            let padding = flushCaptureEncoderToPacketBoundary()
+            finalPackets = padding.isEmpty ? [] : [padding]
+            tailPCM = []
+        }
+        guard captureGeneration == generation, captureDrainGeneration == generation else { return [] }
+        if !tailPCM.isEmpty {
+            onRecordingPCM?(tailPCM)
+            onCapturedPCM?(tailPCM)
+        }
         captureDSP.end(generation: generation)
         nativeCaptureGeneration = nil
         captureDSPResults.removeAll(keepingCapacity: true)
@@ -826,10 +839,8 @@ final class AudioEngine: ObservableObject {
         captureDrainGeneration = nil
         captureRecoveryFailureCount = 0
         recordCaptureLevelSummary()
-        logger.info("PTT capture buffers=\(self.captureBufferCount) samples=\(self.captureSampleCount) encodedBytes=\(self.captureEncodedByteCount) peakLevel=\(self.capturePeakLevel) flushBytes=\(finalAudio.count)")
-        if !finalAudio.isEmpty {
-            onCapturedAudio?(finalAudio)
-        }
+        logger.info("PTT capture buffers=\(self.captureBufferCount) samples=\(self.captureSampleCount) encodedBytes=\(self.captureEncodedByteCount) peakLevel=\(self.capturePeakLevel) flushBytes=\(finalPackets.reduce(0) { $0 + $1.count })")
+        for packet in finalPackets { onCapturedAudio?(packet) }
         codec.resetEncodeState()
         captureResamplerState.reset()
         resetCaptureEncodingCounters()
@@ -846,7 +857,7 @@ final class AudioEngine: ObservableObject {
             logger.info("Playback resumed after PTT engineRunning=\(self.engine.isRunning) playerPlaying=\(self.playerNode.isPlaying)")
         }
 #endif
-        return finalAudio
+        return finalPackets
     }
 
     /// Fully stop audio playback + capture for session teardown.

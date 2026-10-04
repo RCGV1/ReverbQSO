@@ -149,6 +149,19 @@ final class NativeCapturePCM {
         return (0..<Int(output.frameLength)).map { outputData[$0] }
     }
 
+    /// With primeMethod.none Apple's converter reports no EOS tail. Feed at
+    /// most 20 ms of silence to release its minimum-phase filter history, then
+    /// discard the converter. This adds at most 160 codec samples before final
+    /// packet padding and can require one additional padded voice packet.
+    func finish() throws -> [Float] {
+        guard converter != nil, let rate = sourceFormat?.sampleRate else { return [] }
+        defer { reset() }
+        let silence = [Float](repeating: 0, count: Int((rate * 0.020).rounded(.down)))
+        let tail = try resample(silence, sourceSampleRate: rate)
+        guard tail.count <= 160 else { throw ConversionError.inputTooLarge }
+        return tail
+    }
+
     func reset() {
         converter?.reset()
         converter = nil

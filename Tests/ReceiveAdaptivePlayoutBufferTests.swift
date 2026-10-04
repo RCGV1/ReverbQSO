@@ -203,11 +203,12 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         // A compensating early packet joins the existing refill instead of
         // moving its deadline or starting another recovery.
         buffer.enqueue(packet, now: 0.160, rendererLeadSamples: 0)
-        XCTAssertEqual(buffer.nextDeadline, refillDeadline)
+        XCTAssertLessThanOrEqual(buffer.nextDeadline ?? .infinity, refillDeadline)
         XCTAssertEqual(buffer.recoveryCount, 1)
-        XCTAssertEqual(buffer.drain(now: refillDeadline), [packet, packet])
+        let resumedAt = buffer.nextDeadline ?? .infinity
+        XCTAssertEqual(buffer.drain(now: resumedAt), [packet, packet])
 
-        var renderEnd = refillDeadline + 0.160
+        var renderEnd = resumedAt + 0.160
         for arrival in [0.305, 0.320, 0.465, 0.480] {
             XCTAssertLessThanOrEqual(arrival, renderEnd, "Balanced jitter must not deplete the refilled renderer")
             let lead = max(1, Int((renderEnd - arrival) * 8_000))
@@ -264,6 +265,26 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         XCTAssertEqual(buffer.nextDeadline, deadline)
         XCTAssertEqual(buffer.recoveryCount, 1)
         XCTAssertEqual(buffer.drain(now: deadline + 0.010), [packet, packet])
+    }
+
+    func testBurstResumesDepletedRendererBeforeTimerAndAvoidsCapacityDrop() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packet = [Int16](repeating: 100, count: 640)
+        buffer.enqueue(packet, now: 0)
+        _ = buffer.drain(now: 0.040)
+        var renderedEnd = 0.120
+        var delivered = 0
+        for index in 0..<7 {
+            let now = 0.450 + Double(index) * 0.001
+            let lead = max(0, Int((renderedEnd - now) * 8_000))
+            buffer.enqueue(packet, now: now, rendererLeadSamples: lead)
+            let capacity = max(0, 2_576 - lead)
+            let ready = buffer.drain(now: now, maximumSamples: capacity)
+            delivered += ready.count
+            if !ready.isEmpty { renderedEnd = max(now, renderedEnd) + Double(ready.count) * 0.080 }
+        }
+        XCTAssertGreaterThan(delivered, 0, "A full refill must not keep waiting while speech accumulates")
+        XCTAssertEqual(buffer.capacityDiscardedPackets, 0)
     }
 
 }

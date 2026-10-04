@@ -61,6 +61,13 @@ struct ReceiveAdaptivePlayoutBuffer {
         let nominal = recoveryDeadline ?? (hasStarted ? now : (lastDeadline ?? (now + targetDelay)))
         let deadline = max(now, nominal)
         packets.append(Packet(samples: samples, receivedAt: now, deadline: deadline))
+        if rendererLeadSamples == 0, !hasStarted || recoveryDeadline != nil,
+           pendingSampleCount >= samples.count + Int((targetDelay * 8_000).rounded(.up)) {
+            // A burst has already supplied a packet plus the desired jitter
+            // lead. Resume now instead of holding it until a timer expires.
+            for index in packets.indices { packets[index].deadline = min(packets[index].deadline, now) }
+            if let recoveryDeadline { self.recoveryDeadline = min(recoveryDeadline, now) }
+        }
         while pendingSampleCount > Self.maximumPendingSamples {
             packets.removeFirst()
             discardedPackets += 1

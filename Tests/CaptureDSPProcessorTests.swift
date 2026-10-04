@@ -4,6 +4,75 @@ import XCTest
 @testable import ReverbQSO
 
 final class CaptureDSPProcessorTests: XCTestCase {
+    func testNativeTailUsesLastGainBeforeGSMPaddingAndFlushIsIdempotent() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 30)
+        var input = [Float](repeating: 0, count: 960)
+        input[959] = 0.5
+        let configuration = CaptureDSPProcessor.Configuration(
+            codec: .gsm, gainMode: .manual, manualGainMultiplier: 2)
+        let initial = try await submit(processor, normalizedSamples: input, sampleRate: 48_000,
+            generation: 30, configuration: configuration)
+        let referencePCM = NativeCapturePCM()
+        _ = try referencePCM.resample(input, sourceSampleRate: 48_000)
+        let tail = try referencePCM.finish()
+        let gainedTail = tail.map { Int16(clamping: Int((Double($0) * 2 * Double(Int16.max)).rounded())) }
+        let referenceCodec = GSMCodec()
+        _ = referenceCodec.encode(initial.transmittedPCM)
+        let expected = referenceCodec.encode(gainedTail + [Int16](repeating: 0, count: 320))
+
+        let packets = await processor.flush(generation: 30)
+
+        XCTAssertEqual(packets.transmittedPCM, gainedTail)
+        XCTAssertEqual(packets.encodedPackets, [expected])
+        XCTAssertTrue(GSMCodec().decodePacket(try XCTUnwrap(packets.encodedPackets.first)).contains { abs(Int($0)) > 100 })
+        let repeated = await processor.flush(generation: 30)
+        XCTAssertTrue(repeated.isEmpty)
+    }
+
+    func testNativeTailKeepsTwoSpeexPacketsIndependent() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 31)
+        var input = [Float](repeating: 0, count: 3_834)
+        input[input.count - 1] = 0.5
+        let configuration = CaptureDSPProcessor.Configuration(
+            codec: .speex, gainMode: .manual, manualGainMultiplier: 1)
+        let initial = try await submit(processor, normalizedSamples: input, sampleRate: 48_000,
+            generation: 31, configuration: configuration)
+        XCTAssertEqual(initial.transmittedPCM.count, 639)
+        XCTAssertTrue(initial.encodedPackets.isEmpty)
+
+        let packets = await processor.flush(generation: 31)
+
+        XCTAssertEqual(packets.encodedPackets.count, 2)
+        XCTAssertLessThanOrEqual(packets.transmittedPCM.count, 160)
+        let decoder = SpeexCodec()
+        for packet in packets.encodedPackets { XCTAssertEqual(try XCTUnwrap(decoder.decodePacket(packet)).count, 640) }
+        let repeated = await processor.flush(generation: 31)
+        XCTAssertTrue(repeated.isEmpty)
+    }
+
+    func testNativeTailIsNotFlushedForStaleOrEndedGeneration() async throws {
+        let clock = TestCaptureClock()
+        let processor = CaptureDSPProcessor(label: #function, now: { clock.read() })
+        processor.begin(generation: 32)
+        var input = [Float](repeating: 0, count: 960)
+        input[input.count - 1] = 0.5
+        let result: CaptureDSPProcessor.Result? = await withCheckedContinuation { continuation in
+            processor.submit(normalizedSamples: input, sampleRate: 48_000, generation: 32,
+                capturedAt: clock.read(), configuration: manualUnity) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertNotNil(result)
+        clock.advance(by: 0.3)
+        let stale = await processor.flush(generation: 32)
+        XCTAssertTrue(stale.isEmpty)
+        processor.end(generation: 32)
+        let ended = await processor.flush(generation: 32)
+        XCTAssertTrue(ended.isEmpty)
+    }
+
     private let manualUnity = CaptureDSPProcessor.Configuration(
         codec: .gsm,
         gainMode: .manual,
@@ -164,9 +233,10 @@ final class CaptureDSPProcessorTests: XCTestCase {
         )
 
         let flushed = await processor.flush(generation: generation)
-        let payload = try XCTUnwrap(GSMCodec.stripHeader(flushed))
+        let packet = try XCTUnwrap(flushed.encodedPackets.first)
+        let payload = try XCTUnwrap(GSMCodec.stripHeader(packet))
         XCTAssertEqual(payload.count, 4 * GSMCodec.encodedFrameSize)
-        XCTAssertEqual(GSMCodec().decodePacket(flushed).count, 4 * GSMCodec.samplesPerFrame)
+        XCTAssertEqual(GSMCodec().decodePacket(packet).count, 4 * GSMCodec.samplesPerFrame)
     }
 
     func testManualGainIsAppliedBeforeEncoding() async throws {
@@ -282,7 +352,7 @@ final class CaptureDSPProcessorTests: XCTestCase {
         packetBuffer.append(try XCTUnwrap(GSMCodec.stripHeader(try XCTUnwrap(resumed.encodedPackets.first))))
         XCTAssertTrue(EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(buffer: &packetBuffer).isEmpty)
         let flushed = await processor.flush(generation: 20)
-        packetBuffer.append(try XCTUnwrap(GSMCodec.stripHeader(flushed)))
+        packetBuffer.append(try XCTUnwrap(GSMCodec.stripHeader(try XCTUnwrap(flushed.encodedPackets.first))))
         let packets = EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(buffer: &packetBuffer)
         XCTAssertEqual(packets.count, 1)
         XCTAssertEqual(packets.first?.count, 132)

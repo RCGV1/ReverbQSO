@@ -18,7 +18,9 @@ final class LiveAudioRoundTripTests: XCTestCase {
         }
         let root = URL(fileURLWithPath: try XCTUnwrap(environment["ECHOLINK_AUDIO_AUDIT_FOLDER"]))
         let source = try Self.sourceSamples(root.appendingPathComponent("speech.wav"))
-        let expectedPackets = source.count / 3_840
+        // The 48 kHz fixture is converted to 8 kHz, including its bounded
+        // 20 ms converter tail before the final packet is padded.
+        let expectedPackets = (source.count / 6 + 160 + 639) / 640
         for impaired in [false, true] {
             let folder = root.appendingPathComponent(impaired ? "loss-recovery" : "clean")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -167,6 +169,11 @@ final class LiveAudioRoundTripTests: XCTestCase {
             .write(to: outputFolder.appendingPathComponent("offline-report.json"))
         XCTAssertEqual(playback["timelineResets"], 0,
             "Overflow must preserve the running playback timeline")
+        XCTAssertEqual(playback["playoutDiscardedPackets"], 0,
+            "The captured proxy burst must survive the decoded playout queue")
+        XCTAssertEqual(playback["overflowIncomingDrops"], 0,
+            "Refill recovery must respect native output capacity")
+        XCTAssertEqual(playback["backlogTrims"], 0)
         XCTAssertLessThan(playback["trimmedSamples"] ?? Int.max, samples.count / 4,
             "Playback recovery must preserve most of the supplied speech")
         XCTAssertEqual(rendered["droppedTapBuffers"], 0)
@@ -390,7 +397,8 @@ final class LiveAudioRoundTripTests: XCTestCase {
             for packet in result.encodedPackets { payloads.append(packet); audio.onCapturedAudio?(packet) }
         }
         let tail = await processor.flush(generation: 1)
-        if !tail.isEmpty { payloads.append(tail); audio.onCapturedAudio?(tail) }
+        transmittedPCM += tail.transmittedPCM
+        for packet in tail.encodedPackets { payloads.append(packet); audio.onCapturedAudio?(packet) }
         processor.end(generation: 1)
         await connection.endEchoTestAuditTransmission()
         let released = ProcessInfo.processInfo.systemUptime

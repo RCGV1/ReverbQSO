@@ -7,6 +7,28 @@ import XCTest
 #endif
 
 final class NativeCapturePCMTests: XCTestCase {
+    func testFinishRetainsTerminalImpulseAndIsIdempotent() throws {
+        let pcm = NativeCapturePCM()
+        var samples = [Float](repeating: 0, count: 960)
+        samples[959] = 0.5
+        let initial = try pcm.resample(samples, sourceSampleRate: 48_000)
+        XCTAssertEqual(initial.map { abs($0) }.max(), 0)
+        let tail = try pcm.finish()
+        XCTAssertLessThanOrEqual(tail.count, 160)
+        XCTAssertGreaterThan(tail.map { abs($0) }.max() ?? 0, 0.04)
+        XCTAssertTrue(try pcm.finish().isEmpty)
+    }
+
+    func testFinishHasNoTailWithoutRateConversionOrAfterReset() throws {
+        let pcm = NativeCapturePCM()
+        XCTAssertTrue(try pcm.finish().isEmpty)
+        _ = try pcm.resample([Float](repeating: 0.25, count: 160), sourceSampleRate: 8_000)
+        XCTAssertTrue(try pcm.finish().isEmpty)
+        _ = try pcm.resample([Float](repeating: 0.25, count: 960), sourceSampleRate: 48_000)
+        pcm.reset()
+        XCTAssertTrue(try pcm.finish().isEmpty)
+    }
+
     func testExtractsPrimaryFloatChannelWithoutAveragingAntiphaseStereo() throws {
         let buffer = try makeBuffer(format: .pcmFormatFloat32, interleaved: false, channels: 2, frames: 3)
         let data = try XCTUnwrap(buffer.floatChannelData)

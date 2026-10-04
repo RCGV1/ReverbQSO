@@ -140,6 +140,24 @@ final class ReceiveClockCompensatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(output.count, 636)
     }
 
+    func testClockCorrectionPreservesUpperSpeechBandAndReducesAliasing() {
+        func correctedRMSRatio(_ frequency: Double) -> Double {
+            let compensator = ReceiveClockCompensator()
+            let packet = (0..<640).map { Int16((12_000 * sin(2 * .pi * frequency * Double($0) / 8_000)).rounded()) }
+            for _ in 0..<300 { _ = compensator.process(packet, queuedSamples: 2_000, targetQueuedSamples: 320) }
+            let corrected = compensator.process(packet, queuedSamples: 2_000, targetQueuedSamples: 320)
+            XCTAssertEqual(corrected.first, packet.first)
+            XCTAssertEqual(corrected.last, packet.last)
+            func rms(_ samples: [Int16]) -> Double {
+                sqrt(samples.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(samples.count))
+            }
+            return rms(corrected) / rms(packet)
+        }
+        XCTAssertGreaterThan(correctedRMSRatio(3_000), 0.97)
+        XCTAssertGreaterThan(correctedRMSRatio(3_400), 0.90)
+        XCTAssertLessThan(correctedRMSRatio(3_900), 0.30)
+    }
+
     func testFourPacketBurstClearsExcessDelayWithinTenSecondsWithoutDroppingSpeech() {
         var playout = ReceiveAdaptivePlayoutBuffer()
         let compensator = ReceiveClockCompensator()

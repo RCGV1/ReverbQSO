@@ -37,6 +37,13 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         let metrics: Metrics
     }
 
+    struct FlushResult: Sendable, Equatable {
+        let transmittedPCM: [Int16]
+        let encodedPackets: [Data]
+        static let empty = FlushResult(transmittedPCM: [], encodedPackets: [])
+        var isEmpty: Bool { transmittedPCM.isEmpty && encodedPackets.isEmpty }
+    }
+
     typealias Completion = @Sendable (Result?) -> Void
 
     private let queue: DispatchQueue
@@ -59,6 +66,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     private var nextOrdinal: UInt64 = 0
     private var streamEpoch: UInt64 = 0
     private var lastProcessedCaptureAt: TimeInterval?
+    private var lastNativeConfiguration: Configuration?
 
     init(
         label: String = "org.reverbqso.capture-dsp",
@@ -172,20 +180,20 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     }
 
     /// Flushes after all earlier submitted buffers on the serial queue.
-    func flush(generation: UInt64) async -> Data {
+    func flush(generation: UInt64) async -> FlushResult {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 guard isActive(generation), stateGeneration == generation else {
-                    continuation.resume(returning: Data())
+                    continuation.resume(returning: .empty)
                     return
                 }
                 guard let last = lastProcessedCaptureAt,
                       LiveCaptureBacklogPolicy.isFresh(capturedAt: last, now: now()) else {
-                    continuation.resume(returning: Data())
+                    continuation.resume(returning: .empty)
                     return
                 }
-                let output = flushQueueConfined()
-                continuation.resume(returning: isActive(generation) ? output : Data())
+                let output = finishNativeCaptureAndFlush()
+                continuation.resume(returning: isActive(generation) ? output : .empty)
             }
         }
     }
@@ -196,6 +204,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         generation: UInt64,
         configuration: Configuration
     ) -> Result {
+        lastNativeConfiguration = nil
         if selectedCodec != configuration.codec {
             streamEpoch &+= 1
             gsmCodec.resetEncodeState()
@@ -289,6 +298,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
             resetAfterNativeConversionFailure()
             return nil
         }
+        lastNativeConfiguration = configuration
         let codecRMS = Self.rms(codecInput)
         let codecPeak = Self.peak(codecInput)
 
@@ -358,6 +368,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     }
 
     private func resetAfterNativeConversionFailure() {
+        lastNativeConfiguration = nil
         streamEpoch &+= 1
         nativeCapturePCM.reset()
         floatAutomaticGain.reset()
@@ -366,6 +377,42 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         hasGSMInput = false
         gsmSampleRemainder = 0
         gsmFrameRemainder = 0
+    }
+
+    /// Drain the converter before packet padding. A tail can complete one
+    /// Speex packet and require another padded packet; keep those independent.
+    private func finishNativeCaptureAndFlush() -> FlushResult {
+        var tailPackets: [Data] = []
+        var transmittedPCM: [Int16] = []
+        if let configuration = lastNativeConfiguration {
+            lastNativeConfiguration = nil
+            do {
+                let tail = try nativeCapturePCM.finish()
+                let gained: [Float]
+                switch configuration.gainMode {
+                case .automatic:
+                    gained = floatAutomaticGain.process(tail).samples
+                case .manual:
+                    gained = Self.applyManualFloatGain(tail, multiplier: configuration.manualGainMultiplier).samples
+                }
+                transmittedPCM = Self.quantize(gained)
+                tailPackets = encode(transmittedPCM, codec: configuration.codec)
+            } catch {
+                resetAfterNativeConversionFailure()
+                return .empty
+            }
+        }
+        let padding = flushQueueConfined()
+        if selectedCodec == .speex {
+            if !padding.isEmpty { tailPackets.append(padding) }
+            return FlushResult(transmittedPCM: transmittedPCM, encodedPackets: tailPackets)
+        }
+        var payload = Data()
+        for packet in tailPackets + (padding.isEmpty ? [] : [padding]) {
+            if let frames = GSMCodec.stripHeader(packet) { payload.append(frames) }
+        }
+        return FlushResult(transmittedPCM: transmittedPCM,
+            encodedPackets: payload.isEmpty ? [] : [GSMCodec.wrapWithHeader(payload)])
     }
 
     private func flushQueueConfined() -> Data {
@@ -407,6 +454,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     }
 
     private func resetQueueConfinedState() {
+        lastNativeConfiguration = nil
         streamEpoch &+= 1
         resamplerState.reset()
         automaticGain.reset()

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import Foundation
 
 /// Applies a small, feedback-driven sample-rate correction to received PCM.
 ///
@@ -55,14 +56,27 @@ final class ReceiveClockCompensator {
 
         let sourceSpan = Double(samples.count - 1)
         let outputSpan = Double(outputCount - 1)
+        let cutoff = outputCount < samples.count ? 0.95 * Double(outputCount) / Double(samples.count) : 1
         return (0..<outputCount).map { outputIndex in
-            let sourcePosition = Double(outputIndex) * sourceSpan / outputSpan
-            let lowerIndex = Int(sourcePosition.rounded(.down))
-            let upperIndex = min(lowerIndex + 1, samples.count - 1)
-            let fraction = sourcePosition - Double(lowerIndex)
-            let interpolated = Double(samples[lowerIndex])
-                + (Double(samples[upperIndex]) - Double(samples[lowerIndex])) * fraction
-            return Int16(clamping: Int(interpolated.rounded()))
+            // Preserve packet joins. The complete packet is already available,
+            // so the interpolation window adds no playback waiting or lookahead.
+            if outputIndex == 0 { return samples[0] }
+            if outputIndex == outputCount - 1 { return samples[samples.count - 1] }
+            let position = Double(outputIndex) * sourceSpan / outputSpan
+            let center = Int(position.rounded(.down))
+            var sum = 0.0
+            var weightSum = 0.0
+            for index in (center - 15)...(center + 16) {
+                let distance = position - Double(index)
+                guard abs(distance) < 16 else { continue }
+                let argument = Double.pi * cutoff * distance
+                let sinc = abs(argument) < 1e-12 ? 1 : sin(argument) / argument
+                let window = 0.5 * (1 + cos(Double.pi * distance / 16))
+                let weight = cutoff * sinc * window
+                sum += Double(samples[min(samples.count - 1, max(0, index))]) * weight
+                weightSum += weight
+            }
+            return Int16(clamping: Int((sum / weightSum).rounded()))
         }
     }
 
