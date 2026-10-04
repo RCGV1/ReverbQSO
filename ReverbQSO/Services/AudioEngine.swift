@@ -281,6 +281,9 @@ final class AudioEngine: ObservableObject {
     }
     var onRecordingPCM: (@MainActor ([Int16]) -> Void)?
     private var receiveOutputMuted = false
+#if targetEnvironment(macCatalyst)
+    private var playbackRouteSignature: String?
+#endif
 
     func setReceiveOutputMuted(_ muted: Bool) {
         receiveOutputMuted = muted
@@ -291,14 +294,22 @@ final class AudioEngine: ObservableObject {
     private var auditScheduledSamples = 0
     private var auditTrimCount = 0
     private var auditTrimmedSamples = 0
+    private var auditOverflowDropCount = 0
     private var auditConcealmentSkippedSamples = 0
     private var auditScheduleEvents: [[String: Double]] = []
+    private(set) var auditEngineEvents: [[String: String]] = []
+    private var auditTimelineResetCount = 0
+    private var auditGraphReplacementCount = 0
 
     var auditPlaybackSnapshot: [String: Int] {
         ["scheduledSamples": auditScheduledSamples, "backlogTrims": auditTrimCount,
-         "trimmedSamples": auditTrimmedSamples, "playoutDiscardedPackets": receivePlayout.discardedPackets,
+         "trimmedSamples": auditTrimmedSamples, "overflowIncomingDrops": auditOverflowDropCount,
+         "playoutDiscardedPackets": receivePlayout.discardedPackets,
          "concealmentSkippedSamples": auditConcealmentSkippedSamples,
-         "remainingSamples": remainingPlaybackSamples, "running": isRunning ? 1 : 0]
+         "remainingSamples": remainingPlaybackSamples, "running": isRunning ? 1 : 0,
+         "actualEngineRunning": engine.isRunning ? 1 : 0,
+         "timelineResets": auditTimelineResetCount, "graphReplacements": auditGraphReplacementCount,
+         "maximumQueuedSamples": playbackQueue.maximumSamples]
     }
 
     var auditPlaybackSchedule: [[String: Double]] { auditScheduleEvents }
@@ -310,6 +321,7 @@ final class AudioEngine: ObservableObject {
         auditScheduledSamples = 0
         auditTrimCount = 0
         auditTrimmedSamples = 0
+        auditOverflowDropCount = 0
         auditConcealmentSkippedSamples = 0
         auditScheduleEvents.removeAll()
         let mixer = engine.mainMixerNode
@@ -384,10 +396,14 @@ final class AudioEngine: ObservableObject {
     }
 
     private func replaceEngineAfterSessionActivation() {
+#if DEBUG
+        if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditGraphReplacementCount += 1 }
+#endif
+        recordEngineAudit("graph-replacement-begin")
         // An input node created while its hardware route was disabled can keep
         // reporting 0 Hz even after the session becomes valid. A new engine
         // creates a new input node against the now-active route.
-        stopPlaybackTimeline()
+        stopPlaybackTimeline(reason: "graph-replacement")
         engine.stop()
         if engine.attachedNodes.contains(playerNode) {
             engine.detach(playerNode)
@@ -441,6 +457,37 @@ final class AudioEngine: ObservableObject {
     private var playbackEndSampleTime: Int64 = 0
     private var lastReceiveArrival = -Double.infinity
 
+    // State transitions only; keep packet scheduling diagnostics separate.
+    private func recordEngineAudit(_ event: String) {
+#if DEBUG
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
+        let row = ["time": String(ProcessInfo.processInfo.systemUptime), "event": event,
+                   "engine": String(describing: ObjectIdentifier(engine)),
+                   "actualRunning": String(engine.isRunning), "publishedRunning": String(isRunning),
+                   "generation": String(playbackQueue.generation),
+                   "remainingSamples": String(remainingPlaybackSamples)]
+        if auditEngineEvents.count >= 256 { auditEngineEvents.removeFirst() }
+        auditEngineEvents.append(row)
+        VoiceDiagnosticLog.record("engine audit event=\(event) engine=\(row["engine"] ?? "") actualRunning=\(engine.isRunning) publishedRunning=\(isRunning) generation=\(playbackQueue.generation) remainingSamples=\(remainingPlaybackSamples)")
+#endif
+    }
+
+    private func recordAudioFailure(_ error: Error, operation: String) {
+#if DEBUG
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
+        let failure = error as NSError
+        let session = AVAudioSession.sharedInstance()
+#if os(watchOS)
+        let permission = "unavailable"
+#else
+        let permission = String(session.recordPermission.rawValue)
+#endif
+        // Domains/codes and route state only; NSError userInfo may contain data
+        // unrelated to audio diagnostics and is deliberately omitted.
+        recordEngineAudit("failure operation=\(operation) domain=\(failure.domain) code=\(failure.code) category=\(session.category.rawValue) mode=\(session.mode.rawValue) otherAudio=\(session.isOtherAudioPlaying) secondarySilenced=\(session.secondaryAudioShouldBeSilencedHint) inputAvailable=\(session.isInputAvailable) permission=\(permission)")
+#endif
+    }
+
     private var captureFormat: AVAudioFormat? {
         AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -483,7 +530,11 @@ final class AudioEngine: ObservableObject {
             playerNode.volume = receiveOutputMuted ? 0 : 1
             engine.mainMixerNode.outputVolume = 1.0
             try engine.start()
-            isRunning = true
+            isRunning = engine.isRunning
+#if targetEnvironment(macCatalyst)
+            playbackRouteSignature = currentPlaybackRouteSignature()
+#endif
+            recordEngineAudit("playback-start-complete")
             logRouteDiagnostics(context: "playback-engine-started")
             // Start the player node immediately so the first received buffer
             // renders without the extra scheduling round-trip on first arrival.
@@ -491,6 +542,7 @@ final class AudioEngine: ObservableObject {
             ensurePlaybackOutputRoute()
             updateOutputRouteName()
         } catch {
+            recordAudioFailure(error, operation: "start-playback")
             logger.error("Failed to start playback error='\(error.localizedDescription, privacy: .public)'")
             resetEngineGraph()
             isRunning = false
@@ -515,6 +567,13 @@ final class AudioEngine: ObservableObject {
             if inputPreparationGeneration == preparationGeneration { isPreparingCapture = false }
         }
 
+        if tapInstalled && engine.isRunning {
+            for _ in 0..<20 {
+                guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+                if isCaptureReady { return true }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
         for attempt in 0..<3 {
             guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
             if tapInstalled { stopCaptureTap(preservingIntent: false) }
@@ -543,10 +602,11 @@ final class AudioEngine: ObservableObject {
     /// Start capturing audio from the microphone (PTT pressed).
     func startCapture(requestPermission: Bool = true) async -> Bool {
         guard !isAudioInterrupted, !isDeviceRecovering else { return false }
-#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+#if os(iOS) && !targetEnvironment(simulator)
         if tapInstalled && isCaptureReady && !isPreparingCapture {
             guard !captureRequested else { return true }
             captureRequested = true
+            isCapturing = true
             captureGeneration &+= 1
             captureBufferBarrier = CaptureBufferProcessingBarrier()
             captureBufferCount = 0
@@ -565,7 +625,9 @@ final class AudioEngine: ObservableObject {
             VoiceDiagnosticLog.record("PTT audio route preference=\(outputPreference.rawValue) outputs=[\(outputs)] voiceProcessing=\(engine.inputNode.isVoiceProcessingEnabled) AGC=\(engine.inputNode.isVoiceProcessingAGCEnabled) bypassed=\(engine.inputNode.isVoiceProcessingBypassed) inputMuted=\(engine.inputNode.isVoiceProcessingInputMuted)")
             return true
         }
+#if !targetEnvironment(macCatalyst)
         guard isPreparingCapture else { return false }
+#endif
 #endif
         let isContinuingCaptureRequest = captureRequested
         captureRequested = true
@@ -713,7 +775,7 @@ final class AudioEngine: ObservableObject {
         captureRecoveryTask?.cancel()
         captureRecoveryTask = nil
         captureDrainGeneration = generation
-#if !os(iOS) || targetEnvironment(macCatalyst) || targetEnvironment(simulator)
+#if !os(iOS) || targetEnvironment(simulator)
         stopCaptureTap(preservingIntent: false, resetResampler: false)
 #endif
 
@@ -741,11 +803,13 @@ final class AudioEngine: ObservableObject {
         resetCaptureEncodingCounters()
         inputLevel = 0
 #if targetEnvironment(macCatalyst)
-        // Restart the player timeline after the input graph was rebuilt for
-        // capture. Incoming EchoLink packets arrive after PTT is released.
-        if isRunning {
-            stopPlaybackTimeline()
-            playerNode.play()
+        isCapturing = false
+        // Keep the input tap installed with its admission gate sealed. Removing
+        // a tap can reconfigure native I/O and interrupt queued receive audio.
+        // Microphone drain can overlap incoming speech. Keep the healthy
+        // receive timeline intact so release cannot discard the peer's reply.
+        if isRunning && engine.isRunning {
+            if !playerNode.isPlaying { playerNode.play() }
             ensurePlaybackOutputRoute()
             logger.info("Playback resumed after PTT engineRunning=\(self.engine.isRunning) playerPlaying=\(self.playerNode.isPlaying)")
         }
@@ -770,7 +834,7 @@ final class AudioEngine: ObservableObject {
         capturePreparationFailed = false
         invalidateCaptureStart(preservingIntent: false)
         captureRecoveryFailureCount = 0
-        stopPlaybackTimeline()
+        stopPlaybackTimeline(reason: "stop-all")
         engine.stop()
         if engine.attachedNodes.contains(playerNode) {
             engine.detach(playerNode)
@@ -946,7 +1010,12 @@ final class AudioEngine: ObservableObject {
         }
 #endif
 #endif
-        try session.setActive(true)
+        do {
+            try session.setActive(true)
+        } catch {
+            recordAudioFailure(error, operation: "session-activation")
+            throw error
+        }
 #if !os(watchOS) && !targetEnvironment(simulator)
         if session.maximumInputNumberOfChannels > 0 {
             try? session.setPreferredInputNumberOfChannels(1)
@@ -1104,16 +1173,16 @@ final class AudioEngine: ObservableObject {
         return buffer
     }
 
-    private func schedulePlaybackBuffer(_ buffer: AVAudioPCMBuffer) {
+    private func schedulePlaybackBuffer(_ buffer: AVAudioPCMBuffer, startingAt freshTimelineStart: Int64? = nil) {
         let incomingCount = Int(buffer.frameLength)
         guard let incomingData = buffer.floatChannelData else { return }
         let incomingSamples = Array(UnsafeBufferPointer(start: incomingData[0], count: incomingCount))
         let renderedSnapshot = renderedPlaybackSampleTime
         if let rendered = renderedSnapshot { playbackHistory.prune(renderedSampleTime: rendered) }
         let remaining = playbackHistory.remainingSamples(renderedSampleTime: renderedSnapshot)
-        var start = max(playbackEndSampleTime, max(0, renderedSnapshot ?? 0))
-        var scheduledBuffer = buffer
-        var scheduledSamples = incomingSamples
+        let start = freshTimelineStart ?? max(playbackEndSampleTime, max(0, renderedSnapshot ?? 0))
+        let scheduledBuffer = buffer
+        let scheduledSamples = incomingSamples
 #if DEBUG
         let auditEventIndex = auditScheduleEvents.count
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" {
@@ -1123,25 +1192,25 @@ final class AudioEngine: ObservableObject {
                 "priorEnd": Double(playbackEndSampleTime), "count": Double(incomingCount)])
         }
 #endif
-        if playbackQueue.needsReset(adding: incomingCount, remainingSamples: remaining) {
-            let replacement = playbackHistory.boundedReplacement(adding: incomingSamples, maximumSamples: playbackQueue.recoverySamples)
-            guard let combined = playbackBuffer(fromProcessedSamples: replacement.samples, format: buffer.format) else { return }
+        if playbackQueue.wouldOverflow(adding: incomingCount, remainingSamples: remaining) {
+            // Preserve scheduled speech and the native render clock. Restarting
+            // the player here adds preroll and can cascade into further losses.
 #if DEBUG
             auditTrimCount += 1
-            auditTrimmedSamples += replacement.discardedSamples
+            auditOverflowDropCount += 1
+            auditTrimmedSamples += incomingCount
             if auditScheduleEvents.count > auditEventIndex {
-                auditScheduleEvents[auditEventIndex]["discardedSamples"] = Double(replacement.discardedSamples)
-                auditScheduleEvents[auditEventIndex]["retainedSamples"] = Double(max(0, replacement.samples.count - incomingCount))
+                auditScheduledSamples -= incomingCount
+                auditScheduleEvents[auditEventIndex]["discardedSamples"] = Double(incomingCount)
+                auditScheduleEvents[auditEventIndex]["retainedSamples"] = Double(remaining)
+                auditScheduleEvents[auditEventIndex]["scheduledCount"] = 0
+                auditScheduleEvents[auditEventIndex]["scheduledStart"] = Double(playbackEndSampleTime)
+                auditScheduleEvents[auditEventIndex]["generation"] = Double(playbackQueue.generation)
+                auditScheduleEvents[auditEventIndex]["overflowIncomingDrop"] = 1
             }
 #endif
-            // Preserve recent unrendered speech, discarding only the excess.
-            trimPlaybackTimeline()
-            // stop() resets the player timeline; lastRenderTime can still
-            // expose the previous generation's cursor until rendering resumes.
-            start = 0
-            scheduledBuffer = combined
-            scheduledSamples = replacement.samples
-            logger.debug("Trimmed receive playback backlog to bounded recent speech")
+            recordEngineAudit("overflow-incoming-drop samples=\(incomingCount)")
+            return
         }
         let count = scheduledSamples.count
         playbackEndSampleTime = start + Int64(count)
@@ -1176,8 +1245,13 @@ final class AudioEngine: ObservableObject {
     }
 
     private var renderedPlaybackSampleTime: Int64? {
+        // Activation can fail before the player is attached. Native player
+        // timeline APIs require an engine and raise an Objective-C exception.
+        guard engine.attachedNodes.contains(playerNode) else { return nil }
         guard let renderTime = playerNode.lastRenderTime,
-              let playerTime = playerNode.playerTime(forNodeTime: renderTime) else { return nil }
+              renderTime.isSampleTimeValid || renderTime.isHostTimeValid,
+              let playerTime = playerNode.playerTime(forNodeTime: renderTime),
+              playerTime.isSampleTimeValid else { return nil }
         return playerTime.sampleTime
     }
 
@@ -1185,18 +1259,22 @@ final class AudioEngine: ObservableObject {
         playbackHistory.remainingSamples(renderedSampleTime: renderedPlaybackSampleTime)
     }
 
-    private func trimPlaybackTimeline() {
+    private func trimPlaybackTimeline(reason: String = "backlog-trim") {
+#if DEBUG
+        if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditTimelineResetCount += 1 }
+#endif
+        recordEngineAudit("timeline-reset reason=\(reason)")
         playbackQueue.reset()
         playbackHistory.reset()
         playbackEndSampleTime = 0
         receiveClock.reset()
-        playerNode.stop()
+        if engine.attachedNodes.contains(playerNode) { playerNode.stop() }
     }
 
-    private func stopPlaybackTimeline() {
+    private func stopPlaybackTimeline(reason: String = "stop-playback") {
         resetReceiveProcessing()
         lastReceiveArrival = -Double.infinity
-        trimPlaybackTimeline()
+        trimPlaybackTimeline(reason: reason)
     }
 
     private func computeRMS(_ samples: [Int16]) -> Double {
@@ -1431,11 +1509,31 @@ final class AudioEngine: ObservableObject {
         // Starting the output graph before installing the input tap can leave
         // the input branch idle even though the engine reports running.
         let wasRunning = engine.isRunning
+#if targetEnvironment(macCatalyst)
+        // Engine stop/start invalidates the player's running clock on Catalyst.
+        // Preserve processed speech, reset the player before restarting I/O,
+        // and leave the decoded playout buffer available for its normal drain.
+        if let rendered = renderedPlaybackSampleTime { playbackHistory.prune(renderedSampleTime: rendered) }
+        let retainedReceive = playbackHistory.samples
+        trimPlaybackTimeline(reason: "capture-graph-restart")
+#endif
         do {
             if wasRunning { engine.stop() }
             try engine.start()
+#if targetEnvironment(macCatalyst)
+            if !retainedReceive.isEmpty, let format = captureFormat,
+               let retainedBuffer = playbackBuffer(fromProcessedSamples: retainedReceive, format: format) {
+                // stop() resets the player timeline to zero; its previous render
+                // cursor may remain visible until the restarted graph renders.
+                schedulePlaybackBuffer(retainedBuffer, startingAt: 0)
+            }
+#endif
             playerNode.play()
-            isRunning = true
+            isRunning = engine.isRunning
+#if targetEnvironment(macCatalyst)
+            playbackRouteSignature = currentPlaybackRouteSignature()
+#endif
+            recordEngineAudit("capture-graph-start-complete previousRunning=\(wasRunning)")
             logger.info("Capture graph started with input tap installed previousEngineRunning=\(wasRunning)")
         } catch {
             logger.error("Failed to start capture graph error='\(error.localizedDescription, privacy: .public)'")
@@ -1912,7 +2010,25 @@ final class AudioEngine: ObservableObject {
         hasInstalledSessionObservers = true
     }
 
+#if targetEnvironment(macCatalyst)
+    private func currentPlaybackRouteSignature() -> String {
+        let session = AVAudioSession.sharedInstance()
+        let endpoints = (session.currentRoute.inputs + session.currentRoute.outputs).map { $0.uid }.joined(separator: "|")
+        // Querying a lazy input node while output I/O is running can itself
+        // reconfigure the graph. An idle input needs only endpoint identity;
+        // cache its actual format once a capture tap is installed.
+        let inputSignature: String
+        if tapInstalled {
+            let input = engine.inputNode.outputFormat(forBus: 0)
+            inputSignature = "\(input.sampleRate):\(input.channelCount)"
+        } else { inputSignature = "idle" }
+        let output = engine.outputNode.outputFormat(forBus: 0)
+        return "\(endpoints)|\(session.category.rawValue)|\(session.mode.rawValue)|\(session.sampleRate)|\(inputSignature)|\(output.sampleRate):\(output.channelCount)"
+    }
+#endif
+
     private func handleRouteChange(reasonValue: UInt) {
+        recordEngineAudit("route-change rawReason=\(reasonValue)")
         refreshAvailableInputDevices()
         updateOutputRouteName()
         guard playbackDesired || captureRequested else { return }
@@ -1922,6 +2038,13 @@ final class AudioEngine: ObservableObject {
             return
         }
         if reason == .override { return }
+#if targetEnvironment(macCatalyst)
+        if reason == .unknown || reason == .routeConfigurationChange {
+            recoverAudioDevice(for: .routeConfigurationChanged(
+                graphHealthy: engine.isRunning && playbackRouteSignature == currentPlaybackRouteSignature()))
+            return
+        }
+#endif
         guard !isPreparingCapture, !isPerformingCaptureRecovery, !isDeviceRecovering else { return }
         recoverAudioDevice(for: .deviceChange)
     }
@@ -1930,6 +2053,7 @@ final class AudioEngine: ObservableObject {
         let plan = AudioDeviceRecoveryPolicy.plan(for: event,
             playbackActive: playbackDesired && automaticPlaybackAllowed && !isAudioInterrupted, captureRequested: captureRequested,
             preparingOrRecovering: isPreparingCapture || isPerformingCaptureRecovery || isDeviceRecovering)
+        recordEngineAudit("recovery event=\(event) discard=\(plan.discardBufferedReceive) rebuild=\(plan.rebuildGraph) restart=\(plan.restartPlayback) prepare=\(plan.prepareMicrophone) stopCapture=\(plan.stopCapture)")
         guard plan != .none else { return }
         if plan.rebuildGraph || plan.discardBufferedReceive {
             prepareCaptureTask?.cancel()
@@ -1941,7 +2065,7 @@ final class AudioEngine: ObservableObject {
         } else if tapInstalled && (plan.rebuildGraph || plan.discardBufferedReceive) {
             stopCaptureTap(preservingIntent: false)
         }
-        if plan.discardBufferedReceive { stopPlaybackTimeline() }
+        if plan.discardBufferedReceive { stopPlaybackTimeline(reason: "device-recovery \(event)") }
         if case .interruptionBegan = event {
             engine.pause()
             isRunning = false
@@ -1997,6 +2121,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func handleEngineConfigurationChange() {
+        recordEngineAudit("engine-configuration-notification")
         guard (isRunning && !engine.isRunning) || (captureRequested && !hasUsableCaptureRoute()) else { return }
         recoverAudioDevice(for: .engineConfigurationChanged)
     }
@@ -2012,7 +2137,7 @@ final class AudioEngine: ObservableObject {
 
     private func resetEngineGraph() {
         stopCaptureTap(preservingIntent: true)
-        stopPlaybackTimeline()
+        stopPlaybackTimeline(reason: "engine-graph-reset")
         engine.stop()
 
         if engine.attachedNodes.contains(playerNode) {

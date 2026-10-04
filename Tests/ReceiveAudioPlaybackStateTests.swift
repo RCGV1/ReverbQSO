@@ -46,7 +46,8 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
         let oldGeneration = queue.reserve(640)
         _ = queue.reserve(640)
         _ = queue.reserve(640)
-        XCTAssertTrue(queue.needsReset(adding: 640))
+        _ = queue.reserve(640)
+        XCTAssertTrue(queue.wouldOverflow(adding: 640))
         queue.reset()
         let newGeneration = queue.reserve(640)
         queue.complete(640, generation: oldGeneration)
@@ -58,9 +59,9 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
     func testNormalPlaybackCompletionFreesCapacityWithoutReset() {
         var queue = ReceivePlaybackQueue()
         let generation = queue.reserve(640)
-        XCTAssertFalse(queue.needsReset(adding: 640))
+        XCTAssertFalse(queue.wouldOverflow(adding: 640))
         queue.complete(640, generation: generation)
-        XCTAssertFalse(queue.needsReset(adding: queue.maximumSamples))
+        XCTAssertFalse(queue.wouldOverflow(adding: queue.maximumSamples))
     }
     func testDelayedCompletionsDoNotTrimHealthyRenderedPlayback() {
         var queue = ReceivePlaybackQueue()
@@ -74,7 +75,7 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
             }
             completions.removeAll { $0.time <= now }
             let remaining = max(0, end - rendered)
-            XCTAssertFalse(queue.needsReset(adding: 640, remainingSamples: remaining))
+            XCTAssertFalse(queue.wouldOverflow(adding: 640, remainingSamples: remaining))
             end = max(end, rendered) + 640
             let generation = queue.reserve(640)
             completions.append((Double(end) / 8_000 + 0.04 + 0.16, 640, generation))
@@ -84,8 +85,8 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
     func testActualRenderedBacklogStillRequiresTrim() {
         var queue = ReceivePlaybackQueue()
         _ = queue.reserve(640)
-        XCTAssertTrue(queue.needsReset(adding: 640, remainingSamples: 1_920))
-        XCTAssertFalse(queue.needsReset(adding: 640, remainingSamples: 320))
+        XCTAssertTrue(queue.wouldOverflow(adding: 640, remainingSamples: 2_560))
+        XCTAssertFalse(queue.wouldOverflow(adding: 640, remainingSamples: 320))
     }
 
     func testOverflowPreservesNewestUnrenderedAudioAndDiscardsOnlyExcess() {
@@ -117,26 +118,26 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
         history.prune(renderedSampleTime: -342)
         XCTAssertEqual(history.samples.count, 1_280)
         let queue = ReceivePlaybackQueue()
-        XCTAssertFalse(queue.needsReset(adding: 640, remainingSamples: history.remainingSamples(renderedSampleTime: -342)))
+        XCTAssertFalse(queue.wouldOverflow(adding: 640, remainingSamples: history.remainingSamples(renderedSampleTime: -342)))
     }
 
     func testBurstReplacementStaysBoundedAndOldGenerationCannotConsumeIt() {
         var history = ReceivePlaybackHistory()
         var queue = ReceivePlaybackQueue()
-        history.append([Float](repeating: 1, count: 1_920), startingAt: 0)
-        let oldToken = queue.reserve(1_920)
+        history.append([Float](repeating: 1, count: 2_560), startingAt: 0)
+        let oldToken = queue.reserve(2_560)
         let replacement = history.boundedReplacement(adding: [Float](repeating: 2, count: 640), maximumSamples: queue.maximumSamples)
-        XCTAssertEqual(replacement.samples.count, 1_936)
+        XCTAssertEqual(replacement.samples.count, 2_576)
         XCTAssertEqual(replacement.discardedSamples, 624)
         queue.reset()
         history.reset()
         history.append(replacement.samples, startingAt: 0)
         let newToken = queue.reserve(replacement.samples.count)
-        queue.complete(1_920, generation: oldToken)
-        XCTAssertEqual(queue.queuedSamples, 1_936)
+        queue.complete(2_560, generation: oldToken)
+        XCTAssertEqual(queue.queuedSamples, 2_576)
         XCTAssertEqual(history.samples.suffix(640), [Float](repeating: 2, count: 640)[...])
-        queue.complete(1_936, generation: newToken)
-        history.prune(renderedSampleTime: 1_936)
+        queue.complete(2_576, generation: newToken)
+        history.prune(renderedSampleTime: 2_576)
         XCTAssertEqual(queue.queuedSamples, 0)
         XCTAssertEqual(history.samples, [])
     }
@@ -153,16 +154,49 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
         history.append(recovery.samples, startingAt: 0)
         _ = queue.reserve(recovery.samples.count)
         var end = Int64(recovery.samples.count)
-        // Model a conservative full packet of startup preroll, then normal
-        // playback. Filling the replacement to 1,936 causes a reset at tick 1.
+        // Two packets arrive during the measured >100 ms native preroll.
+        // The old 242 ms bound resets again at tick 2 before output starts.
+        let generationAfterRecovery = queue.generation
         for tick in 1...100 {
-            let rendered = Int64(max(0, tick - 1) * 640)
+            let rendered = tick <= 2 ? Int64(-342 + (tick - 1) * 171) : Int64((tick - 2) * 640)
             history.prune(renderedSampleTime: rendered)
-            XCTAssertFalse(queue.needsReset(adding: 640, remainingSamples: history.remainingSamples(renderedSampleTime: rendered)))
+            XCTAssertFalse(queue.wouldOverflow(adding: 640, remainingSamples: history.remainingSamples(renderedSampleTime: rendered)))
             history.append([Float](repeating: Float(tick + 2), count: 640), startingAt: end)
             end += 640
             XCTAssertLessThanOrEqual(history.samples.count, queue.maximumSamples)
+            XCTAssertEqual(queue.generation, generationAfterRecovery)
         }
+    }
+
+    func testOverflowRejectsIncomingSpeechWithoutResetAndResumesAfterRendering() {
+        var queue = ReceivePlaybackQueue()
+        var history = ReceivePlaybackHistory()
+        let existing = (0..<2_008).map(Float.init)
+        history.append(existing, startingAt: 0)
+        _ = queue.reserve(existing.count)
+        let generation = queue.generation
+        let incoming = [Float](repeating: 10_000, count: 640)
+        XCTAssertTrue(queue.wouldOverflow(adding: incoming.count,
+            remainingSamples: history.remainingSamples(renderedSampleTime: 0)))
+        // Reject the new block without touching scheduled history or generation.
+        XCTAssertEqual(history.samples, existing)
+        XCTAssertEqual(queue.queuedSamples, existing.count)
+        XCTAssertEqual(queue.generation, generation)
+        history.prune(renderedSampleTime: 640)
+        XCTAssertFalse(queue.wouldOverflow(adding: incoming.count,
+            remainingSamples: history.remainingSamples(renderedSampleTime: 640)))
+        history.append(incoming, startingAt: Int64(existing.count))
+        _ = queue.reserve(incoming.count)
+        XCTAssertEqual(history.samples, Array(existing.dropFirst(640)) + incoming)
+        XCTAssertLessThanOrEqual(history.samples.count, queue.maximumSamples)
+        XCTAssertEqual(queue.generation, generation)
+    }
+
+    func testObservedSmallBurstOvershootPreservesSpeechWithoutRestart() {
+        let queue = ReceivePlaybackQueue()
+        XCTAssertFalse(queue.wouldOverflow(adding: 641, remainingSamples: 1_413))
+        XCTAssertFalse(queue.wouldOverflow(adding: 640, remainingSamples: 1_919))
+        XCTAssertTrue(queue.wouldOverflow(adding: 641, remainingSamples: 1_936))
     }
 
 }

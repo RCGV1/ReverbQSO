@@ -7,6 +7,7 @@
 struct AudioDeviceRecoveryPolicy {
     enum Event: Equatable {
         case deviceChange
+        case routeConfigurationChanged(graphHealthy: Bool)
         case interruptionBegan
         case interruptionEnded(shouldResume: Bool)
         case mediaReset
@@ -37,6 +38,10 @@ struct AudioDeviceRecoveryPolicy {
         preparingOrRecovering: Bool
     ) -> Plan {
         switch event {
+        case .routeConfigurationChanged(graphHealthy: let graphHealthy):
+            guard !graphHealthy else { return .none }
+            return disruptivePlan(playbackActive: playbackActive, captureRequested: captureRequested)
+
         case .deviceChange:
             return disruptivePlan(
                 playbackActive: playbackActive,

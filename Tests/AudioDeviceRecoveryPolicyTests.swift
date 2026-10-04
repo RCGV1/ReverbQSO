@@ -4,6 +4,24 @@ import XCTest
 @testable import ReverbQSO
 
 final class AudioDeviceRecoveryPolicyTests: XCTestCase {
+    func testUnchangedHealthyRouteFeedbackPreservesSpeechAndTransmit() {
+        let plan = AudioDeviceRecoveryPolicy.plan(
+            for: .routeConfigurationChanged(graphHealthy: true), playbackActive: true,
+            captureRequested: true, preparingOrRecovering: false)
+        XCTAssertEqual(plan, .none)
+    }
+
+    func testChangedOrStoppedRouteFeedbackStillDiscardsAndRebuilds() {
+        let plan = AudioDeviceRecoveryPolicy.plan(
+            for: .routeConfigurationChanged(graphHealthy: false), playbackActive: true,
+            captureRequested: true, preparingOrRecovering: false)
+        XCTAssertTrue(plan.discardBufferedReceive)
+        XCTAssertTrue(plan.stopCapture)
+        XCTAssertTrue(plan.rebuildGraph)
+        XCTAssertTrue(plan.restartPlayback)
+        XCTAssertTrue(plan.prepareMicrophone)
+    }
+
     func testDisruptiveDeviceChangeClearsOldAudioAndCaptureBeforeRebuilding() {
         let plan = AudioDeviceRecoveryPolicy.plan(
             for: .deviceChange,

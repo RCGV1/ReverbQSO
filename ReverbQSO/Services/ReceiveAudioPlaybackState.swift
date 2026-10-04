@@ -19,11 +19,10 @@ struct ReceivePlaybackGain {
 struct ReceivePlaybackQueue {
     private(set) var queuedSamples = 0
     private(set) var generation: UInt64 = 0
-    let maximumSamples = 1_936 // 242 ms (includes up to 0.5% clock correction) at 8 kHz
-    // A stopped player needs preroll before it can consume the replacement.
-    // Leave a full 80 ms packet of headroom so that packet cannot immediately
-    // stop the player again while its render cursor is still zero/negative.
-    let recoverySamples = 1_280 // 160 ms recovery low water
+    let maximumSamples = 2_576 // 322 ms (includes up to 0.5% clock correction) at 8 kHz
+    // Absorb two extra packets during measured native startup or short bursts.
+    // Overflow rejects incoming speech while preserving the running timeline.
+    let recoverySamples = 1_280 // 160 ms concealment budget
     /// Decoder state has already advanced over the full loss. Render only the
     /// recent synthesized tail that fits, preserving capacity for received voice
     /// and the next packet instead of restarting playback to discard real speech.
@@ -34,7 +33,7 @@ struct ReceivePlaybackQueue {
     /// Completion callbacks can arrive after the player has rendered their audio.
     /// Use the render timeline when available so delayed callbacks cannot stop
     /// healthy playback and discard speech that is still scheduled.
-    func needsReset(adding count: Int, remainingSamples: Int? = nil) -> Bool {
+    func wouldOverflow(adding count: Int, remainingSamples: Int? = nil) -> Bool {
         max(0, remainingSamples ?? queuedSamples) + count > maximumSamples
     }
     mutating func reserve(_ count: Int) -> UInt64 {

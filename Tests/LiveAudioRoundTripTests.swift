@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AVFoundation
 import XCTest
+#if os(iOS) && !targetEnvironment(macCatalyst)
+import UIKit
+#endif
 @testable import ReverbQSO
 
 /// Explicit account-authorized EchoTest audit, excluded from normal tests.
@@ -162,8 +165,8 @@ final class LiveAudioRoundTripTests: XCTestCase {
                                   "schedule": audio.auditPlaybackSchedule]
         try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
             .write(to: outputFolder.appendingPathComponent("offline-report.json"))
-        XCTAssertLessThanOrEqual(playback["backlogTrims"] ?? Int.max, 10,
-            "A single burst must not restart playback for every following packet")
+        XCTAssertEqual(playback["timelineResets"], 0,
+            "Overflow must preserve the running playback timeline")
         XCTAssertLessThan(playback["trimmedSamples"] ?? Int.max, samples.count / 4,
             "Playback recovery must preserve most of the supplied speech")
         XCTAssertEqual(rendered["droppedTapBuffers"], 0)
@@ -201,13 +204,45 @@ final class LiveAudioRoundTripTests: XCTestCase {
         guard environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
             throw XCTSkip("Live audio audit requires explicit opt-in")
         }
-        let credentialURL = URL(fileURLWithPath: try XCTUnwrap(environment["ECHOLINK_LIVE_CREDENTIAL_PATH"]))
-        let password = try NSAttributedString(url: credentialURL,
-            options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
-            .string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !password.isEmpty else { throw AuditError.missingCredential }
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        // A device test launched while locked can run without an active scene.
+        // Do not treat a denied background activation as a speech-quality result.
+        let foregroundDeadline = ProcessInfo.processInfo.systemUptime + 30
+        while UIApplication.shared.applicationState != .active,
+              ProcessInfo.processInfo.systemUptime < foregroundDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard UIApplication.shared.applicationState == .active else {
+            throw XCTSkip("Physical audio audit needs the unlocked app in foreground")
+        }
+        let previousIdleTimer = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer { UIApplication.shared.isIdleTimerDisabled = previousIdleTimer }
+#endif
         let callsign = try XCTUnwrap(environment["ECHOLINK_LIVE_CALLSIGN"])
-        let folder = URL(fileURLWithPath: try XCTUnwrap(environment["ECHOLINK_AUDIO_AUDIT_FOLDER"]))
+        let password: String
+        if environment["ECHOLINK_AUDIT_USE_SAVED_ACCOUNT"] == "1" {
+            // Physical-device audits consume the existing app Keychain item.
+            // Credentials never travel through test arguments or output files.
+            guard let saved = KeychainService.loadPassword(for: callsign), !saved.isEmpty else {
+                throw AuditError.missingCredential
+            }
+            password = saved
+        } else {
+            let credentialURL = URL(fileURLWithPath: try XCTUnwrap(environment["ECHOLINK_LIVE_CREDENTIAL_PATH"]))
+            password = try NSAttributedString(url: credentialURL,
+                options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+                .string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !password.isEmpty else { throw AuditError.missingCredential }
+        let folder: URL
+        if environment["ECHOLINK_AUDIT_DEVICE_FOLDER"] == "1" {
+            folder = try XCTUnwrap(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
+                .appendingPathComponent("AudioAudit", isDirectory: true)
+        } else {
+            folder = URL(fileURLWithPath: try XCTUnwrap(environment["ECHOLINK_AUDIO_AUDIT_FOLDER"]))
+        }
+        VoiceDiagnosticLog.reset()
         let sourceURL = folder.appendingPathComponent("speech.wav")
         let source = try Self.sourceSamples(sourceURL)
         let configuration = EchoLinkProxyConfiguration(mode: .publicProxy, host: "",
@@ -218,33 +253,69 @@ final class LiveAudioRoundTripTests: XCTestCase {
         let connection = EchoLinkConnectionService(networkConfigurationProvider: { configuration }, audioEngine: audio)
         connection.authenticatedCallsign = callsign
         connection.resolveProxySession = { try await proxyStore.sessionForCurrentConfiguration(callsign: $0) }
+        var liveStage = "proxy-login"
         do {
             let proxy = try await proxyStore.sessionForCurrentConfiguration(callsign: callsign)
             await directory.setProxySession(proxy)
             try await directory.login(callsign: callsign, password: password)
+            liveStage = "directory-list"
             let stations = try await directory.fetchStations()
             guard let echo = stations.first(where: { $0.callsign.uppercased() == "*ECHOTEST*" }) else {
                 throw AuditError.stationMissing
             }
+            liveStage = "connect"
             await connection.connect(to: echo)
             guard connection.session?.state == .connected else { throw AuditError.connectionFailed }
             // Finish the real server's introduction before sending test speech.
+            liveStage = "introduction"
             var lastArrival = ProcessInfo.processInfo.systemUptime
-            connection.onAuditIncomingDatagram = { _ in lastArrival = ProcessInfo.processInfo.systemUptime }
+            var introArrivals: [[String: Double]] = []
+            connection.onAuditIncomingDatagram = { data in
+                lastArrival = ProcessInfo.processInfo.systemUptime
+                if let packet = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(data) {
+                    var row = Self.metadata(packet.metadata)
+                    row["time"] = lastArrival
+                    introArrivals.append(row)
+                }
+            }
             let introductionDeadline = lastArrival + 20
             while ProcessInfo.processInfo.systemUptime < introductionDeadline {
                 if ProcessInfo.processInfo.systemUptime - lastArrival > 1.5 && !connection.isRemoteTransmitting { break }
                 try await Task.sleep(for: .milliseconds(100))
             }
+            let intro: [String: Any] = ["arrivals": introArrivals, "playback": audio.auditPlaybackSnapshot,
+                                      "engineEvents": audio.auditEngineEvents]
+            try JSONSerialization.data(withJSONObject: intro, options: [.prettyPrinted, .sortedKeys])
+                .write(to: folder.appendingPathComponent("introduction-report.json"))
+#if targetEnvironment(macCatalyst)
+            // Exercise the real microphone graph transition before network
+            // replay. Its tap stays sealed; only fixture PCM is transmitted.
+            if MicrophoneAccess.status == .granted {
+                let ready = await audio.prepareCaptureInput(requestPermission: false)
+                guard ready else { throw AuditError.transmissionUnavailable }
+            }
+#endif
             let codecs: [EchoLinkVoiceCodec] = connection.transmitCodec == .speex ? [.gsm, .speex] : [.gsm]
-            for codec in codecs {
-                try await audit(codec: codec, source: source, folder: folder, audio: audio, connection: connection)
-                try await Task.sleep(for: .seconds(2))
+            let rounds = min(3, max(1, Int(environment["ECHOLINK_AUDIO_AUDIT_ROUNDS"] ?? "1") ?? 1))
+            for round in 1...rounds {
+                let output = rounds == 1 ? folder : folder.appendingPathComponent("round-\(round)", isDirectory: true)
+                try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                for codec in codecs {
+                    liveStage = "echo-round-\(round)"
+                    try await audit(codec: codec, source: source, folder: output, audio: audio, connection: connection)
+                    try await Task.sleep(for: .seconds(2))
+                }
             }
             await connection.disconnect()
             await directory.logout()
             await proxyStore.close()
         } catch {
+            let failure: [String: Any] = ["stage": liveStage, "errorDomain": (error as NSError).domain,
+                "errorCode": (error as NSError).code, "playback": audio.auditPlaybackSnapshot,
+                "engineEvents": audio.auditEngineEvents]
+            // Only state and numeric error details; never an authentication description.
+            try? JSONSerialization.data(withJSONObject: failure, options: [.prettyPrinted, .sortedKeys])
+                .write(to: folder.appendingPathComponent("failure-report.json"))
             await connection.disconnect()
             await directory.logout()
             await proxyStore.close()
@@ -288,6 +359,8 @@ final class LiveAudioRoundTripTests: XCTestCase {
             blocks.append(row)
             decoded.append(contentsOf: samples)
         }
+        let baselinePlayback = audio.auditPlaybackSnapshot
+        let baselineTransport = connection.auditTransportSnapshot
         let capture = try audio.beginAuditRenderCapture(url: folder.appendingPathComponent("\(label)-rendered.caf"))
         guard connection.beginEchoTestAuditTransmission(codec: codec) else {
             _ = await audio.endAuditRenderCapture(capture)
@@ -327,7 +400,10 @@ final class LiveAudioRoundTripTests: XCTestCase {
         }
         let rendered = await audio.endAuditRenderCapture(capture)
         let schedule = audio.auditPlaybackSchedule
-        let playback = audio.auditPlaybackSnapshot
+        var playback = audio.auditPlaybackSnapshot
+        playback["playoutDiscardedPacketsTotal"] = playback["playoutDiscardedPackets"]
+        playback["playoutDiscardedPackets"] = max(0, (playback["playoutDiscardedPackets"] ?? 0)
+            - (baselinePlayback["playoutDiscardedPackets"] ?? 0))
         let transport = connection.auditTransportSnapshot
         var localDecoded: [Int16] = []
         if codec == .speex {
@@ -350,12 +426,21 @@ final class LiveAudioRoundTripTests: XCTestCase {
             "sourceDuration": Double(source.count) / 48_000, "began": began, "released": released,
             "firstRX": firstRX ?? -1, "lastRX": lastRX, "arrivals": arrivals,
             "accepted": accepted, "decodedBlocks": blocks, "transport": transport,
-            "playback": playback, "renderCapture": rendered, "schedule": schedule]
+            "playback": playback, "renderCapture": rendered, "schedule": schedule,
+            "baselinePlayback": baselinePlayback, "baselineTransport": baselineTransport,
+            "engineEvents": audio.auditEngineEvents]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             .write(to: folder.appendingPathComponent("\(label)-report.json"))
         print("LIVE AUDIO AUDIT \(label): queued=\(transport["queued"] ?? -1) sent=\(transport["sent"] ?? -1) receivedSamples=\(decoded.count) renderTrims=\(playback["backlogTrims"] ?? -1)")
         XCTAssertFalse(decoded.isEmpty, "EchoTest did not return audio")
+        // Source delivery can be interrupted before reaching the transport. A
+        // matching queue/sent count alone would pass a truncated transmission.
+        let expectedPackets = (localDecoded.count + 639) / 640
+        XCTAssertEqual(transport["queued"], expectedPackets, "Source transmission was interrupted")
         XCTAssertEqual(transport["queued"], transport["sent"], "TX queue lost packets")
+        XCTAssertEqual(playback["actualEngineRunning"], 1, "Echo arrived while the hardware graph was stopped")
+        XCTAssertGreaterThan(playback["scheduledSamples"] ?? 0, 0, "Return audio never reached playback")
+        XCTAssertEqual(rendered["writeErrors"], 0, "Mixer capture could not be saved")
         XCTAssertEqual(rendered["droppedTapBuffers"], 0, "Audit capture fell behind")
         connection.onAuditIncomingDatagram = nil
         connection.onAuditAcceptedPacket = nil
