@@ -2,8 +2,12 @@
 import Foundation
 
 /// Small decoded-audio playout buffer. Network reordering happens upstream.
-/// Bounds startup jitter protection to 40...100 ms and retained speech to 240 ms.
+/// Bounds startup jitter protection to 40...100 ms and waiting age to 240 ms.
 struct ReceiveAdaptivePlayoutBuffer {
+    // A proxy read can deliver several intact packets together after a stall.
+    // Keep six packets while native output consumes them; this is capacity,
+    // not a six-packet startup delay. Expiration still bounds local waiting.
+    private static let maximumPendingSamples = 3_840
     private struct Packet {
         let samples: [Int16]
         let receivedAt: TimeInterval
@@ -18,6 +22,9 @@ struct ReceiveAdaptivePlayoutBuffer {
     private var hasStarted = false
     private(set) var targetDelay = 0.040
     private(set) var discardedPackets = 0
+    private(set) var capacityDiscardedPackets = 0
+    private(set) var expiredDiscardedPackets = 0
+    private(set) var maximumObservedWait = 0.0
     var pendingSampleCount: Int { packets.reduce(0) { $0 + $1.samples.count } }
     var nextDeadline: TimeInterval? { packets.first?.deadline }
 
@@ -45,9 +52,10 @@ struct ReceiveAdaptivePlayoutBuffer {
         let nominal = hasStarted ? now + max(0, adjustment) : (lastDeadline ?? (now + targetDelay))
         let deadline = max(now, nominal)
         packets.append(Packet(samples: samples, receivedAt: now, deadline: deadline))
-        while pendingSampleCount > 1920 {
+        while pendingSampleCount > Self.maximumPendingSamples {
             packets.removeFirst()
             discardedPackets += 1
+            capacityDiscardedPackets += 1
         }
         // Bursts/stalls must not leave the newest speech scheduled far in the future.
         if let last = packets.last, last.deadline - now > 0.220 {
@@ -60,13 +68,26 @@ struct ReceiveAdaptivePlayoutBuffer {
         previousTarget = targetDelay
     }
 
-    mutating func drain(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [[Int16]] {
+    /// Leave ready speech here until the renderer has room. Draining into a
+    /// full native queue merely moves loss from one buffer to another.
+    mutating func drain(now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+                        maximumSamples: Int = Int.max) -> [[Int16]] {
         guard now.isFinite else { return [] }
         var ready: [[Int16]] = []
+        var available = max(0, maximumSamples)
         while let first = packets.first, first.deadline <= now {
+            maximumObservedWait = max(maximumObservedWait, now - first.receivedAt)
+            if now - first.receivedAt > 0.240 {
+                packets.removeFirst()
+                discardedPackets += 1
+                expiredDiscardedPackets += 1
+                continue
+            }
+            guard first.samples.count <= available else { break }
             packets.removeFirst()
-            if now - first.receivedAt <= 0.240 { ready.append(first.samples); hasStarted = true }
-            else { discardedPackets += 1 }
+            available -= first.samples.count
+            ready.append(first.samples)
+            hasStarted = true
         }
         return ready
     }

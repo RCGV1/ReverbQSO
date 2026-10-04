@@ -161,6 +161,29 @@ final class GSMCodecStreamingTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testResetEncodeStateDoesNotCarryPreviousSpeechIntoNewTransmission() {
+        let codec = GSMCodec()
+        let speech = (0..<160).map { Int16($0 % 40 < 20 ? 12_000 : -12_000) }
+        for _ in 0..<20 { _ = codec.encode(speech) }
+
+        codec.resetEncodeState()
+
+        let silence = [Int16](repeating: 0, count: 160)
+        XCTAssertEqual(codec.encode(silence), GSMCodec().encode(silence))
+    }
+
+    func testResetDecodeStateDoesNotCarryPreviousTalkerIntoSilence() throws {
+        let codec = GSMCodec()
+        let encoder = GSMCodec()
+        let speech = (0..<160).map { Int16($0 % 40 < 20 ? 12_000 : -12_000) }
+        for _ in 0..<20 { _ = codec.decodePacket(encoder.encode(speech)) }
+        let silencePacket = GSMCodec().encode([Int16](repeating: 0, count: 160))
+
+        codec.resetDecodeState()
+
+        XCTAssertEqual(codec.decodePacket(silencePacket), GSMCodec().decodePacket(silencePacket))
+    }
+
     func testResetAllClearsBothRemainderBuffers() {
         let codec = GSMCodec()
         // Plant encode remainder.

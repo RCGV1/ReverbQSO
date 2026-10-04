@@ -46,9 +46,8 @@ final class EchoLinkProxyClient: @unchecked Sendable {
     private let queue = DispatchQueue(label: "org.reverbqso.app.proxy")
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "EchoLinkProxy")
     private var receiveBuffer = Data()
-    private lazy var messageBuffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>(
-        onConsumerCancellation: { [weak self] in self?.close() }
-    )
+    private let messageBuffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>()
+    var inboundAudioMetrics: LiveTransportMessageBufferMetrics { messageBuffer.metricsSnapshot }
     private var isClosed = false
     private let authenticationTimeout: TimeInterval
 
@@ -67,6 +66,7 @@ final class EchoLinkProxyClient: @unchecked Sendable {
             port: nwPort,
             using: NWParameters(tls: nil, tcp: tcpOptions)
         )
+        messageBuffer.setOnConsumerCancellation { [weak self] in self?.close() }
     }
 
     static func connectFirstAvailable(

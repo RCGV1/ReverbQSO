@@ -155,6 +155,10 @@ final class EchoLinkConferenceHostService: ObservableObject {
             true
 #endif
         }
+        audioEngine.onCaptureStreamReset = { [weak self] in
+            self?.pendingLocalGSM.removeAll(keepingCapacity: true)
+            self?.speexCodec.resetEncoding()
+        }
         audioEngine.onCaptureSuspended = { [weak self] in self?.setPTT(active: false) }
         recordingPreferencesSubscription = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)

@@ -361,6 +361,7 @@ final class LiveAudioRoundTripTests: XCTestCase {
         }
         let baselinePlayback = audio.auditPlaybackSnapshot
         let baselineTransport = connection.auditTransportSnapshot
+        let baselineInbound = await connection.auditInboundBufferSnapshot()
         let capture = try audio.beginAuditRenderCapture(url: folder.appendingPathComponent("\(label)-rendered.caf"))
         guard connection.beginEchoTestAuditTransmission(codec: codec) else {
             _ = await audio.endAuditRenderCapture(capture)
@@ -405,6 +406,7 @@ final class LiveAudioRoundTripTests: XCTestCase {
         playback["playoutDiscardedPackets"] = max(0, (playback["playoutDiscardedPackets"] ?? 0)
             - (baselinePlayback["playoutDiscardedPackets"] ?? 0))
         let transport = connection.auditTransportSnapshot
+        let inbound = await connection.auditInboundBufferSnapshot()
         var localDecoded: [Int16] = []
         if codec == .speex {
             let decoder = SpeexCodec()
@@ -428,6 +430,7 @@ final class LiveAudioRoundTripTests: XCTestCase {
             "accepted": accepted, "decodedBlocks": blocks, "transport": transport,
             "playback": playback, "renderCapture": rendered, "schedule": schedule,
             "baselinePlayback": baselinePlayback, "baselineTransport": baselineTransport,
+            "baselineInboundBuffers": baselineInbound, "inboundBuffers": inbound,
             "engineEvents": audio.auditEngineEvents]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             .write(to: folder.appendingPathComponent("\(label)-report.json"))

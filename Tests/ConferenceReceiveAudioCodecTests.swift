@@ -75,6 +75,51 @@ final class ConferenceReceiveAudioCodecTests: XCTestCase {
         XCTAssertEqual(GSMCodec().decodePacket(decoded.gsmPayload).count, 640)
     }
 
+    func testMalformedNewTalkerDoesNotResetGSMHistory() throws {
+        let codec = ConferenceReceiveAudioCodec()
+        let reference = ConferenceReceiveAudioCodec()
+        let encoder = GSMCodec()
+        let speech = (0..<640).map { Int16($0 % 40 < 20 ? 12_000 : -12_000) }
+        func packet(_ sequence: UInt16) throws -> ParsedIncomingAudioDatagram {
+            .init(packet: .gsm(try XCTUnwrap(GSMCodec.stripHeader(encoder.encode(speech)))),
+                metadata: .init(payloadType: 3, sequenceNumber: sequence,
+                    timestamp: UInt32(sequence) * 640, ssrc: 1))
+        }
+        for sequence in UInt16(1)...5 {
+            let incoming = try packet(sequence)
+            XCTAssertEqual(try XCTUnwrap(codec.decode(incoming)).samples,
+                           try XCTUnwrap(reference.decode(incoming)).samples)
+        }
+        XCTAssertNil(codec.decode(.init(packet: .gsm(Data(repeating: 0, count: 132)),
+            metadata: .init(payloadType: 3, sequenceNumber: 1, timestamp: 0, ssrc: 2))))
+        let next = try packet(6)
+        XCTAssertEqual(try XCTUnwrap(codec.decode(next)).samples,
+                       try XCTUnwrap(reference.decode(next)).samples)
+    }
+
+    func testMalformedCodecSwitchDoesNotResetSpeexHistoryOrGSMTranscoder() throws {
+        let codec = ConferenceReceiveAudioCodec()
+        let reference = ConferenceReceiveAudioCodec()
+        func packet(_ sequence: UInt16) -> ParsedIncomingAudioDatagram {
+            .init(packet: .speex(SpeexCodecTests.fixture),
+                metadata: .init(payloadType: 0x96, sequenceNumber: sequence,
+                    timestamp: UInt32(sequence) * 640, ssrc: 1))
+        }
+        for sequence in UInt16(1)...3 {
+            let incoming = packet(sequence)
+            _ = try XCTUnwrap(codec.decode(incoming))
+            _ = try XCTUnwrap(reference.decode(incoming))
+        }
+        XCTAssertNil(codec.decode(.init(packet: .pcm([1, 2]),
+            metadata: .init(payloadType: 0, sequenceNumber: 4, timestamp: 2560, ssrc: 1))))
+        XCTAssertNil(codec.decode(.init(packet: .speex(Data([0])),
+            metadata: .init(payloadType: 0x96, sequenceNumber: 1, timestamp: 0, ssrc: 2))))
+        let actual = try XCTUnwrap(codec.decode(packet(4)))
+        let expected = try XCTUnwrap(reference.decode(packet(4)))
+        XCTAssertEqual(actual.samples, expected.samples)
+        XCTAssertEqual(actual.gsmPayload, expected.gsmPayload)
+    }
+
     private func metadata(_ sequence: UInt16) -> EchoLinkVoicePacketMetadata {
         EchoLinkVoicePacketMetadata(payloadType: 0, sequenceNumber: sequence, timestamp: UInt32(sequence) * 640, ssrc: 1)
     }

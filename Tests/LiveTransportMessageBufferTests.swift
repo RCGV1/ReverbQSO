@@ -4,6 +4,71 @@ import XCTest
 @testable import ReverbQSO
 
 final class LiveTransportMessageBufferTests: XCTestCase {
+    func testMetricsDistinguishCapacityAndAgeDropsUsingInjectedClock() async throws {
+        var clock = 10.0
+        let buffer = LiveTransportMessageBuffer<Int>(voiceCapacity: 2, now: { clock })
+        buffer.yield(1, kind: .voice)
+        buffer.yield(99, kind: .control)
+        clock = 10.1
+        buffer.yield(2, kind: .voice)
+        clock = 10.2
+        buffer.yield(3, kind: .voice)
+        let full = buffer.metricsSnapshot
+        XCTAssertEqual(full.acceptedVoiceMessages, 3)
+        XCTAssertEqual(full.capacityDroppedVoiceMessages, 1)
+        XCTAssertEqual(full.ageDroppedVoiceMessages, 0)
+        XCTAssertEqual(full.queuedVoiceMessages, 2)
+        XCTAssertEqual(full.queuedMessages, 3)
+        XCTAssertEqual(full.maximumQueuedVoiceMessages, 2)
+        XCTAssertEqual(full.maximumQueuedMessages, 3)
+        XCTAssertEqual(full.maximumObservedVoiceWaitAgeSeconds, 0.2, accuracy: 0.000_001)
+
+        clock = 10.5
+        buffer.finish()
+        let control = try await buffer.next()
+        XCTAssertEqual(control, 99)
+        let drained = buffer.metricsSnapshot
+        XCTAssertEqual(drained.capacityDroppedVoiceMessages, 1)
+        XCTAssertEqual(drained.ageDroppedVoiceMessages, 2)
+        XCTAssertEqual(drained.queuedVoiceMessages, 0)
+        XCTAssertEqual(drained.queuedMessages, 0)
+        XCTAssertEqual(drained.maximumObservedVoiceWaitAgeSeconds, 0.4, accuracy: 0.000_001)
+        XCTAssertFalse(buffer.yield(4, kind: .voice))
+        XCTAssertEqual(buffer.metricsSnapshot.acceptedVoiceMessages, 3,
+                       "Terminal rejection is not an accepted voice message")
+    }
+
+    func testReadingMetricsDoesNotExpireQueuedVoice() async throws {
+        var clock = 0.0
+        let buffer = LiveTransportMessageBuffer<Int>(now: { clock })
+        buffer.yield(1, kind: .voice)
+        clock = 1
+        let unread = buffer.metricsSnapshot
+        XCTAssertEqual(unread.queuedVoiceMessages, 1)
+        XCTAssertEqual(unread.ageDroppedVoiceMessages, 0)
+        XCTAssertEqual(unread.maximumObservedVoiceWaitAgeSeconds, 0)
+        buffer.finish()
+        let end = try await buffer.next()
+        XCTAssertNil(end)
+        XCTAssertEqual(buffer.metricsSnapshot.ageDroppedVoiceMessages, 1)
+        XCTAssertEqual(buffer.metricsSnapshot.maximumObservedVoiceWaitAgeSeconds, 1)
+    }
+
+    func testEligibleVoiceDequeueRecordsWaitWithoutDrop() async throws {
+        var clock = 0.0
+        let buffer = LiveTransportMessageBuffer<Int>(now: { clock })
+        buffer.yield(1, kind: .voice)
+        clock = 0.24
+        let voice = try await buffer.next()
+        XCTAssertEqual(voice, 1)
+        let metrics = buffer.metricsSnapshot
+        XCTAssertEqual(metrics.acceptedVoiceMessages, 1)
+        XCTAssertEqual(metrics.capacityDroppedVoiceMessages, 0)
+        XCTAssertEqual(metrics.ageDroppedVoiceMessages, 0)
+        XCTAssertEqual(metrics.maximumObservedVoiceWaitAgeSeconds, 0.24)
+        XCTAssertEqual(metrics.queuedMessages, 0)
+    }
+
     func testAudioPortClassifierPreservesRTCPAndNDATABeforeVoiceParsing() {
         let bye = EchoLinkControlPacketCodec.buildBYEPacket()
         let ndata = EchoLinkControlPacketCodec.buildNDATAInfoPacket(message: "Online")

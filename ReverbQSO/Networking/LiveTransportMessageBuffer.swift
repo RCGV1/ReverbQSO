@@ -23,6 +23,18 @@ enum LiveTransportMessageBufferError: Error, Equatable {
     case multipleConsumers
 }
 
+/// Numeric transport diagnostics; contains no peer identity or message data.
+struct LiveTransportMessageBufferMetrics: Sendable, Equatable {
+    let acceptedVoiceMessages: Int
+    let capacityDroppedVoiceMessages: Int
+    let ageDroppedVoiceMessages: Int
+    let maximumObservedVoiceWaitAgeSeconds: TimeInterval
+    let queuedVoiceMessages: Int
+    let queuedMessages: Int
+    let maximumQueuedVoiceMessages: Int
+    let maximumQueuedMessages: Int
+}
+
 /// A single-consumer transport buffer that bounds live voice latency while
 /// retaining ordered control traffic.
 final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
@@ -53,6 +65,26 @@ final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
     private var controlCount = 0
     private var waiter: Waiter?
     private var terminalResult: Result<Void, Error>?
+    private var acceptedVoiceMessages = 0
+    private var capacityDroppedVoiceMessages = 0
+    private var ageDroppedVoiceMessages = 0
+    private var maximumObservedVoiceWaitAgeSeconds: TimeInterval = 0
+    private var maximumQueuedVoiceMessages = 0
+    private var maximumQueuedMessages = 0
+
+    var metricsSnapshot: LiveTransportMessageBufferMetrics {
+        lock.lock()
+        defer { lock.unlock() }
+        return LiveTransportMessageBufferMetrics(
+            acceptedVoiceMessages: acceptedVoiceMessages,
+            capacityDroppedVoiceMessages: capacityDroppedVoiceMessages,
+            ageDroppedVoiceMessages: ageDroppedVoiceMessages,
+            maximumObservedVoiceWaitAgeSeconds: maximumObservedVoiceWaitAgeSeconds,
+            queuedVoiceMessages: voiceCount, queuedMessages: messages.count,
+            maximumQueuedVoiceMessages: maximumQueuedVoiceMessages,
+            maximumQueuedMessages: maximumQueuedMessages
+        )
+    }
 
     init(
         voiceCapacity: Int = 4,
@@ -94,6 +126,7 @@ final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
             return false
         }
 
+        if kind == .voice { acceptedVoiceMessages += 1 }
         if let waiter {
             self.waiter = nil
             lock.unlock()
@@ -103,12 +136,15 @@ final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
 
         switch kind {
         case .voice:
+            let insertedAt = now()
             if voiceCount == voiceCapacity,
                let oldestVoice = messages.firstIndex(where: { $0.kind == .voice }) {
+                observeVoiceWaitAge(messages[oldestVoice], at: insertedAt)
                 messages.remove(at: oldestVoice)
                 voiceCount -= 1
+                capacityDroppedVoiceMessages += 1
             }
-            messages.append(BufferedMessage(element: element, kind: kind, insertedAt: now()))
+            messages.append(BufferedMessage(element: element, kind: kind, insertedAt: insertedAt))
             voiceCount += 1
         case .control:
             guard controlCount < controlCapacity else {
@@ -119,6 +155,8 @@ final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
             messages.append(BufferedMessage(element: element, kind: kind, insertedAt: nil))
             controlCount += 1
         }
+        maximumQueuedVoiceMessages = max(maximumQueuedVoiceMessages, voiceCount)
+        maximumQueuedMessages = max(maximumQueuedMessages, messages.count)
         lock.unlock()
         return true
     }
@@ -195,11 +233,22 @@ final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
 
     private func discardExpiredVoice(at currentTime: TimeInterval) {
         messages.removeAll { message in
+            observeVoiceWaitAge(message, at: currentTime)
             guard message.kind == .voice, let insertedAt = message.insertedAt,
                   currentTime - insertedAt > maximumVoiceAge else { return false }
             voiceCount -= 1
+            ageDroppedVoiceMessages += 1
             return true
         }
+    }
+
+    /// Called only while holding the buffer lock. Ages are observed during
+    /// dequeue/eviction, so reading diagnostics never changes queue behavior.
+    private func observeVoiceWaitAge(_ message: BufferedMessage, at currentTime: TimeInterval) {
+        guard message.kind == .voice, let insertedAt = message.insertedAt else { return }
+        let age = currentTime - insertedAt
+        guard age.isFinite, age >= 0 else { return }
+        maximumObservedVoiceWaitAgeSeconds = max(maximumObservedVoiceWaitAgeSeconds, age)
     }
 
     private func decrementCount(for kind: MessageKind) {

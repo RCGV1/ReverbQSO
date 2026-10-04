@@ -656,6 +656,21 @@ final class EchoLinkConnectionService: ObservableObject {
          "rxDatagrams": incomingAudioDatagrams, "rxAccepted": incomingVoicePackets]
     }
 
+    func auditInboundBufferSnapshot() async -> [String: [String: Double]] {
+        let metrics: [String: LiveTransportMessageBufferMetrics]
+        if let proxySession { metrics = await proxySession.inboundAudioMetrics }
+        else if let relayClient { metrics = ["relay": await relayClient.inboundAudioMetrics] }
+        else { metrics = [:] }
+        return metrics.mapValues {
+            ["acceptedVoice": Double($0.acceptedVoiceMessages),
+             "capacityDrops": Double($0.capacityDroppedVoiceMessages),
+             "ageDrops": Double($0.ageDroppedVoiceMessages),
+             "maximumWaitSeconds": $0.maximumObservedVoiceWaitAgeSeconds,
+             "queuedVoice": Double($0.queuedVoiceMessages),
+             "maximumQueuedVoice": Double($0.maximumQueuedVoiceMessages)]
+        }
+    }
+
     /// Explicit live-test seam: known PCM replaces the physical microphone,
     /// while the production packet builder, queue, transport and RX stay active.
     func beginEchoTestAuditTransmission(codec: EchoLinkVoiceCodec) -> Bool {
@@ -797,6 +812,9 @@ final class EchoLinkConnectionService: ObservableObject {
         audioEngine.$outputRouteName
             .receive(on: DispatchQueue.main)
             .assign(to: &$audioOutputRouteName)
+        audioEngine.onCaptureStreamReset = { [weak self] in
+            self?.pendingOutgoingGSMPayload.removeAll(keepingCapacity: true)
+        }
         audioEngine.onCaptureSuspended = { [weak self] in
             guard let self, self.session?.isPTTActive == true else { return }
             self.sendPTT(active: false)

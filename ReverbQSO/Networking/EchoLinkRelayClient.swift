@@ -59,6 +59,7 @@ actor EchoLinkRelayClient {
     private var activePeers: Set<Peer> = []
     private var isClosing = false
     private var responseBuffer = LiveTransportMessageBuffer<EchoLinkRelayResponse>()
+    var inboundAudioMetrics: LiveTransportMessageBufferMetrics { responseBuffer.metricsSnapshot }
     private var receiveTask: Task<Void, Never>?
     private var keepaliveTask: Task<Void, Never>?
     private var registrationTask: Task<Void, Never>?

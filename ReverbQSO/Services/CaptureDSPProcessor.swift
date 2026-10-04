@@ -30,6 +30,8 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     struct Result: Sendable, Equatable {
         let generation: UInt64
         let ordinal: UInt64
+        /// Changes whenever encoder continuity is reset inside this generation.
+        let streamEpoch: UInt64
         let transmittedPCM: [Int16]
         let encodedPackets: [Data]
         let metrics: Metrics
@@ -38,6 +40,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     typealias Completion = @Sendable (Result?) -> Void
 
     private let queue: DispatchQueue
+    private let now: @Sendable () -> TimeInterval
     private let generationLock = NSLock()
     private var activeGeneration: UInt64?
 
@@ -54,9 +57,14 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     private var gsmSampleRemainder = 0
     private var gsmFrameRemainder = 0
     private var nextOrdinal: UInt64 = 0
+    private var streamEpoch: UInt64 = 0
     private var lastProcessedCaptureAt: TimeInterval?
 
-    init(label: String = "org.reverbqso.capture-dsp") {
+    init(
+        label: String = "org.reverbqso.capture-dsp",
+        now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.now = now
         queue = DispatchQueue(label: label, qos: .userInitiated)
     }
 
@@ -82,6 +90,18 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         }
     }
 
+    /// Discards predictor history and partial frames after a delivery was rejected.
+    /// Already completed results retain their old epoch and must be rejected by
+    /// the delivery owner until a result from the next epoch arrives.
+    func resetStream(generation: UInt64) {
+        queue.async { [self] in
+            guard isActive(generation), stateGeneration == generation else { return }
+            let ordinal = nextOrdinal
+            resetQueueConfinedState()
+            nextOrdinal = ordinal
+        }
+    }
+
     func submit(
         samples: [Int16],
         sampleRate: Double,
@@ -94,7 +114,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
             guard isActive(generation), stateGeneration == generation,
                   LiveCaptureBacklogPolicy.isFresh(
                     capturedAt: capturedAt,
-                    now: ProcessInfo.processInfo.systemUptime
+                    now: now()
                   ) else {
                 completion(nil)
                 return
@@ -130,7 +150,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
             guard isActive(generation), stateGeneration == generation,
                   LiveCaptureBacklogPolicy.isFresh(
                     capturedAt: capturedAt,
-                    now: ProcessInfo.processInfo.systemUptime
+                    now: now()
                   ) else {
                 completion(nil)
                 return
@@ -160,7 +180,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
                     return
                 }
                 guard let last = lastProcessedCaptureAt,
-                      LiveCaptureBacklogPolicy.isFresh(capturedAt: last, now: ProcessInfo.processInfo.systemUptime) else {
+                      LiveCaptureBacklogPolicy.isFresh(capturedAt: last, now: now()) else {
                     continuation.resume(returning: Data())
                     return
                 }
@@ -177,6 +197,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         configuration: Configuration
     ) -> Result {
         if selectedCodec != configuration.codec {
+            streamEpoch &+= 1
             gsmCodec.resetEncodeState()
             speexCodec.resetEncoding()
             hasGSMInput = false
@@ -229,6 +250,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         return Result(
             generation: generation,
             ordinal: ordinal,
+            streamEpoch: streamEpoch,
             transmittedPCM: transmittedPCM,
             encodedPackets: packets,
             metrics: Metrics(
@@ -293,6 +315,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
         return Result(
             generation: generation,
             ordinal: ordinal,
+            streamEpoch: streamEpoch,
             transmittedPCM: transmittedPCM,
             encodedPackets: packets,
             metrics: Metrics(
@@ -312,6 +335,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
 
     private func prepareCodec(_ codec: EchoLinkVoiceCodec) {
         guard selectedCodec != codec else { return }
+        streamEpoch &+= 1
         gsmCodec.resetEncodeState()
         speexCodec.resetEncoding()
         hasGSMInput = false
@@ -334,6 +358,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     }
 
     private func resetAfterNativeConversionFailure() {
+        streamEpoch &+= 1
         nativeCapturePCM.reset()
         floatAutomaticGain.reset()
         gsmCodec.resetEncodeState()
@@ -382,6 +407,7 @@ final class CaptureDSPProcessor: @unchecked Sendable {
     }
 
     private func resetQueueConfinedState() {
+        streamEpoch &+= 1
         resamplerState.reset()
         automaticGain.reset()
         nativeCapturePCM.reset()

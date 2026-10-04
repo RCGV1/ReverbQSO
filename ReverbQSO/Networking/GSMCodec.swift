@@ -39,8 +39,8 @@ final class GSMCodec: AudioCodec {
     static let sampleRate = 8000
 
     private let logger = Logger(subsystem: "org.reverbqso.app", category: "GSMCodec")
-    private let encoder: gsm?
-    private let decoder: gsm?
+    private var encoder: gsm?
+    private var decoder: gsm?
     private var encodeRemainder: [Int16] = []
     private var decodeRemainder: [UInt8] = []
     private let encodeLock = NSLock()
@@ -69,10 +69,11 @@ final class GSMCodec: AudioCodec {
     /// Encode PCM samples into GSM 06.10 format.
     ///
     func encode(_ pcm: [Int16]) -> Data {
-        guard !pcm.isEmpty, let encoder else { return Data() }
+        guard !pcm.isEmpty else { return Data() }
 
         encodeLock.lock()
         defer { encodeLock.unlock() }
+        guard let encoder else { return Data() }
 
         encodeRemainder.append(contentsOf: pcm)
 
@@ -110,11 +111,11 @@ final class GSMCodec: AudioCodec {
     /// This method accumulates partial frames across calls via `decodeRemainder`.
     /// Use `decodePacket(_:)` for network packets that should be decoded independently.
     func decode(_ data: Data) -> [Int16] {
-        guard let decoder else { return [] }
         guard !data.isEmpty else { return [] }
 
         decodeLock.lock()
         defer { decodeLock.unlock() }
+        guard let decoder else { return [] }
 
         let payload = Self.stripHeader(data) ?? data
         decodeRemainder.append(contentsOf: payload)
@@ -128,11 +129,11 @@ final class GSMCodec: AudioCodec {
     /// bytes from prior calls. Each UDP datagram is self-contained, so carrying
     /// partial frames across packets corrupts audio after packet loss or reordering.
     func decodePacket(_ data: Data) -> [Int16] {
-        guard let decoder else { return [] }
         guard !data.isEmpty else { return [] }
 
         decodeLock.lock()
         defer { decodeLock.unlock() }
+        guard let decoder else { return [] }
 
         let payload = Self.stripHeader(data) ?? data
 
@@ -198,7 +199,7 @@ final class GSMCodec: AudioCodec {
 
     // MARK: - State Management
 
-    /// Clear the encode remainder buffer.
+    /// Clear partial samples and reset the native encoder predictor history.
     ///
     /// Call between PTT sessions so stale partial frames don't leak
     /// into the next transmission.
@@ -206,24 +207,25 @@ final class GSMCodec: AudioCodec {
         encodeLock.lock()
         defer { encodeLock.unlock() }
         encodeRemainder.removeAll(keepingCapacity: true)
+        if let encoder { gsm_destroy(encoder) }
+        encoder = gsm_create()
     }
 
-    /// Clear the decode remainder buffer.
+    /// Clear partial bytes and reset the native decoder predictor history.
     ///
     /// Call between sessions or when a decode stream is interrupted.
     func resetDecodeState() {
         decodeLock.lock()
         defer { decodeLock.unlock() }
         decodeRemainder.removeAll(keepingCapacity: true)
+        if let decoder { gsm_destroy(decoder) }
+        decoder = gsm_create()
     }
 
     /// Reset all codec state for a fresh session.
     ///
-    /// This clears both remainder buffers. The internal GSM filter state
-    /// (LPC coefficients, pitch predictor memory) is part of the opaque
-    /// `gsm_state` and cannot be reset without destroying and recreating.
-    /// For EchoLink, simply clearing the remainder buffers is sufficient
-    /// since GSM 06.10 converges within 1–2 frames.
+    /// Recreates both native states so the next talker or capture generation
+    /// cannot inherit the prior speech's filter and pitch predictor history.
     func resetAll() {
         resetEncodeState()
         resetDecodeState()

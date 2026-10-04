@@ -239,6 +239,56 @@ final class CaptureDSPProcessorTests: XCTestCase {
         XCTAssertEqual(result.metrics.rawPeak, Int(Int16.max))
     }
 
+    func testRejectedDeliveryResetDoesNotSpliceItsPartialSamplesIntoFreshAudio() async throws {
+        let processor = CaptureDSPProcessor(label: #function)
+        processor.begin(generation: 21)
+        let rejected = try await submit(processor, samples: [Int16](repeating: 500, count: 79),
+            sampleRate: 8_000, generation: 21, configuration: manualUnity)
+
+        processor.resetStream(generation: 21)
+        let fresh = try await submit(processor, samples: [Int16](repeating: 1_000, count: 81),
+            sampleRate: 8_000, generation: 21, configuration: manualUnity)
+
+        XCTAssertNotEqual(rejected.streamEpoch, fresh.streamEpoch)
+        XCTAssertEqual(fresh.ordinal, rejected.ordinal + 1)
+        XCTAssertTrue(fresh.encodedPackets.isEmpty)
+        XCTAssertEqual(fresh.metrics.gsmSampleRemainder, 81)
+    }
+
+    func testCaptureStreamResetDiscardsOldPacketFragmentsBeforeResumingAndFlush() async throws {
+        let clock = TestCaptureClock()
+        let processor = CaptureDSPProcessor(label: #function, now: { clock.read() })
+        processor.begin(generation: 20)
+        func process(_ samples: [Int16]) async throws -> CaptureDSPProcessor.Result {
+            let result: CaptureDSPProcessor.Result? = await withCheckedContinuation { continuation in
+                processor.submit(samples: samples, sampleRate: 8_000, generation: 20,
+                    capturedAt: clock.read(), configuration: manualUnity) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            return try XCTUnwrap(result)
+        }
+        let first = try await process([Int16](repeating: 500, count: 480))
+        var packetBuffer = try XCTUnwrap(GSMCodec.stripHeader(try XCTUnwrap(first.encodedPackets.first)))
+        XCTAssertEqual(packetBuffer.count, 99)
+        XCTAssertTrue(EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(buffer: &packetBuffer).isEmpty)
+
+        clock.advance(by: 0.3)
+        let resumed = try await process([Int16](repeating: 1_000, count: 160))
+        XCTAssertNotEqual(first.streamEpoch, resumed.streamEpoch)
+        XCTAssertEqual(resumed.ordinal, first.ordinal + 1)
+        // AudioEngine propagates the epoch transition to the packetizer before delivery.
+        packetBuffer.removeAll(keepingCapacity: true)
+        packetBuffer.append(try XCTUnwrap(GSMCodec.stripHeader(try XCTUnwrap(resumed.encodedPackets.first))))
+        XCTAssertTrue(EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(buffer: &packetBuffer).isEmpty)
+        let flushed = await processor.flush(generation: 20)
+        packetBuffer.append(try XCTUnwrap(GSMCodec.stripHeader(flushed)))
+        let packets = EchoLinkAudioPacketCodec.consumeOutgoingGSMPayloadPackets(buffer: &packetBuffer)
+        XCTAssertEqual(packets.count, 1)
+        XCTAssertEqual(packets.first?.count, 132)
+        XCTAssertTrue(packetBuffer.isEmpty, "Flush must finish the resumed packet without an abandoned tail")
+    }
+
     private func submit(
         _ processor: CaptureDSPProcessor,
         samples: [Int16],
@@ -292,5 +342,20 @@ final class CaptureDSPProcessorTests: XCTestCase {
             }
         }
         return try XCTUnwrap(result)
+    }
+}
+
+private final class TestCaptureClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var time: TimeInterval = 100
+    func read() -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return time
+    }
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        time += interval
+        lock.unlock()
     }
 }

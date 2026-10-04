@@ -3,6 +3,27 @@ import XCTest
 @testable import ReverbQSO
 
 final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
+    func testReadySpeechWaitsForPlaybackRoomInsteadOfBeingDiscarded() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let first = [Int16](repeating: 10, count: 640)
+        let second = [Int16](repeating: 20, count: 640)
+        buffer.enqueue(first, now: 0)
+        buffer.enqueue(second, now: 0.01)
+        XCTAssertEqual(buffer.drain(now: 0.05, maximumSamples: 639), [])
+        XCTAssertEqual(buffer.pendingSampleCount, 1280)
+        XCTAssertEqual(buffer.drain(now: 0.06, maximumSamples: 640), [first])
+        XCTAssertEqual(buffer.drain(now: 0.08, maximumSamples: 640), [second])
+        XCTAssertEqual(buffer.discardedPackets, 0)
+    }
+
+    func testOutputStallStillExpiresSpeechEvenWithNoAvailableCapacity() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        buffer.enqueue([Int16](repeating: 10, count: 640), now: 0)
+        XCTAssertEqual(buffer.drain(now: 0.25, maximumSamples: 0), [])
+        XCTAssertEqual(buffer.pendingSampleCount, 0)
+        XCTAssertEqual(buffer.discardedPackets, 1)
+    }
+
     func testStartupBuffersFortyMillisecondsThenPreservesPacket() {
         var buffer = ReceiveAdaptivePlayoutBuffer()
         let samples = [Int16](repeating: 123, count: 640)
@@ -36,7 +57,7 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         for index in 0..<1000 {
             buffer.enqueue([Int16](repeating: Int16(index), count: 640), now: 0)
         }
-        XCTAssertLessThanOrEqual(buffer.pendingSampleCount, 1920)
+        XCTAssertLessThanOrEqual(buffer.pendingSampleCount, 3840)
         XCTAssertGreaterThan(buffer.discardedPackets, 0)
         XCTAssertEqual(buffer.drain(now: 0.239).last?.first, 999)
     }
@@ -46,6 +67,17 @@ final class ReceiveAdaptivePlayoutBufferTests: XCTestCase {
         buffer.enqueue([Int16](repeating: 900, count: 640), now: 0)
         XCTAssertEqual(buffer.drain(now: 0.5), [])
         XCTAssertNil(buffer.nextDeadline)
+    }
+
+    func testStartupBurstWaitsFortyMillisecondsWithoutDiscardingIntactPackets() {
+        var buffer = ReceiveAdaptivePlayoutBuffer()
+        let packets = (0..<6).map { [Int16](repeating: Int16($0), count: 640) }
+        for packet in packets { buffer.enqueue(packet, now: 0) }
+        XCTAssertTrue(buffer.drain(now: 0.039, maximumSamples: 2560).isEmpty)
+        XCTAssertEqual(buffer.drain(now: 0.040, maximumSamples: 2560), Array(packets.prefix(4)))
+        XCTAssertEqual(buffer.drain(now: 0.120, maximumSamples: 640), [packets[4]])
+        XCTAssertEqual(buffer.drain(now: 0.200, maximumSamples: 640), [packets[5]])
+        XCTAssertEqual(buffer.discardedPackets, 0)
     }
 
     func testTalkSpurtPauseStartsWithFreshJitterProtection() {

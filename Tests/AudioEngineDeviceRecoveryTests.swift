@@ -8,6 +8,49 @@ import UIKit
 
 @MainActor
 final class AudioEngineDeviceRecoveryTests: XCTestCase {
+    func testMacIntersamplePeaksStayBelowFullScaleAfterNativeResampling() async throws {
+#if DEBUG && targetEnvironment(macCatalyst)
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
+            throw XCTSkip("Mac output peak audit is opt-in")
+        }
+        let engine = AudioEngine()
+        defer { engine.stopAll() }
+        engine.startPlayback()
+        try await Task.sleep(for: .milliseconds(200))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("native-peaks-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try engine.beginAuditRenderCapture(url: url)
+        // A 2 kHz sine halfway between samples has a reconstructed peak larger
+        // than every 8 kHz sample. A sample-peak limiter alone misses it.
+        let tone = (0..<640).map { Int16(20_000 * sin(2 * Double.pi * 2_000 * Double($0) / 8_000 + .pi / 4)) }
+        for _ in 0..<4 {
+            engine.playReceivedPCM(tone)
+            try await Task.sleep(for: .milliseconds(80))
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        let report = await engine.endAuditRenderCapture(capture)
+        XCTAssertEqual(report["writeErrors"], 0)
+        XCTAssertEqual(report["droppedTapBuffers"], 0)
+        let file = try AVAudioFile(forReading: url)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+                                                   frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: buffer)
+        let channels = try XCTUnwrap(buffer.floatChannelData)
+        let peak = (0..<Int(buffer.format.channelCount)).flatMap { channel in
+            (0..<Int(buffer.frameLength)).map { abs(channels[channel][$0]) }
+        }.max() ?? 0
+        XCTAssertGreaterThan(peak, 0.2, "The tone must actually render")
+        XCTAssertLessThan(peak, 1, "Native sample-rate conversion must not create clipped output")
+        let snapshot = engine.auditPlaybackSnapshot
+        XCTAssertEqual(snapshot["nativePeakLimiterActive"], 1)
+        let latency = try XCTUnwrap(snapshot["nativePeakLimiterLatencyMicroseconds"])
+        XCTAssertLessThanOrEqual(latency, 5_000, "Peak protection must not introduce a large reported delay")
+        print("Native peak audit peak=\(peak) limiterLatencyMicroseconds=\(latency)")
+#else
+        throw XCTSkip("Requires opted-in Mac Catalyst native render audit")
+#endif
+    }
+
     func testPhysicalWarmInputRemainsSilentUntilPTTAndDeliversEncodedAudio() async throws {
 #if DEBUG && os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
@@ -219,6 +262,66 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
 #endif
     }
 
+    func testMacFivePacketBurstPreservesSpeechWithoutReset() async throws {
+#if DEBUG && targetEnvironment(macCatalyst)
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
+            throw XCTSkip("Mac mixer audit is opt-in")
+        }
+        let engine = AudioEngine()
+        defer { engine.stopAll() }
+        engine.startPlayback()
+        XCTAssertEqual(engine.auditPlaybackSnapshot["actualEngineRunning"], 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("receive-burst-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let capture = try engine.beginAuditRenderCapture(url: url)
+        let tone = (0..<640).map { Int16(8000 * sin(2 * Double.pi * 700 * Double($0) / 8000)) }
+        engine.playReceivedPCM(tone)
+        try await Task.sleep(for: .milliseconds(500))
+        let before = engine.auditPlaybackSnapshot
+        // A network receive burst can deliver several packets in one actor
+        // turn, before the playout task gets an opportunity to drain them.
+        for _ in 0..<5 { engine.playReceivedPCM(tone) }
+        try await Task.sleep(for: .seconds(1))
+        let after = engine.auditPlaybackSnapshot
+        let report = await engine.endAuditRenderCapture(capture)
+        XCTAssertEqual(after["playoutDiscardedPackets"], before["playoutDiscardedPackets"])
+        XCTAssertEqual(after["overflowIncomingDrops"], before["overflowIncomingDrops"])
+        XCTAssertEqual(after["timelineResets"], before["timelineResets"])
+        XCTAssertEqual(after["actualEngineRunning"], 1)
+        XCTAssertEqual(report["writeErrors"], 0)
+        XCTAssertEqual(report["droppedTapBuffers"], 0)
+
+        let file = try AVAudioFile(forReading: url)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+                                                   frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: buffer)
+        let channels = try XCTUnwrap(buffer.floatChannelData)
+        let rate = file.processingFormat.sampleRate
+        let windowFrames = max(1, Int((rate * 0.01).rounded()))
+        // Count energetic 10 ms windows rather than individual sine samples:
+        // zero crossings are audible tone duration too. Including the warmup
+        // packet gives 480 ms expected audio; dropping two burst packets gives
+        // only 320 ms and cannot satisfy this 400 ms render requirement.
+        let audibleSeconds = (0..<Int(buffer.format.channelCount)).map { channel in
+            var audibleFrames = 0
+            for start in stride(from: 0, to: Int(buffer.frameLength), by: windowFrames) {
+                let end = min(start + windowFrames, Int(buffer.frameLength))
+                let squareSum = (start..<end).reduce(0.0) { sum, frame in
+                    let value = Double(channels[channel][frame])
+                    return sum + value * value
+                }
+                if sqrt(squareSum / Double(end - start)) > 0.02 { audibleFrames += end - start }
+            }
+            return Double(audibleFrames) / rate
+        }
+        print("Receive burst before=\(before) after=\(after) audibleSeconds=\(audibleSeconds) render=\(report)")
+        XCTAssertGreaterThanOrEqual(audibleSeconds.max() ?? 0, 0.4,
+                                   "All five queued speech packets must reach the mixer")
+#else
+        throw XCTSkip("Requires opted-in Mac Catalyst mixer audit")
+#endif
+    }
+
 #if DEBUG && targetEnvironment(macCatalyst)
     private func captureMacReceiveTone(_ engine: AudioEngine, label: String) async throws -> Double {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("receive-control-\(UUID().uuidString).caf")
@@ -308,6 +411,33 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
                                         object: AVAudioSession.sharedInstance())
         await settle()
         XCTAssertFalse(engine.isRunning)
+    }
+
+    func testMacQueuedInterruptionFromStoppedSessionCannotBlockReconnect() async throws {
+#if DEBUG && targetEnvironment(macCatalyst)
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
+            throw XCTSkip("Mac output graph audit is opt-in")
+        }
+        let engine = AudioEngine()
+        defer { engine.stopAll() }
+        engine.startPlayback()
+        XCTAssertTrue(engine.isRunning, "Initial output graph must start for observer installation")
+        guard engine.isRunning else { return }
+
+        // Posting on MainActor invokes the observer synchronously, but its
+        // handling Task cannot run until this turn yields. Teardown must make
+        // that queued notification belong only to the previous connection.
+        postInterruption(.began)
+        engine.stopAll()
+        await settle()
+        XCTAssertFalse(engine.isRunning)
+
+        engine.startPlayback()
+        XCTAssertTrue(engine.isRunning, "An old queued interruption must not block a fresh connection")
+        XCTAssertEqual(engine.auditPlaybackSnapshot["actualEngineRunning"], 1)
+#else
+        throw XCTSkip("Requires opted-in Mac Catalyst output graph audit")
+#endif
     }
 
     private func postInterruption(_ type: AVAudioSession.InterruptionType,

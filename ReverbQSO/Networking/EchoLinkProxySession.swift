@@ -76,6 +76,12 @@ actor EchoLinkProxySession {
         terminalError == nil
     }
 
+    var inboundAudioMetrics: [String: LiveTransportMessageBufferMetrics] {
+        var metrics = ["socket": client.inboundAudioMetrics]
+        if let udpBuffer { metrics["session"] = udpBuffer.metricsSnapshot }
+        return metrics
+    }
+
     func sendAudio(_ data: Data, to host: String) async throws {
         try await client.sendAudio(data, to: host)
     }

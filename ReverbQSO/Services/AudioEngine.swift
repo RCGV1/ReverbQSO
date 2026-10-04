@@ -2,6 +2,7 @@
 
 import Foundation
 import AVFoundation
+import AudioToolbox
 import Combine
 import os
 
@@ -263,6 +264,10 @@ final class AudioEngine: ObservableObject {
     // MARK: - Audio Components
 
     private var engine = AVAudioEngine()
+#if targetEnvironment(macCatalyst)
+    private var receiveNativeMixer: AVAudioMixerNode?
+    private var receivePeakLimiter: AVAudioUnitEffect?
+#endif
     private let codec = GSMCodec()
     private let speexCodec = SpeexCodec()
     private let speexReceiveDecoder = SpeexReceiveStreamDecoder()
@@ -270,6 +275,8 @@ final class AudioEngine: ObservableObject {
     var isSpeexTransmitAvailable: Bool { speexCodec.isEncoderAvailable }
     /// Optional second consumer for host fanout, after resampling and microphone gain.
     var onCapturedPCM: (@MainActor ([Int16]) -> Void)?
+    /// Drops partial network packets when encoder continuity changes within PTT.
+    var onCaptureStreamReset: (@MainActor () -> Void)?
 
     @discardableResult
     func setTransmitCodec(_ selected: EchoLinkVoiceCodec) -> Bool {
@@ -302,14 +309,22 @@ final class AudioEngine: ObservableObject {
     private var auditGraphReplacementCount = 0
 
     var auditPlaybackSnapshot: [String: Int] {
-        ["scheduledSamples": auditScheduledSamples, "backlogTrims": auditTrimCount,
+        var result = ["scheduledSamples": auditScheduledSamples, "backlogTrims": auditTrimCount,
          "trimmedSamples": auditTrimmedSamples, "overflowIncomingDrops": auditOverflowDropCount,
          "playoutDiscardedPackets": receivePlayout.discardedPackets,
+         "playoutCapacityDrops": receivePlayout.capacityDiscardedPackets,
+         "playoutAgeDrops": receivePlayout.expiredDiscardedPackets,
+         "playoutMaximumWaitMilliseconds": Int(receivePlayout.maximumObservedWait * 1000),
          "concealmentSkippedSamples": auditConcealmentSkippedSamples,
          "remainingSamples": remainingPlaybackSamples, "running": isRunning ? 1 : 0,
          "actualEngineRunning": engine.isRunning ? 1 : 0,
          "timelineResets": auditTimelineResetCount, "graphReplacements": auditGraphReplacementCount,
          "maximumQueuedSamples": playbackQueue.maximumSamples]
+#if targetEnvironment(macCatalyst)
+        result["nativePeakLimiterActive"] = receivePeakLimiter == nil ? 0 : 1
+        result["nativePeakLimiterLatencyMicroseconds"] = Int((receivePeakLimiter?.latency ?? 0) * 1_000_000)
+#endif
+        return result
     }
 
     var auditPlaybackSchedule: [[String: Double]] { auditScheduleEvents }
@@ -348,6 +363,8 @@ final class AudioEngine: ObservableObject {
     private nonisolated let captureDSP = CaptureDSPProcessor()
     private var nativeCaptureGeneration: UInt64?
     private var captureDSPNextOrdinal: UInt64 = 0
+    private var deliveredCaptureStreamEpoch: UInt64?
+    private var rejectedCaptureStreamEpoch: UInt64?
     private var captureDSPResults: [UInt64: (CaptureDSPProcessor.Result, Int, Bool)] = [:]
     private var prepareCaptureTask: Task<Void, Never>?
     private var inputPreparationGeneration: UInt64 = 0
@@ -381,6 +398,7 @@ final class AudioEngine: ObservableObject {
     private var rxWindowMaxRMS = 0.0
     private var rxWindowPeak = 0
     private var sessionObservers: [SessionObserverToken] = []
+    private var sessionObserverGeneration: UInt64 = 0
     private var hasInstalledSessionObservers = false
     private var routePreferenceSubscription: AnyCancellable?
 
@@ -408,6 +426,7 @@ final class AudioEngine: ObservableObject {
         if engine.attachedNodes.contains(playerNode) {
             engine.detach(playerNode)
         }
+        detachReceivePeakProtection()
         for token in sessionObservers {
             NotificationCenter.default.removeObserver(token.rawValue)
         }
@@ -528,7 +547,6 @@ final class AudioEngine: ObservableObject {
 #endif
             try setupEngineIfNeeded()
             playerNode.volume = receiveOutputMuted ? 0 : 1
-            engine.mainMixerNode.outputVolume = 1.0
             try engine.start()
             isRunning = engine.isRunning
 #if targetEnvironment(macCatalyst)
@@ -839,6 +857,8 @@ final class AudioEngine: ObservableObject {
         if engine.attachedNodes.contains(playerNode) {
             engine.detach(playerNode)
         }
+        detachReceivePeakProtection()
+        sessionObserverGeneration &+= 1
         for token in sessionObservers {
             NotificationCenter.default.removeObserver(token.rawValue)
         }
@@ -921,26 +941,39 @@ final class AudioEngine: ObservableObject {
 #endif
             playbackSamples = Array(retained) + samples
         } else { playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now) }
+        drainReceivePlayout()
         receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
+        drainReceivePlayout()
         scheduleReceivePlayout()
+    }
+
+    private func drainReceivePlayout() {
+        guard isRunning, let format = captureFormat else { return }
+        let capacity = max(0, playbackQueue.maximumSamples - remainingPlaybackSamples)
+        // Clock correction can grow a packet by up to 0.5%. Reserve that room
+        // before removing it from the decoded queue.
+        let budget = Int(Double(capacity) / 1.005)
+        for samples in receivePlayout.drain(maximumSamples: budget) {
+            let corrected = receiveClock.process(samples, queuedSamples: remainingPlaybackSamples,
+                targetQueuedSamples: Int(receivePlayout.targetDelay * 8000))
+            guard let buffer = pcmBuffer(from: corrected, format: format) else { continue }
+            schedulePlaybackBuffer(buffer)
+            if !playerNode.isPlaying { playerNode.play() }
+        }
     }
 
     private func scheduleReceivePlayout() {
         guard receivePlayoutTask == nil, let deadline = receivePlayout.nextDeadline else { return }
         let generation = receivePlayoutGeneration
         receivePlayoutTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(max(0, deadline - ProcessInfo.processInfo.systemUptime))) }
+            let delay = deadline - ProcessInfo.processInfo.systemUptime
+            // A ready packet may be waiting for native output capacity. Retry
+            // on a bounded cadence instead of spinning on its past deadline.
+            do { try await Task.sleep(for: .seconds(delay > 0 ? delay : 0.010)) }
             catch { return }
             guard let self, !Task.isCancelled, self.receivePlayoutGeneration == generation else { return }
             self.receivePlayoutTask = nil
-            for samples in self.receivePlayout.drain() {
-                guard self.isRunning, let format = self.captureFormat else { continue }
-                let corrected = self.receiveClock.process(samples, queuedSamples: self.remainingPlaybackSamples,
-                    targetQueuedSamples: Int(self.receivePlayout.targetDelay * 8000))
-                guard let buffer = self.pcmBuffer(from: corrected, format: format) else { continue }
-                self.schedulePlaybackBuffer(buffer)
-                if !self.playerNode.isPlaying { self.playerNode.play() }
-            }
+            self.drainReceivePlayout()
             self.scheduleReceivePlayout()
         }
     }
@@ -1137,6 +1170,12 @@ final class AudioEngine: ObservableObject {
         guard !isConfigured else { return }
 
         engine.attach(playerNode)
+        defer {
+            if !isConfigured {
+                detachReceivePeakProtection()
+                if engine.attachedNodes.contains(playerNode) { engine.detach(playerNode) }
+            }
+        }
 
         guard let format = captureFormat else {
             throw NSError(domain: "AudioEngine", code: -1, userInfo: [
@@ -1144,8 +1183,69 @@ final class AudioEngine: ObservableObject {
             ])
         }
 
+#if targetEnvironment(macCatalyst)
+        let hardwareFormat = engine.outputNode.inputFormat(forBus: 0)
+        // Keep the limiter mono/stereo even on multichannel interfaces. The main
+        // mixer maps those channels to the device after peak protection.
+        let hasValidNativeRate = hardwareFormat.sampleRate.isFinite
+            && hardwareFormat.sampleRate >= 1_000 && hardwareFormat.sampleRate <= 384_000
+            && hardwareFormat.channelCount > 0
+        let nativeFormat = hasValidNativeRate
+            ? AVAudioFormat(standardFormatWithSampleRate: hardwareFormat.sampleRate,
+                            channels: min(2, hardwareFormat.channelCount)) : nil
+        if isUsableHardwareFormat(nativeFormat), let nativeFormat {
+            let nativeMixer = AVAudioMixerNode()
+            let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+                componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter,
+                componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0))
+            receiveNativeMixer = nativeMixer
+            receivePeakLimiter = limiter
+            engine.attach(nativeMixer)
+            engine.attach(limiter)
+            var parametersApplied = true
+            for (parameter, value) in [(kLimiterParam_AttackTime, Float(0.001)),
+                                       (kLimiterParam_DecayTime, Float(0.024)),
+                                       (kLimiterParam_PreGain, Float(0))] {
+                let status = AudioUnitSetParameter(limiter.audioUnit, parameter, kAudioUnitScope_Global, 0, value, 0)
+                if status != noErr {
+                    parametersApplied = false
+                    logger.error("Native receive limiter parameter failed status=\(status, privacy: .public)")
+                    break
+                }
+            }
+            if parametersApplied {
+                // Limit after conversion to the device rate. Limiting only the
+                // 8 kHz samples misses peaks reconstructed by native resampling.
+                engine.connect(playerNode, to: nativeMixer, format: format)
+                engine.connect(nativeMixer, to: limiter, format: nativeFormat)
+                engine.connect(limiter, to: engine.mainMixerNode, format: nativeFormat)
+            } else {
+                detachReceivePeakProtection()
+                engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+            }
+        } else {
+            logger.error("Native receive limiter unavailable for output format; using direct playback")
+            engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+        }
+#else
         engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+#endif
+#if targetEnvironment(macCatalyst)
+        // Apply headroom on every rebuilt graph, including capture recovery.
+        engine.mainMixerNode.outputVolume = 0.98
+#else
+        engine.mainMixerNode.outputVolume = 1.0
+#endif
         isConfigured = true
+    }
+
+    private func detachReceivePeakProtection() {
+#if targetEnvironment(macCatalyst)
+        if let mixer = receiveNativeMixer, engine.attachedNodes.contains(mixer) { engine.detach(mixer) }
+        if let limiter = receivePeakLimiter, engine.attachedNodes.contains(limiter) { engine.detach(limiter) }
+        receiveNativeMixer = nil
+        receivePeakLimiter = nil
+#endif
     }
 
     // MARK: - Audio Utilities
@@ -1460,6 +1560,8 @@ final class AudioEngine: ObservableObject {
     private func activateCaptureDelivery(generation: UInt64) {
         nativeCaptureGeneration = generation
         captureDSPNextOrdinal = 0
+        deliveredCaptureStreamEpoch = nil
+        rejectedCaptureStreamEpoch = nil
         captureDSPResults.removeAll(keepingCapacity: true)
         captureDSP.begin(generation: generation)
         captureTapGate.activate(captureBufferBarrier, generation: generation, configuration: .init(
@@ -1549,7 +1651,22 @@ final class AudioEngine: ObservableObject {
         captureDSPResults[result.ordinal] = (result, sourceSampleCount, fresh)
         while let next = captureDSPResults.removeValue(forKey: captureDSPNextOrdinal) {
             captureDSPNextOrdinal &+= 1
-            if next.2 { applyCaptureDSPResult(next.0, sourceSampleCount: next.1) }
+            let epoch = next.0.streamEpoch
+            if !next.2 {
+                if rejectedCaptureStreamEpoch != epoch {
+                    rejectedCaptureStreamEpoch = epoch
+                    onCaptureStreamReset?()
+                    captureDSP.resetStream(generation: next.0.generation)
+                }
+                continue
+            }
+            guard rejectedCaptureStreamEpoch != epoch else { continue }
+            if deliveredCaptureStreamEpoch != epoch {
+                deliveredCaptureStreamEpoch = epoch
+                rejectedCaptureStreamEpoch = nil
+                onCaptureStreamReset?()
+            }
+            applyCaptureDSPResult(next.0, sourceSampleCount: next.1)
         }
     }
 
@@ -1697,6 +1814,7 @@ final class AudioEngine: ObservableObject {
             if engine.attachedNodes.contains(playerNode) {
                 engine.detach(playerNode)
             }
+            detachReceivePeakProtection()
             isConfigured = false
             isRunning = false
 
@@ -1933,6 +2051,8 @@ final class AudioEngine: ObservableObject {
 
     private func installAudioSessionObserversIfNeeded() {
         guard !hasInstalledSessionObservers else { return }
+        sessionObserverGeneration &+= 1
+        let observerGeneration = sessionObserverGeneration
         let center = NotificationCenter.default
 
         let routeObserver = center.addObserver(
@@ -1942,7 +2062,8 @@ final class AudioEngine: ObservableObject {
         ) { [weak self] notification in
             let reasonValue = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue ?? 0
             Task { @MainActor [weak self, reasonValue] in
-                self?.handleRouteChange(reasonValue: reasonValue)
+                guard let self, self.sessionObserverGeneration == observerGeneration else { return }
+                self.handleRouteChange(reasonValue: reasonValue)
             }
         }
 
@@ -1954,7 +2075,8 @@ final class AudioEngine: ObservableObject {
             let typeValue = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue ?? 0
             let optionsValue = (notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? NSNumber)?.uintValue ?? 0
             Task { @MainActor [weak self, typeValue, optionsValue] in
-                self?.handleInterruption(typeValue: typeValue, optionsValue: optionsValue)
+                guard let self, self.sessionObserverGeneration == observerGeneration else { return }
+                self.handleInterruption(typeValue: typeValue, optionsValue: optionsValue)
             }
         }
 
@@ -1964,7 +2086,8 @@ final class AudioEngine: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.handleMediaServicesReset()
+                guard let self, self.sessionObserverGeneration == observerGeneration else { return }
+                self.handleMediaServicesReset()
             }
         }
 
@@ -1975,7 +2098,8 @@ final class AudioEngine: ObservableObject {
             queue: .main
         ) { [weak self, weak observedEngine] _ in
             Task { @MainActor [weak self, weak observedEngine] in
-                guard let self, let observedEngine, self.engine === observedEngine else { return }
+                guard let self, self.sessionObserverGeneration == observerGeneration,
+                      let observedEngine, self.engine === observedEngine else { return }
                 self.handleEngineConfigurationChange()
             }
         }
@@ -1994,7 +2118,7 @@ final class AudioEngine: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionObserverGeneration == observerGeneration else { return }
                 let session = AVAudioSession.sharedInstance()
                 let previous = Set(self.availableInputDevices.map(\.id))
                 self.refreshAvailableInputDevices(session: session)
@@ -2143,6 +2267,7 @@ final class AudioEngine: ObservableObject {
         if engine.attachedNodes.contains(playerNode) {
             engine.detach(playerNode)
         }
+        detachReceivePeakProtection()
 
         isConfigured = false
         isCapturing = false
