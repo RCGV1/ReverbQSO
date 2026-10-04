@@ -279,11 +279,13 @@ final class AudioEngine: ObservableObject {
     private var auditScheduledSamples = 0
     private var auditTrimCount = 0
     private var auditTrimmedSamples = 0
+    private var auditConcealmentSkippedSamples = 0
     private var auditScheduleEvents: [[String: Double]] = []
 
     var auditPlaybackSnapshot: [String: Int] {
         ["scheduledSamples": auditScheduledSamples, "backlogTrims": auditTrimCount,
          "trimmedSamples": auditTrimmedSamples, "playoutDiscardedPackets": receivePlayout.discardedPackets,
+         "concealmentSkippedSamples": auditConcealmentSkippedSamples,
          "remainingSamples": remainingPlaybackSamples, "running": isRunning ? 1 : 0]
     }
 
@@ -296,6 +298,7 @@ final class AudioEngine: ObservableObject {
         auditScheduledSamples = 0
         auditTrimCount = 0
         auditTrimmedSamples = 0
+        auditConcealmentSkippedSamples = 0
         auditScheduleEvents.removeAll()
         let mixer = engine.mainMixerNode
         let capture = try AudioAuditRenderCapture(url: url, format: mixer.outputFormat(forBus: 0))
@@ -839,7 +842,12 @@ final class AudioEngine: ObservableObject {
         let playbackSamples: [Int16]
         if let nativeConcealment {
             receiveSpeech.reset()
-            playbackSamples = nativeConcealment + samples
+            let retained = playbackQueue.retainedConcealment(nativeConcealment,
+                receivedSamples: samples.count, remainingSamples: remainingPlaybackSamples)
+#if DEBUG
+            auditConcealmentSkippedSamples += nativeConcealment.count - retained.count
+#endif
+            playbackSamples = Array(retained) + samples
         } else { playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now) }
         receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
         scheduleReceivePlayout()

@@ -7,6 +7,112 @@ import XCTest
 /// Password is consumed only in this process; reports contain audio and counters.
 @MainActor
 final class LiveAudioRoundTripTests: XCTestCase {
+    /// Known speech through a localhost relay/echo peer; no directory or account access.
+    func testLocalSpeexSpeechRoundTripAndLossRecovery() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["ECHOLINK_RUN_LOCAL_SPEEX_AUDIT"] == "1" else {
+            throw XCTSkip("Local hardware Speex audit requires explicit opt-in")
+        }
+        let root = URL(fileURLWithPath: try XCTUnwrap(environment["ECHOLINK_AUDIO_AUDIT_FOLDER"]))
+        let source = try Self.sourceSamples(root.appendingPathComponent("speech.wav"))
+        let expectedPackets = source.count / 3_840
+        for impaired in [false, true] {
+            let folder = root.appendingPathComponent(impaired ? "loss-recovery" : "clean")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let socket = try BoundUDPSocket(localPort: 0)
+            let audio = AudioEngine()
+            let connection = EchoLinkConnectionService(
+                relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: socket.actualLocalPort) },
+                networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+                audioEngine: audio)
+            connection.authenticatedCallsign = "N0TST"
+            connection.callAccessPolicyProvider = { CallAccessPolicy() }
+            let server = Task {
+                let registration = try await Self.receiveLocal(socket)
+                guard registration.sourceHost == "127.0.0.1" else { throw AuditError.invalidSource }
+                try await socket.send(Data([4, 0, 0, 0, 0, 0, 0, 0, 0]),
+                                      to: registration.sourceHost, port: registration.sourcePort)
+                let handshake = try await Self.receiveLocal(socket)
+                guard handshake.sourceHost == registration.sourceHost,
+                      handshake.sourcePort == registration.sourcePort else { throw AuditError.invalidSource }
+                let sdes = EchoLinkControlPacketCodec.buildSDESPacket(callsign: "*ECHOTEST*", advertiseSpeex: true)
+                try await socket.send(Data([1, 198, 51, 100, 10, 0x14, 0x4F, 0x14, 0x4F]) + sdes,
+                                      to: registration.sourceHost, port: registration.sourcePort)
+                var packets: [Data] = []
+                var wire: [[String: Double]] = []
+                while packets.count < expectedPackets {
+                    let datagram = try await Self.receiveLocal(socket)
+                    guard datagram.sourceHost == registration.sourceHost,
+                          datagram.sourcePort == registration.sourcePort else { continue }
+                    guard datagram.data.count >= 19, datagram.data[0] == 1,
+                          datagram.data[5] == 0x14, datagram.data[6] == 0x4E else { continue }
+                    let packet = Data(datagram.data.dropFirst(7))
+                    // The audio port also carries the initial station-info text.
+                    guard let parsed = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet) else { continue }
+                    guard case .speex = parsed.packet else { throw AuditError.invalidSource }
+                    var row = Self.metadata(parsed.metadata)
+                    row["time"] = ProcessInfo.processInfo.systemUptime
+                    row["bytes"] = Double(packet.count)
+                    wire.append(row)
+                    packets.append(packet)
+                }
+                // Keep return speech clear of the final transmit drain.
+                try await Task.sleep(for: .milliseconds(300))
+                let began = ProcessInfo.processInfo.systemUptime
+                let dropped: Set<Int> = impaired ? [40, 80, 81] : []
+                var returned = 0
+                func send(_ packet: Data) async throws {
+                    try await socket.send(Data([1, 198, 51, 100, 10, 0x14, 0x4E, 0x14, 0x4E]) + packet,
+                                          to: registration.sourceHost, port: registration.sourcePort)
+                }
+                for index in packets.indices {
+                    let jitter = impaired ? Double((index % 3) - 1) * 0.003 : 0
+                    let delay = began + Double(index) * 0.08 + jitter - ProcessInfo.processInfo.systemUptime
+                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+                    if dropped.contains(index) || (impaired && index == 100) { continue }
+                    try await send(packets[index]); returned += 1
+                    if impaired && index == 20 { try await send(packets[index]); returned += 1 }
+                    if impaired && index == 101 { try await send(packets[100]); returned += 1 }
+                }
+                let result: [String: Any] = ["packets": wire, "transmitPackets": packets.count,
+                    "returnDatagrams": returned, "intentionallyDroppedIndices": dropped.sorted(),
+                    "duplicatedIndex": impaired ? 20 : -1, "reorderedIndex": impaired ? 100 : -1]
+                try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+                    .write(to: folder.appendingPathComponent("localhost-peer.json"))
+            }
+            do {
+                await connection.connect(to: Station(callsign: "*ECHOTEST*", ipAddress: "198.51.100.10"))
+                XCTAssertEqual(connection.session?.state, .connected)
+                XCTAssertEqual(connection.transmitCodec, .speex)
+                try await audit(codec: .speex, source: source, folder: folder, audio: audio, connection: connection)
+                try await server.value
+                let report = try XCTUnwrap(JSONSerialization.jsonObject(with:
+                    Data(contentsOf: folder.appendingPathComponent("speex-report.json"))) as? [String: Any])
+                let accepted = try XCTUnwrap(report["accepted"] as? [[String: Double]])
+                XCTAssertEqual(accepted.count, expectedPackets - (impaired ? 3 : 0))
+                let playback = try XCTUnwrap(report["playback"] as? [String: Int])
+                XCTAssertEqual(playback["backlogTrims"], 0)
+                XCTAssertEqual(playback["playoutDiscardedPackets"], 0)
+                await connection.disconnect()
+                socket.close()
+            } catch {
+                server.cancel(); socket.close()
+                await connection.disconnect()
+                throw error
+            }
+        }
+    }
+
+    private static func receiveLocal(_ socket: BoundUDPSocket) async throws -> BoundUDPSocket.Datagram {
+        try await withThrowingTaskGroup(of: BoundUDPSocket.Datagram.self) { group in
+            group.addTask { try await socket.receive() }
+            group.addTask { try await Task.sleep(for: .seconds(5)); throw AuditError.localPeerTimedOut }
+            defer { group.cancelAll() }
+            let result = try await group.next()
+            return try XCTUnwrap(result)
+        }
+    }
+
     /// Replays a supplied arrival trace through real hardware without any network login.
     func testOfflineBurstTraceDoesNotEnterPlaybackResetLoop() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -283,6 +389,7 @@ final class LiveAudioRoundTripTests: XCTestCase {
     }
 
     private static func writePCM(_ samples: [Int16], to url: URL) throws {
+        guard !samples.isEmpty else { throw AuditError.emptyAudio }
         let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatInt16,
             sampleRate: 8_000, channels: 1, interleaved: true))
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)))
@@ -297,6 +404,6 @@ final class LiveAudioRoundTripTests: XCTestCase {
 
     private enum AuditError: Error {
         case missingCredential, stationMissing, connectionFailed, auditFailed
-        case transmissionUnavailable, dspRejected, invalidSource
+        case transmissionUnavailable, dspRejected, invalidSource, localPeerTimedOut, emptyAudio
     }
 }

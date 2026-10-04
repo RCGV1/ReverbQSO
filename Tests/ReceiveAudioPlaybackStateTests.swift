@@ -3,6 +3,24 @@ import XCTest
 @testable import ReverbQSO
 
 final class ReceiveAudioPlaybackStateTests: XCTestCase {
+    func testConcealmentKeepsRecentSyntheticSpeechWithoutCrowdingReceivedVoice() {
+        let queue = ReceivePlaybackQueue()
+        let concealed = (0..<1_280).map(Int16.init)
+        XCTAssertEqual(Array(queue.retainedConcealment(concealed, receivedSamples: 640, remainingSamples: 0)),
+                       Array(concealed.suffix(640)))
+        XCTAssertEqual(Array(queue.retainedConcealment(concealed, receivedSamples: 640, remainingSamples: 320)),
+                       Array(concealed.suffix(320)))
+        XCTAssertTrue(queue.retainedConcealment(concealed, receivedSamples: 640, remainingSamples: 800).isEmpty)
+    }
+
+    func testSingleLostPacketRetainsFullConcealmentWithinRecoveryBudget() {
+        let queue = ReceivePlaybackQueue()
+        let concealed = [Int16](repeating: 1, count: 640)
+        XCTAssertEqual(Array(queue.retainedConcealment(concealed, receivedSamples: 640, remainingSamples: 0)), concealed)
+        XCTAssertEqual(Array(queue.retainedConcealment(concealed, receivedSamples: 640, remainingSamples: -342)), concealed)
+        XCTAssertTrue(queue.retainedConcealment([], receivedSamples: 640, remainingSamples: 0).isEmpty)
+    }
+
     func testLoudReceivePreservesWaveformInsteadOfHardClipping() {
         var gain = ReceivePlaybackGain()
         let output = gain.process([30_000, 15_000, -30_000, -15_000])

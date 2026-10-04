@@ -106,7 +106,12 @@ final class WatchReceiveAudioPlayer {
         if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
         lastReceiveArrival = now
         let playbackSamples: [Int16]
-        if let nativeConcealment { receiveSpeech.reset(); playbackSamples = nativeConcealment + samples }
+        if let nativeConcealment {
+            receiveSpeech.reset()
+            let retained = ReceivePlaybackQueue().retainedConcealment(nativeConcealment,
+                receivedSamples: samples.count, remainingSamples: remainingPlaybackSamples)
+            playbackSamples = Array(retained) + samples
+        }
         else { playbackSamples = receiveSpeech.process(samples, metadata: parsed.metadata, now: now) }
         receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, playbackQueuedSamples: remainingPlaybackSamples, now: now)
         schedulePlayout()
