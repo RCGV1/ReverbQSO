@@ -2,9 +2,37 @@
 
 import XCTest
 import Combine
+import AVFoundation
 @testable import ReverbQSO
 
 final class AudioRoutePreferenceTests: XCTestCase {
+    func testSpeakerDefaultsSurviveRouteChangesWithoutForcingHeadphonesOff() {
+        let options = AudioRoutePreferences.playAndRecordOptions(output: .speaker, allowsA2DP: false)
+        XCTAssertTrue(options.contains(.defaultToSpeaker))
+        XCTAssertTrue(options.contains(.allowBluetoothHFP))
+        XCTAssertFalse(options.contains(.allowBluetoothA2DP))
+        XCTAssertFalse(AudioRoutePreferences.playAndRecordOptions(output: .receiver, allowsA2DP: false).contains(.defaultToSpeaker))
+        XCTAssertFalse(AudioRoutePreferences.playAndRecordOptions(output: .system, allowsA2DP: true).contains(.defaultToSpeaker))
+        XCTAssertTrue(AudioRoutePreferences.playAndRecordOptions(output: .speaker, allowsA2DP: true).contains(.allowBluetoothA2DP))
+    }
+
+    func testNewRoutePreferenceUsesSpeakerOnPhoneAndSystemOnMac() throws {
+        let suite = "AudioRoutePreferenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #if targetEnvironment(macCatalyst)
+        XCTAssertEqual(AudioRoutePreferences.defaultOutput, .system)
+        #else
+        XCTAssertEqual(AudioRoutePreferences.defaultOutput, .speaker)
+        #endif
+        XCTAssertEqual(AudioRoutePreferences.output(defaults: defaults), AudioRoutePreferences.defaultOutput)
+        // Explicit choices must survive the new default.
+        AudioRoutePreferences.save(output: .receiver, defaults: defaults)
+        XCTAssertEqual(AudioRoutePreferences.output(defaults: defaults), .receiver)
+        AudioRoutePreferences.save(output: .system, defaults: defaults)
+        XCTAssertEqual(AudioRoutePreferences.output(defaults: defaults), .system)
+    }
+
     @MainActor func testMultipleEnginesRefreshSharedMicrophoneSelection() async {
         let oldInput = AudioRoutePreferences.inputUID()
         defer { AudioRoutePreferences.save(inputUID: oldInput) }

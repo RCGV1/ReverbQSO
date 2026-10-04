@@ -2,6 +2,9 @@
 
 import Foundation
 import SwiftUI
+#if os(iOS) && !targetEnvironment(macCatalyst)
+import UIKit
+#endif
 
 /// Central application state shared across the app via the environment.
 @MainActor
@@ -318,6 +321,38 @@ final class AppState: ObservableObject {
         as requestedCallsign: String? = nil,
         preservingEndpoint: Bool = false
     ) async {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        // Hold finite execution time through directory sign-in and the peer handshake.
+        // The audio background mode only takes over once receive playback starts.
+        let callsign = requestedCallsign ?? currentUser
+        let existingEntryIDs = Set(qsoHub.entries.map(\.id))
+        let operation = Task { @MainActor in
+            guard !Task.isCancelled else { return }
+            await performConnect(to: station, as: callsign, preservingEndpoint: preservingEndpoint)
+        }
+        let lifetime = ConnectionAttemptLifetime {
+            operation.cancel()
+            self.qsoHub.cancelPendingConnection(as: callsign, excluding: existingEntryIDs)
+            self.qsoHub.lastError = "Connection paused because iOS ended background execution. Open ReverbQSO and try again."
+        }
+        lifetime.beginApplicationTask(name: "Sign in and connect to EchoLink")
+        defer { lifetime.end() }
+        await withTaskCancellationHandler {
+            await operation.value
+        } onCancel: {
+            operation.cancel()
+        }
+#else
+        await performConnect(to: station, as: requestedCallsign, preservingEndpoint: preservingEndpoint)
+#endif
+    }
+
+    private func performConnect(
+        to station: Station,
+        as requestedCallsign: String?,
+        preservingEndpoint: Bool
+    ) async {
+        guard !Task.isCancelled else { return }
         let callsign = requestedCallsign ?? currentUser
         if isDemoMode {
             guard isLoggedIn, savedAccounts.contains(callsign),
@@ -351,12 +386,14 @@ final class AppState: ObservableObject {
             }
             let directory = EchoLinkDirectoryService()
             await directory.login(callsign: callsign, password: password, persistAsActive: callsign == currentUser)
+            guard !Task.isCancelled else { return }
             guard directory.isLoggedIn else {
                 qsoHub.lastError = directory.error?.localizedDescription ?? "Could not sign in as \(callsign)."
                 return
             }
             accountDirectories[callsign] = directory
         }
+        guard !Task.isCancelled else { return }
         qsoHub.lastError = nil
         _ = await qsoHub.connect(to: station, as: callsign, preservingEndpoint: preservingEndpoint)
     }
@@ -511,6 +548,10 @@ final class AppState: ObservableObject {
         if SimulatorDemoData.isEnabled { return }
 #endif
         if active {
+            connectionService.resumeAudioWhenApplicationActive()
+            for entry in qsoHub.entries {
+                entry.service.resumeAudioWhenApplicationActive()
+            }
             startDirectoryRefreshIfEligible()
         } else {
             directoryService.stopForegroundRefreshing()
@@ -651,3 +692,48 @@ enum SimulatorDemoData {
     }
 }
 #endif
+
+/// Balances a finite execution assertion even if expiration and completion race.
+@MainActor
+final class ConnectionAttemptLifetime {
+    private var finish: (() -> Void)?
+    private var hasEnded = false
+    private let onExpiration: () -> Void
+
+    init(onExpiration: @escaping () -> Void) {
+        self.onExpiration = onExpiration
+    }
+
+    func begin(_ start: (@escaping @MainActor @Sendable () -> Void) -> (() -> Void)?) {
+        let finish = start { [weak self] in self?.expire() }
+        if hasEnded {
+            finish?()
+        } else {
+            self.finish = finish
+        }
+    }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+    func beginApplicationTask(name: String) {
+        begin { expire in
+            let identifier = UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expire)
+            guard identifier != .invalid else { return nil }
+            return { UIApplication.shared.endBackgroundTask(identifier) }
+        }
+    }
+#endif
+
+    func end() {
+        guard !hasEnded else { return }
+        hasEnded = true
+        let finish = self.finish
+        self.finish = nil
+        finish?()
+    }
+
+    private func expire() {
+        guard !hasEnded else { return }
+        onExpiration()
+        end()
+    }
+}

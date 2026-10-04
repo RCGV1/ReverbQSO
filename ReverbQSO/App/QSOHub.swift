@@ -157,6 +157,14 @@ final class QSOHub: ObservableObject {
         }
     }
 
+    /// Stop only this account's unfinished attempt when iOS expires its execution time.
+    func cancelPendingConnection(as callsign: String, excluding existingEntryIDs: Set<UUID> = []) {
+        for entry in entries where !existingEntryIDs.contains(entry.id)
+            && entry.callsign.caseInsensitiveCompare(callsign) == .orderedSame {
+            entry.service.cancelPendingConnection()
+        }
+    }
+
     func disconnectAll() async {
         for entry in entries {
             await entry.service.disconnect()

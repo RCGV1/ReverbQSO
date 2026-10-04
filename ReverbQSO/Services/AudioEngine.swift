@@ -22,10 +22,30 @@ enum AudioRoutePreferences {
     static let outputKey = "audio.outputPreference"
     static let inputKey = "audio.inputDeviceUID"
 
-    static func output(defaultValue: AudioOutputPreference,
+    static var defaultOutput: AudioOutputPreference {
+#if targetEnvironment(macCatalyst)
+        .system
+#else
+        .speaker
+#endif
+    }
+
+    static func output(defaultValue: AudioOutputPreference = defaultOutput,
                        defaults: UserDefaults = .standard) -> AudioOutputPreference {
         AudioOutputPreference(rawValue: defaults.string(forKey: outputKey) ?? "") ?? defaultValue
     }
+
+#if !os(watchOS)
+    static func playAndRecordOptions(output: AudioOutputPreference,
+                                    allowsA2DP: Bool) -> AVAudioSession.CategoryOptions {
+        var options: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
+        // A category default survives interruptions and headset changes while
+        // still letting connected headphones take precedence over the speaker.
+        if output == .speaker { options.insert(.defaultToSpeaker) }
+        if allowsA2DP { options.insert(.allowBluetoothA2DP) }
+        return options
+    }
+#endif
 
     static func inputUID(defaults: UserDefaults = .standard) -> String? {
         defaults.string(forKey: inputKey)
@@ -237,16 +257,8 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var outputRouteName = "System Audio"
     @Published private(set) var availableInputDevices: [AudioInputDevice] = []
     @Published private(set) var selectedInputDeviceID: String? = AudioRoutePreferences.inputUID()
-#if os(iOS) && !targetEnvironment(macCatalyst)
     @Published private(set) var outputPreference: AudioOutputPreference =
-        AudioRoutePreferences.output(defaultValue: .system)
-#elseif targetEnvironment(macCatalyst)
-    @Published private(set) var outputPreference: AudioOutputPreference =
-        AudioRoutePreferences.output(defaultValue: .system)
-#else
-    @Published private(set) var outputPreference: AudioOutputPreference =
-        AudioRoutePreferences.output(defaultValue: .speaker)
-#endif
+        AudioRoutePreferences.output()
 
     // MARK: - Audio Components
 
@@ -368,11 +380,7 @@ final class AudioEngine: ObservableObject {
 
     private func reloadRoutePreferences() {
         selectedInputDeviceID = AudioRoutePreferences.inputUID()
-#if os(watchOS)
-        outputPreference = AudioRoutePreferences.output(defaultValue: .speaker)
-#else
-        outputPreference = AudioRoutePreferences.output(defaultValue: .system)
-#endif
+        outputPreference = AudioRoutePreferences.output()
     }
 
     private func replaceEngineAfterSessionActivation() {
@@ -953,19 +961,11 @@ final class AudioEngine: ObservableObject {
 
 #if !os(watchOS)
     private var voiceChatRouteOptions: AVAudioSession.CategoryOptions {
-#if targetEnvironment(macCatalyst)
-        [.defaultToSpeaker, .allowBluetoothHFP]
-#else
-        [.allowBluetoothHFP]
-#endif
+        AudioRoutePreferences.playAndRecordOptions(output: outputPreference, allowsA2DP: false)
     }
 
     private var fallbackRouteOptions: AVAudioSession.CategoryOptions {
-#if targetEnvironment(macCatalyst)
-        [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP]
-#else
-        [.allowBluetoothHFP, .allowBluetoothA2DP]
-#endif
+        AudioRoutePreferences.playAndRecordOptions(output: outputPreference, allowsA2DP: true)
     }
 #endif
 
@@ -976,6 +976,10 @@ final class AudioEngine: ObservableObject {
         let session = AVAudioSession.sharedInstance()
         guard session.category == .playAndRecord else { return }
         do {
+            // Clear a previous speaker default when Receiver/System is chosen,
+            // and preserve the new choice through future session recovery.
+            try session.setCategory(.playAndRecord, mode: session.mode,
+                                    options: session.mode == .voiceChat ? voiceChatRouteOptions : fallbackRouteOptions)
             switch preference {
             case .speaker, .receiver:
                 try session.overrideOutputAudioPort(preference == .speaker ? .speaker : .none)

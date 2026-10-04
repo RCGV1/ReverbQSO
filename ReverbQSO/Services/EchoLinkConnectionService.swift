@@ -623,6 +623,7 @@ final class EchoLinkConnectionService: ObservableObject {
     private var controlSocket: BoundUDPSocket?
     private var proxySession: EchoLinkProxySession?
     private var relayClient: EchoLinkRelayClient?
+    private var outboundConnectionAttemptID: UUID?
     private let audioEngine: AudioEngine
     @Published private(set) var transmitCodec: EchoLinkVoiceCodec = .gsm
     private var activeTransmitCodec: EchoLinkVoiceCodec = .gsm
@@ -813,7 +814,8 @@ final class EchoLinkConnectionService: ObservableObject {
                 let ready = state.0 && !state.1
                 self.isCaptureReady = ready
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-                guard self.session?.state == .connected, !self.isBackgroundMuted else { return }
+                guard self.session?.state == .connected, !self.isBackgroundMuted,
+                      self.audioEngine.isRunning else { return }
                 if ready {
                     if self.audioStatusMessage?.hasPrefix("Preparing microphone") == true
                         || self.audioStatusMessage?.hasPrefix("Microphone input is unavailable") == true {
@@ -831,7 +833,8 @@ final class EchoLinkConnectionService: ObservableObject {
         audioEngine.$capturePreparationFailed
             .receive(on: DispatchQueue.main)
             .sink { [weak self] failed in
-                guard let self, failed, self.session?.state == .connected, !self.isBackgroundMuted else { return }
+                guard let self, failed, self.session?.state == .connected, !self.isBackgroundMuted,
+                      self.audioEngine.isRunning else { return }
                 self.audioStatusMessage = "Microphone input is unavailable. Receive audio is available."
             }
             .store(in: &cancellables)
@@ -891,8 +894,7 @@ final class EchoLinkConnectionService: ObservableObject {
         if muted {
             audioEngine.stopAll()
         } else if session?.state == .connected {
-            audioEngine.startPlayback()
-            beginCapturePreparationIfNeeded()
+            resumeAudioWhenApplicationActive()
         }
 #endif
         objectWillChange.send()
@@ -926,6 +928,36 @@ final class EchoLinkConnectionService: ObservableObject {
 
     /// Connect to a remote EchoLink station.
     func connect(to station: Station, preservingEndpoint: Bool = false) async {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        // Service entry points include manual reconnect, which bypasses AppState.
+        // Capture the previous session so an expired rejected attempt cannot end it.
+        let previousSessionID = session?.id
+        let operation = Task { @MainActor in
+            guard !Task.isCancelled else { return }
+            await performConnect(to: station, preservingEndpoint: preservingEndpoint)
+        }
+        let lifetime = ConnectionAttemptLifetime {
+            operation.cancel()
+            guard self.session?.id != previousSessionID else { return }
+            self.cancelPendingConnection()
+            self.error = ConnectionError.connectionFailed(
+                "iOS ended background execution. Open ReverbQSO and try again."
+            )
+        }
+        lifetime.beginApplicationTask(name: "EchoLink peer handshake")
+        defer { lifetime.end() }
+        await withTaskCancellationHandler {
+            await operation.value
+        } onCancel: {
+            operation.cancel()
+        }
+#else
+        await performConnect(to: station, preservingEndpoint: preservingEndpoint)
+#endif
+    }
+
+    private func performConnect(to station: Station, preservingEndpoint: Bool) async {
+        guard !Task.isCancelled else { return }
         let resolvedStation = (isLocalDemoMode || preservingEndpoint) ? station : (resolveStation?(station) ?? station)
         let accessPolicy = callAccessPolicyProvider?() ?? CallAccessPolicyStore.load(demo: isLocalDemoMode)
         if let reason = accessPolicy.rejection(for: resolvedStation, direction: .outgoing, countryCode: resolvedStation.callSignCountryCode) {
@@ -957,6 +989,10 @@ final class EchoLinkConnectionService: ObservableObject {
         let newSession = QSOSession(station: station)
         let sessionID = newSession.id
         session = newSession
+        outboundConnectionAttemptID = sessionID
+        defer {
+            if outboundConnectionAttemptID == sessionID { outboundConnectionAttemptID = nil }
+        }
         error = nil
         audioStatusMessage = nil
         remotePadAllowed = false
@@ -980,6 +1016,14 @@ final class EchoLinkConnectionService: ObservableObject {
             guard storedProxyConfiguration.mode != .automatic else {
                 throw ConnectionError.connectionFailed("Sign in again to select an Automatic connection method.")
             }
+            try Task.checkCancellation()
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+            // Prepare real receive audio before the first network suspension, while
+            // a foreground-initiated call can still activate its audio session.
+            if !isBackgroundMuted {
+                audioEngine.startPlayback()
+            }
+#endif
             if storedProxyConfiguration.mode == .relay {
                 let client: EchoLinkRelayClient
                 if let address = selection?.relayAddress {
@@ -1059,7 +1103,11 @@ final class EchoLinkConnectionService: ObservableObject {
             }
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
             if !isBackgroundMuted {
-                beginCapturePreparationIfNeeded(sessionID: sessionID)
+                if audioEngine.isRunning {
+                    beginCapturePreparationIfNeeded(sessionID: sessionID)
+                } else {
+                    audioStatusMessage = "Open ReverbQSO to enable audio."
+                }
             }
 #endif
             startKeepAlive(sessionID: sessionID)
@@ -1068,10 +1116,8 @@ final class EchoLinkConnectionService: ObservableObject {
             logger.info("EchoLink connection established station=\(station.callsign, privacy: .public)")
         } catch is CancellationError {
             guard session?.id == sessionID else { return }
-            if session?.state == .connecting {
-                tearDown(expectedSessionID: sessionID)
-                session = nil
-            }
+            tearDown(expectedSessionID: sessionID)
+            session = nil
         } catch {
             guard session?.id == sessionID else { return }
             guard session?.state != .disconnecting,
@@ -1112,6 +1158,28 @@ final class EchoLinkConnectionService: ObservableObject {
         }
     }
 #endif
+
+    /// Retry an audio activation denied while the app was executing in background.
+    func resumeAudioWhenApplicationActive() {
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        guard session?.state == .connected, !isBackgroundMuted, !audioEngine.isRunning else { return }
+        audioEngine.startPlayback()
+        guard audioEngine.isRunning else {
+            audioStatusMessage = "Open ReverbQSO to enable audio."
+            return
+        }
+        audioStatusMessage = nil
+        beginCapturePreparationIfNeeded()
+#endif
+    }
+
+    /// Synchronous cleanup is required in UIKit's background expiration handler.
+    func cancelPendingConnection() {
+        guard let pending = session,
+              pending.state == .connecting || outboundConnectionAttemptID == pending.id else { return }
+        tearDown(expectedSessionID: pending.id)
+        session = nil
+    }
 
     /// Disconnect from the current station.
     func disconnect() async {
@@ -1658,6 +1726,7 @@ final class EchoLinkConnectionService: ObservableObject {
     }
 
     private func requireCurrentSession(_ sessionID: UUID) throws {
+        try Task.checkCancellation()
         guard session?.id == sessionID else { throw CancellationError() }
     }
 

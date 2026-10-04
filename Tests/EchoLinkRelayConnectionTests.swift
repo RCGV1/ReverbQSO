@@ -6,6 +6,65 @@ import XCTest
 
 @MainActor
 final class EchoLinkRelayConnectionTests: XCTestCase {
+    func testExpiringPendingHandshakeTearsDownWithoutConnectionErrorOrReconnect() async throws {
+        let relay = try BoundUDPSocket(localPort: 0)
+        defer { relay.close() }
+        let audio = AudioEngine()
+        let service = EchoLinkConnectionService(
+            relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
+            networkConfigurationProvider: { EchoLinkProxyConfiguration(mode: .relay, host: "", port: 8100, password: "") },
+            audioEngine: audio
+        )
+        service.authenticatedCallsign = "W1AW"
+        let handshakeSent = expectation(description: "Unacknowledged peer handshake was sent")
+        let server = Task {
+            let registration = try await relay.receive()
+            try await relay.send(Data([4, 0, 0, 0, 0, 0, 0, 0, 0]),
+                to: registration.sourceHost, port: registration.sourcePort)
+            let request = try await relay.receive()
+            XCTAssertEqual(request.data.first, EchoLinkRelayRequestType.data.rawValue)
+            handshakeSent.fulfill()
+            // Do not return peer SDES: the outgoing attempt must stay connecting.
+        }
+        let operation = Task { await service.connect(to: Station(callsign: "TEST", ipAddress: "198.51.100.10")) }
+        defer { operation.cancel(); server.cancel() }
+        await fulfillment(of: [handshakeSent], timeout: 3)
+        XCTAssertEqual(service.session?.state, .connecting)
+        service.cancelPendingConnection()
+        operation.cancel()
+        await operation.value
+        try await server.value
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.error)
+        XCTAssertNil(service.reconnectCandidate)
+        XCTAssertFalse(audio.isRunning)
+        service.cancelPendingConnection() // Cleanup remains safe after completion.
+    }
+
+    func testCallerCancellationReleasesDirectPortsWithoutReconnect() async throws {
+        let audio = AudioEngine()
+        let service = EchoLinkConnectionService(
+            networkConfigurationProvider: { EchoLinkProxyConfiguration(mode: .direct, host: "", port: 8100, password: "") },
+            audioEngine: audio
+        )
+        service.authenticatedCallsign = "W1AW"
+        let operation = Task { await service.connect(to: Station(callsign: "TEST", ipAddress: "127.0.0.1")) }
+        defer { operation.cancel() }
+        // Let the service bind its sockets and enter the handshake polling wait.
+        for _ in 0..<100 where service.session == nil { await Task.yield() }
+        XCTAssertEqual(service.session?.state, .connecting)
+        operation.cancel()
+        await operation.value
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.error)
+        XCTAssertNil(service.reconnectCandidate)
+        XCTAssertFalse(audio.isRunning)
+        let audioPort = try BoundUDPSocket(localPort: 5198)
+        defer { audioPort.close() }
+        let controlPort = try BoundUDPSocket(localPort: 5199)
+        defer { controlPort.close() }
+    }
+
     func testAutomaticRelayPinsQSOAndReconnectToSelectedEndpoint() async throws {
         let relay = try BoundUDPSocket(localPort: 0)
         defer { relay.close() }
