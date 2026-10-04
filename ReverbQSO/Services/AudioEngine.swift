@@ -2,7 +2,9 @@
 
 import Foundation
 import AVFoundation
+#if targetEnvironment(macCatalyst)
 import AudioToolbox
+#endif
 import Combine
 import os
 

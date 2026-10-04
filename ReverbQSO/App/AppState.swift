@@ -650,7 +650,7 @@ enum SimulatorDemoData {
     static let screen = ProcessInfo.processInfo.arguments
         .first { $0.hasPrefix("--simulator-demo-screen=") }
         .map { String($0.dropFirst("--simulator-demo-screen=".count)) } ?? "qso"
-    static let startsInQSO = ["qso", "chat", "activity", "participants", "audio", "dtmf", "rx"]
+    static let startsInQSO = ["qso", "browse-qso", "chat", "activity", "participants", "audio", "dtmf", "rx"]
         .contains(screen)
     static let callsign = "N0DEMO"
     static let password = "demo"

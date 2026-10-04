@@ -54,6 +54,10 @@ struct QSOView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        #if !targetEnvironment(macCatalyst)
+        .navigationTitle(UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
+                         ? "" : viewModel.isConnected ? viewModel.stationCallsign : "QSO")
+        #endif
         .toolbar {
             if viewModel.isConnected {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -77,15 +81,13 @@ struct QSOView: View {
                 }
             }
             #if !targetEnvironment(macCatalyst)
-            if viewModel.isConnected {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        Text(viewModel.stationCallsign)
-                            .font(.headline)
-                        Text(viewModel.formattedElapsedTime)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+            if viewModel.isConnected && hasStationActivity,
+               !(horizontalSizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showStationActivity = true } label: {
+                        Label("Station messages", systemImage: "text.bubble")
                     }
+                    .accessibilityHint("Show information and messages sent by this station")
                 }
             }
             #endif
@@ -179,7 +181,7 @@ struct QSOView: View {
 
     private var compactContent: some View {
         GeometryReader { geometry in
-            if geometry.size.height < 560 {
+            if geometry.size.height < 360 {
                 ScrollView {
                     VStack(spacing: 12) {
                         VStack(spacing: 12) {
@@ -205,7 +207,7 @@ struct QSOView: View {
                     }
                     .scrollDismissesKeyboard(.interactively)
                     if viewModel.isConnected && !isChatFocused {
-                        radioControls(pttSize: 120)
+                        radioControls(pttSize: geometry.size.height < 560 ? 104 : 120)
                     }
                 }
             }
@@ -216,8 +218,13 @@ struct QSOView: View {
 
     @ViewBuilder
     private var compactStatusContent: some View {
-        stationHeader
-            .padding(.top, 16)
+        if viewModel.isConnected {
+            compactConnectionStatus
+                .padding(.top, 8)
+        } else {
+            stationHeader
+                .padding(.top, 16)
+        }
 
         if viewModel.isConnected, !viewModel.activeNodeParticipants.isEmpty {
             participantSummary
@@ -698,6 +705,32 @@ struct QSOView: View {
             endPoint: .bottom
         )
         .ignoresSafeArea()
+    }
+
+    private var compactConnectionStatus: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Circle().fill(connectionStateColor).frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                    Text(connectionStateText)
+                        .font(.subheadline)
+                        .foregroundStyle(connectionStateColor)
+                }
+                if let station = viewModel.session?.station {
+                    Text(station.nodeNumber > 0
+                         ? "\(station.type.displayName) · \(station.nodeNumber)"
+                         : station.type.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(viewModel.formattedElapsedTime)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Duration \(viewModel.formattedElapsedTime)")
+        }
     }
 
     private var stationHeader: some View {

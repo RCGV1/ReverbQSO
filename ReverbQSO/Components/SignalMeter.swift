@@ -24,7 +24,8 @@ struct SignalMeter: View {
             Text(label)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .leading)
+                .frame(minWidth: 40, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
 
             GeometryReader { geo in
                 let totalSpacing = segmentSpacing * CGFloat(segmentCount - 1)

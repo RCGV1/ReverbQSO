@@ -221,6 +221,10 @@ private struct MainTabView: View {
             if let id {
                 if presentedEntryID != id {
                     presentedEntryID = id
+                    #if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
+                    // Exercise the return bar without opening a real connection.
+                    if SimulatorDemoData.isEnabled && SimulatorDemoData.screen == "browse-qso" { return }
+                    #endif
                     qsoTab = selectedTab
                     pushQSO(id, in: selectedTab)
                 }
@@ -378,13 +382,13 @@ private struct QSONavigationTab<Content: View>: View {
                                 HStack(spacing: 10) {
                                     Image(systemName: "waveform")
                                         .foregroundStyle(.tint)
-                                    Text(active.station?.callsign ?? "Connecting…")
+                                    Text("Return to QSO")
                                         .fontWeight(.semibold)
-                                        .lineLimit(1)
+                                        .fixedSize(horizontal: false, vertical: true)
                                     Spacer(minLength: 8)
-                                    Text(active.service.session?.state == .connected ? "In QSO" : "Connecting")
-                                        .font(.caption)
+                                    Text(active.station?.callsign ?? "Connecting…")
                                         .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                     Image(systemName: "chevron.right")
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
@@ -393,7 +397,7 @@ private struct QSONavigationTab<Content: View>: View {
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.borderless)
                             .accessibilityLabel("Return to QSO with \(active.station?.callsign ?? "connecting station")")
                             .accessibilityIdentifier("return-to-qso")
                             if qsoHub.entries.count > 1 {
@@ -625,121 +629,105 @@ private struct LoginView: View {
                         .frame(width: brandWidth)
                 }
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Spacer(minLength: 12)
+                if isWideLayout {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Spacer(minLength: 12)
 
-                        if !isWideLayout {
-                            HStack(spacing: 10) {
-                                Image(systemName: "antenna.radiowaves.left.and.right")
-                                    .font(.title3.weight(.medium))
-                                    .foregroundStyle(.tint)
-                                    .accessibilityHidden(true)
-                                Text("ReverbQSO")
-                                    .font(.headline.weight(.semibold))
-                            }
-                            .padding(.bottom, 20)
-                        }
-
-                        Text("Sign in")
-                            .font(.largeTitle.weight(.bold))
-                            .padding(.bottom, 4)
-                        Text("Use your EchoLink callsign to connect with other stations.")
-                            .foregroundStyle(.secondary)
-                            .padding(.bottom, 20)
-
-                        VStack(alignment: .leading, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Callsign")
-                                    .font(.subheadline.weight(.semibold))
-                                TextField("Your callsign", text: $callsign)
-                                    .textContentType(.username)
-                                    .textInputAutocapitalization(.characters)
-                                    .autocorrectionDisabled()
-                                    .keyboardType(.asciiCapable)
-                                    .submitLabel(.next)
-                                    .focused($focusedField, equals: .callsign)
-                                    .onSubmit { focusedField = .password }
-                                    .loginFieldStyle()
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Password")
-                                    .font(.subheadline.weight(.semibold))
-                                SecureField("EchoLink password", text: $password)
-                                    .textContentType(.password)
-                                    .submitLabel(.go)
-                                    .focused($focusedField, equals: .password)
-                                    .onSubmit { if canSubmit { submitLogin() } }
-                                    .loginFieldStyle()
-                            }
-                        }
-                        .accessibilityElement(children: .contain)
-
-                        Link("Forgot password?", destination: passwordHelpURL)
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
-                            .padding(.top, 4)
-
-                        if let error = appState.loginError, !error.isEmpty {
-                            Label(error, systemImage: "exclamationmark.circle.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 20)
-                                .accessibilityAddTraits(.updatesFrequently)
-                        }
-
-                        Button(action: submitLogin) {
-                            HStack(spacing: 8) {
-                                if isSubmitting {
-                                    ProgressView()
-                                        .tint(.white)
-                                }
-                                Text(isSubmitting ? "Signing In…" : "Sign In")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(!canSubmit)
-                        .padding(.top, 12)
-
-                        if isWideLayout {
-                            Spacer().frame(height: 28)
-                        } else {
-                            Spacer(minLength: 24)
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("New to EchoLink?")
+                            Text("Sign in")
+                                .font(.largeTitle.weight(.bold))
+                                .padding(.bottom, 4)
+                            Text("EchoLink account")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Button {
-                                showingRegistration = true
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text("Register a callsign")
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .accessibilityHidden(true)
-                                }
-                                .font(.subheadline.weight(.semibold))
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.tint)
-                        }
-                        .padding(.bottom, 16)
+                                .padding(.bottom, 20)
 
-                        if isWideLayout {
+                            VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Callsign")
+                                        .font(.subheadline.weight(.semibold))
+                                    TextField("Your callsign", text: $callsign)
+                                        .textContentType(.username)
+                                        .textInputAutocapitalization(.characters)
+                                        .autocorrectionDisabled()
+                                        .keyboardType(.asciiCapable)
+                                        .submitLabel(.next)
+                                        .focused($focusedField, equals: .callsign)
+                                        .onSubmit { focusedField = .password }
+                                        .loginFieldStyle()
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Password")
+                                        .font(.subheadline.weight(.semibold))
+                                    SecureField("EchoLink password", text: $password)
+                                        .textContentType(.password)
+                                        .submitLabel(.go)
+                                        .focused($focusedField, equals: .password)
+                                        .onSubmit { if canSubmit { submitLogin() } }
+                                        .loginFieldStyle()
+                                }
+                            }
+                            .accessibilityElement(children: .contain)
+
+                            Link("Forgot password?", destination: passwordHelpURL)
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                                .padding(.top, 4)
+
+                            if let error = appState.loginError, !error.isEmpty {
+                                Label(error, systemImage: "exclamationmark.circle.fill")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 20)
+                                    .accessibilityAddTraits(.updatesFrequently)
+                            }
+
+                            Button(action: submitLogin) {
+                                HStack(spacing: 8) {
+                                    if isSubmitting {
+                                        ProgressView()
+                                            .tint(.white)
+                                    }
+                                    Text(isSubmitting ? "Signing In…" : "Sign In")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .disabled(!canSubmit)
+                            .padding(.top, 12)
+
+                            Spacer().frame(height: 28)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    showingRegistration = true
+                                } label: {
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        Text("Register a callsign")
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                            .accessibilityHidden(true)
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.tint)
+                            }
+                            .padding(.bottom, 16)
+
                             Spacer(minLength: 12)
                         }
+                        .frame(maxWidth: formMaxWidth)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                        .padding(.horizontal, 28)
                     }
-                    .frame(maxWidth: formMaxWidth)
-                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
-                    .padding(.horizontal, 28)
+                    .scrollDismissesKeyboard(.interactively)
+                } else {
+                    compactLoginForm
                 }
-                .scrollDismissesKeyboard(.interactively)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
@@ -760,6 +748,74 @@ private struct LoginView: View {
                 EchoLinkRegistrationView(initialCallsign: callsign)
             }
         }
+    }
+
+    private var compactLoginForm: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("ReverbQSO", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.title.weight(.bold))
+                        .labelStyle(.titleAndIcon)
+                    Text("Sign in with EchoLink")
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 8, trailing: 0))
+            }
+
+            Section {
+                LabeledContent("Callsign") {
+                    TextField("Callsign", text: $callsign)
+                        .multilineTextAlignment(.trailing)
+                        .textContentType(.username)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .keyboardType(.asciiCapable)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .callsign)
+                        .onSubmit { focusedField = .password }
+                        .accessibilityLabel("Callsign")
+                }
+                LabeledContent("Password") {
+                    SecureField("EchoLink password", text: $password)
+                        .multilineTextAlignment(.trailing)
+                        .textContentType(.password)
+                        .submitLabel(.go)
+                        .focused($focusedField, equals: .password)
+                        .onSubmit { if canSubmit { submitLogin() } }
+                        .accessibilityLabel("Password")
+                }
+            }
+
+            Section {
+                Button(action: submitLogin) {
+                    HStack(spacing: 8) {
+                        if isSubmitting { ProgressView().tint(.white) }
+                        Text(isSubmitting ? "Signing In…" : "Sign In")
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 28)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!canSubmit)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            } footer: {
+                if let error = appState.loginError, !error.isEmpty {
+                    Label(error, systemImage: "exclamationmark.circle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+            }
+
+            Section {
+                Link("Forgot password?", destination: passwordHelpURL)
+                Button("Register a callsign") { showingRegistration = true }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var tabletBrandPanel: some View {
