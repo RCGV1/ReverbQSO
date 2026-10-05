@@ -4,6 +4,17 @@ import XCTest
 @testable import ReverbQSO
 
 final class EchoLinkAudioPacketCodecTests: XCTestCase {
+    func testReceptionReportsRequireCompleteReportBodies() {
+        let rr = Data([0xC0, 201, 0, 1, 0, 0, 0, 1])
+        let sr = Data([0x80, 200, 0, 6]) + Data(repeating: 0, count: 24)
+        XCTAssertTrue(EchoLinkControlPacketCodec.isValidReceptionReport(rr))
+        XCTAssertTrue(EchoLinkControlPacketCodec.isValidReceptionReport(sr))
+        XCTAssertFalse(EchoLinkControlPacketCodec.isValidReceptionReport(Data([0xC0, 201, 0, 0])))
+        XCTAssertFalse(EchoLinkControlPacketCodec.isValidReceptionReport(Data([0xC1, 201, 0, 1, 0, 0, 0, 1])))
+        XCTAssertFalse(EchoLinkControlPacketCodec.isValidReceptionReport(rr + Data([0])))
+        XCTAssertEqual(LiveTransportAudioPortPayloadKind.classify(rr), .control)
+    }
+
     func testValidRawGSMIsNotMisreadAsLegacyRTPWithAnExtension() {
         let frame = Data([0xD0] + Array(repeating: UInt8(0), count: 32))
         for raw in [frame, frame + frame] {

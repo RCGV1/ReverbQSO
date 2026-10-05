@@ -4,6 +4,7 @@ import Foundation
 import AVFoundation
 #if targetEnvironment(macCatalyst)
 import AudioToolbox
+import CoreAudio
 #endif
 import Combine
 import os
@@ -19,6 +20,241 @@ struct AudioInputDevice: Identifiable, Equatable {
     let name: String
     let portType: String
 }
+
+#if targetEnvironment(macCatalyst)
+private final class MacMicrophoneCapture: @unchecked Sendable {
+    private struct CaptureError: LocalizedError {
+        let operation: String
+        let status: OSStatus
+        var errorDescription: String? { "\(operation) failed (OSStatus \(status))" }
+    }
+
+    private final class CallbackContext {
+        let block: AVAudioNodeTapBlock
+        let format: AVAudioFormat
+        let bytesPerFrame: Int
+        let requiredBufferCount: Int
+
+        init(block: @escaping AVAudioNodeTapBlock, format: AVAudioFormat, bytesPerFrame: Int) {
+            self.block = block
+            self.format = format
+            self.bytesPerFrame = bytesPerFrame
+            self.requiredBufferCount = format.isInterleaved ? 1 : Int(format.channelCount)
+        }
+
+        func deliver(_ input: UnsafePointer<AudioBufferList>?) {
+            guard let input else { return }
+            guard let offset = MemoryLayout<AudioBufferList>.offset(of: \.mBuffers),
+                  Int(input.pointee.mNumberBuffers) >= requiredBufferCount else { return }
+            let sources = UnsafeRawPointer(input).advanced(by: offset)
+                .assumingMemoryBound(to: AudioBuffer.self)
+            guard sources[0].mData != nil, bytesPerFrame > 0 else { return }
+            let frames = Int(sources[0].mDataByteSize) / bytesPerFrame
+            guard frames > 0, frames <= Int(format.sampleRate / 4),
+                  frames * bytesPerFrame <= Int(sources[0].mDataByteSize),
+                  let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                                frameCapacity: AVAudioFrameCount(frames)) else { return }
+            buffer.frameLength = AVAudioFrameCount(frames)
+            let destinations = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+            guard destinations.count == requiredBufferCount else { return }
+            let copyBytes = frames * bytesPerFrame
+            for index in 0..<requiredBufferCount {
+                guard let sourceData = sources[index].mData,
+                      let destinationData = destinations[index].mData,
+                      Int(sources[index].mDataByteSize) >= copyBytes,
+                      Int(destinations[index].mDataByteSize) >= copyBytes else { return }
+                memcpy(destinationData, sourceData, copyBytes)
+            }
+            block(buffer, AVAudioTime(hostTime: mach_absolute_time()))
+        }
+    }
+
+    private struct Running {
+        let deviceID: AudioDeviceID
+        let ioProcID: AudioDeviceIOProcID
+        let context: Unmanaged<CallbackContext>
+    }
+
+    private let queue = DispatchQueue(label: "org.reverbqso.mac-microphone", qos: .userInitiated)
+    private let block: AVAudioNodeTapBlock
+    private var running: Running?
+
+    init(block: @escaping AVAudioNodeTapBlock) { self.block = block }
+
+    func start(deviceID: AudioDeviceID) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async { [self] in
+                do {
+                    guard running == nil else { continuation.resume(); return }
+                    let asbd = try Self.inputFormat(deviceID: deviceID)
+                    var mutableASBD = asbd
+                    guard let format = AVAudioFormat(streamDescription: &mutableASBD),
+                          asbd.mBytesPerFrame > 0,
+                          format.channelCount > 0,
+                          format.sampleRate > 0,
+                          [.pcmFormatFloat32, .pcmFormatFloat64,
+                           .pcmFormatInt16, .pcmFormatInt32].contains(format.commonFormat) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    let context = Unmanaged.passRetained(CallbackContext(
+                        block: block, format: format, bytesPerFrame: Int(asbd.mBytesPerFrame)))
+                    var ioProcID: AudioDeviceIOProcID?
+                    let createStatus = AudioDeviceCreateIOProcID(
+                        deviceID, Self.ioProc, context.toOpaque(), &ioProcID)
+                    guard createStatus == noErr, let ioProcID else {
+                        context.release()
+                        throw CaptureError(operation: "AudioDeviceCreateIOProcID", status: createStatus)
+                    }
+                    let startStatus = AudioDeviceStart(deviceID, ioProcID)
+                    guard startStatus == noErr else {
+                        if AudioDeviceDestroyIOProcID(deviceID, ioProcID) == noErr { context.release() }
+                        throw CaptureError(operation: "AudioDeviceStart", status: startStatus)
+                    }
+                    running = Running(deviceID: deviceID, ioProcID: ioProcID, context: context)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func stop() {
+        // Retain this object until device callbacks are retired on its queue.
+        queue.async { [self] in stopOnQueue() }
+    }
+
+    func stopAndWait() async {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                stopOnQueue()
+                continuation.resume()
+            }
+        }
+    }
+
+    private func stopOnQueue() {
+        guard let running else { return }
+        _ = AudioDeviceStop(running.deviceID, running.ioProcID)
+        // Keep callback context alive if the device refuses callback removal.
+        if AudioDeviceDestroyIOProcID(running.deviceID, running.ioProcID) == noErr {
+            running.context.release()
+        }
+        self.running = nil
+    }
+
+    private static func inputFormat(deviceID: AudioDeviceID) throws -> AudioStreamBasicDescription {
+        var streamsAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain)
+        var streamBytes: UInt32 = 0
+        let sizeStatus = AudioObjectGetPropertyDataSize(deviceID, &streamsAddress, 0, nil, &streamBytes)
+        guard sizeStatus == noErr else {
+            throw CaptureError(operation: "input stream list size", status: sizeStatus)
+        }
+        let count = Int(streamBytes) / MemoryLayout<AudioStreamID>.size
+        guard count > 0 else { throw CocoaError(.fileNoSuchFile) }
+        var streams = [AudioStreamID](repeating: 0, count: count)
+        let listStatus = streams.withUnsafeMutableBytes { bytes in
+            AudioObjectGetPropertyData(deviceID, &streamsAddress, 0, nil, &streamBytes, bytes.baseAddress!)
+        }
+        guard listStatus == noErr else {
+            throw CaptureError(operation: "input stream list", status: listStatus)
+        }
+        var formatAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioStreamPropertyVirtualFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var asbd = AudioStreamBasicDescription()
+        var formatBytes = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let formatStatus = AudioObjectGetPropertyData(
+            streams[0], &formatAddress, 0, nil, &formatBytes, &asbd)
+        guard formatStatus == noErr else {
+            throw CaptureError(operation: "input stream format", status: formatStatus)
+        }
+        return asbd
+    }
+
+    private static let ioProc: AudioDeviceIOProc = {
+        _, _, input, _, output, _, clientData in
+        let buffers = UnsafeMutableAudioBufferListPointer(output)
+        for index in buffers.indices {
+            if let data = buffers[index].mData {
+                memset(data, 0, Int(buffers[index].mDataByteSize))
+            }
+        }
+        guard let clientData else { return noErr }
+        Unmanaged<CallbackContext>.fromOpaque(clientData).takeUnretainedValue().deliver(input)
+        return noErr
+    }
+}
+
+private enum MacMicrophoneDevices {
+    struct Device {
+        let id: AudioDeviceID
+        let uid: String
+        let name: String
+        let transport: UInt32
+        var isBluetooth: Bool {
+            transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+        }
+    }
+
+    static func available() -> [Device] {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+                                                mScope: kAudioObjectPropertyScopeGlobal,
+                                                mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return [] }
+        guard size >= MemoryLayout<AudioDeviceID>.size else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        let result = ids.withUnsafeMutableBytes {
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, $0.baseAddress!)
+        }
+        guard result == noErr else { return [] }
+        return ids.compactMap { id in
+            var streams = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
+                                                      mScope: kAudioDevicePropertyScopeInput,
+                                                      mElement: kAudioObjectPropertyElementMain)
+            var streamBytes: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &streamBytes) == noErr,
+                  streamBytes > 0, let uid = string(id, kAudioDevicePropertyDeviceUID),
+                  let name = string(id, kAudioObjectPropertyName) else { return nil }
+            return Device(id: id, uid: uid, name: name, transport: number(id, kAudioDevicePropertyTransportType) ?? 0)
+        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    static func selected(uid: String?) -> Device? {
+        let devices = available()
+        if let uid { return devices.first(where: { $0.uid == uid }) }
+        let defaultID = number(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice)
+        if let current = devices.first(where: { $0.id == defaultID }), !current.isBluetooth { return current }
+        // An automatic Bluetooth microphone would downgrade system playback.
+        return devices.first(where: { $0.transport == kAudioDeviceTransportTypeBuiltIn })
+            ?? devices.first(where: { !$0.isBluetooth })
+            ?? devices.first(where: { $0.id == defaultID })
+    }
+
+    private static func number(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> UInt32? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
+    private static func string(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                mElement: kAudioObjectPropertyElementMain)
+        var value: CFString?
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value as String?
+    }
+}
+#endif
 
 enum AudioRoutePreferences {
     static let didChange = Notification.Name("ReverbQSO.audioRoutePreferencesChanged")
@@ -194,8 +430,8 @@ enum MicrophoneGainSettings {
     }
 }
 
-/// The tap stays installed for the QSO. Only callbacks admitted while PTT is
-/// down may enter the encoder; sealing the gate makes release deterministic.
+/// Only callbacks admitted while PTT is down may enter the encoder.
+/// Sealing the gate makes release deterministic for both native capture and taps.
 private final class CaptureTapGate: @unchecked Sendable {
     private let lock = NSLock()
     private var active: (CaptureBufferProcessingBarrier, UInt64, CaptureDSPProcessor.Configuration)?
@@ -298,6 +534,14 @@ final class AudioEngine: ObservableObject {
         receiveOutputMuted = muted
         playerNode.volume = muted ? 0 : 1
     }
+#if targetEnvironment(macCatalyst)
+    // Native receive and microphone I/O have separate lifetimes. Holding a
+    // Bluetooth input open lowers every app's headphone playback quality.
+    private var nativeMicrophoneCapture: MacMicrophoneCapture?
+#endif
+
+    private var microphoneNode: AVAudioInputNode { engine.inputNode }
+
     private var playerNode = AVAudioPlayerNode()
     private var diagnosticsPlaybackOverflowDrops = 0
     private var diagnosticsPlaybackDiscardBaseline = 0
@@ -451,11 +695,11 @@ final class AudioEngine: ObservableObject {
         engine = AVAudioEngine()
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         do {
-            try engine.inputNode.setVoiceProcessingEnabled(true)
+            try microphoneNode.setVoiceProcessingEnabled(true)
             // Software gain handles automatic/manual levels. Keep voice I/O
             // echo cancellation, but do not run two competing gain controls.
-            engine.inputNode.isVoiceProcessingAGCEnabled = false
-            VoiceDiagnosticLog.record("fresh engine voice processing enabled AGC=\(engine.inputNode.isVoiceProcessingAGCEnabled)")
+            microphoneNode.isVoiceProcessingAGCEnabled = false
+            VoiceDiagnosticLog.record("fresh engine voice processing enabled AGC=\(microphoneNode.isVoiceProcessingAGCEnabled)")
         } catch {
             VoiceDiagnosticLog.record("fresh engine voice processing unavailable error=\(error.localizedDescription)")
             // Discard any partially configured I/O unit before using the
@@ -466,9 +710,11 @@ final class AudioEngine: ObservableObject {
         isConfigured = false
         isRunning = false
         installAudioSessionObserversIfNeeded()
-        let freshInput = engine.inputNode
+#if !targetEnvironment(macCatalyst)
+        let freshInput = microphoneNode
         let format = freshInput.outputFormat(forBus: 0)
         VoiceDiagnosticLog.record("fresh engine input format channels=\(format.channelCount) rate=\(format.sampleRate)")
+#endif
     }
 
     /// Callback invoked with encoded audio data ready for transmission.
@@ -561,6 +807,14 @@ final class AudioEngine: ObservableObject {
 #endif
             try setupEngineIfNeeded()
             playerNode.volume = receiveOutputMuted ? 0 : 1
+#if targetEnvironment(macCatalyst)
+            if let unit = engine.outputNode.audioUnit {
+                var disabled: UInt32 = 0
+                let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO,
+                    kAudioUnitScope_Input, 1, &disabled, UInt32(MemoryLayout<UInt32>.size))
+                VoiceDiagnosticLog.record("native receive input I/O disabled status=\(status)")
+            }
+#endif
             try engine.start()
             isRunning = engine.isRunning
 #if targetEnvironment(macCatalyst)
@@ -586,7 +840,7 @@ final class AudioEngine: ObservableObject {
     /// gesture. Automatic preparation never presents a permission prompt.
     /// RX remains available if permission or the input route fails.
     func prepareCaptureInput(requestPermission: Bool = true) async -> Bool {
-#if targetEnvironment(simulator)
+#if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
         return false
 #else
         guard !isCaptureReady else { return true }
@@ -654,7 +908,7 @@ final class AudioEngine: ObservableObject {
             activateCaptureDelivery(generation: captureGeneration)
             VoiceDiagnosticLog.record("capture began from ready input graph")
             let outputs = AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
-            VoiceDiagnosticLog.record("PTT audio route preference=\(outputPreference.rawValue) outputs=[\(outputs)] voiceProcessing=\(engine.inputNode.isVoiceProcessingEnabled) AGC=\(engine.inputNode.isVoiceProcessingAGCEnabled) bypassed=\(engine.inputNode.isVoiceProcessingBypassed) inputMuted=\(engine.inputNode.isVoiceProcessingInputMuted)")
+            VoiceDiagnosticLog.record("PTT audio route preference=\(outputPreference.rawValue) outputs=[\(outputs)] voiceProcessing=\(microphoneNode.isVoiceProcessingEnabled) AGC=\(microphoneNode.isVoiceProcessingAGCEnabled) bypassed=\(microphoneNode.isVoiceProcessingBypassed) inputMuted=\(microphoneNode.isVoiceProcessingInputMuted)")
             return true
         }
 #if !targetEnvironment(macCatalyst)
@@ -695,6 +949,9 @@ final class AudioEngine: ObservableObject {
             return false
         }
 
+#if targetEnvironment(macCatalyst)
+        return await startNativeMicrophone(generation: generation)
+#else
         if !isRunning { startPlayback() }
         guard isRunning else {
             captureRequested = false
@@ -707,7 +964,8 @@ final class AudioEngine: ObservableObject {
             logger.error("Failed to prepare audio session for capture error='\(error.localizedDescription, privacy: .public)'")
         }
 
-        let inputNode = engine.inputNode
+
+        let inputNode = microphoneNode
         logRouteDiagnostics(context: "capture-before-format")
         let outputFormat = inputNode.outputFormat(forBus: 0)
         let inputFormat = inputNode.inputFormat(forBus: 0)
@@ -753,7 +1011,7 @@ final class AudioEngine: ObservableObject {
         }
 
         stopCaptureTap(preservingIntent: true)
-        let recoveredInputNode = engine.inputNode
+        let recoveredInputNode = microphoneNode
         if let safeTapFormat = validatedTapFormat(for: recoveredInputNode, preferred: selectedFormat),
            installCaptureTap(on: recoveredInputNode, format: safeTapFormat, generation: generation) {
             guard activateCaptureGraphAfterInstallingTap() else { return false }
@@ -771,9 +1029,39 @@ final class AudioEngine: ObservableObject {
         }
         return false
 #endif
+#endif
     }
 
     /// Stop microphone capture (PTT released) while keeping playback alive.
+#if targetEnvironment(macCatalyst)
+    private func startNativeMicrophone(generation: UInt64) async -> Bool {
+        if !isRunning { startPlayback() }
+        guard isRunning, let device = MacMicrophoneDevices.selected(uid: selectedInputDeviceID) else {
+            captureRequested = false
+            return false
+        }
+        tapVersion &+= 1
+        tapInstalled = true
+        isCapturing = true
+        activateCaptureDelivery(generation: generation)
+        let capture = MacMicrophoneCapture(block: Self.captureTapBlock(
+            engine: self, gate: captureTapGate, tapVersion: tapVersion))
+        nativeMicrophoneCapture = capture
+        do {
+            try await capture.start(deviceID: device.id)
+            guard isCaptureRequestCurrent(generation) else { capture.stop(); return false }
+            VoiceDiagnosticLog.record("native microphone selected name=\(device.name) bluetooth=\(device.isBluetooth)")
+            return true
+        } catch {
+            logger.error("Native microphone start failed: \(error.localizedDescription, privacy: .public)")
+            guard isCaptureRequestCurrent(generation) else { capture.stop(); return false }
+            stopCaptureTap(preservingIntent: false)
+            nativeMicrophoneCapture = nil
+            return false
+        }
+    }
+#endif
+
     func stopCapture() {
         _ = stopCaptureAndFlush()
     }
@@ -794,6 +1082,10 @@ final class AudioEngine: ObservableObject {
         }
         codec.resetEncodeState()
         resetCaptureEncodingCounters()
+#if targetEnvironment(macCatalyst)
+        nativeMicrophoneCapture = nil
+        if playbackDesired && isRunning { try? configureAudioSession() }
+#endif
         return finalAudio
     }
 
@@ -807,7 +1099,7 @@ final class AudioEngine: ObservableObject {
         captureRecoveryTask?.cancel()
         captureRecoveryTask = nil
         captureDrainGeneration = generation
-#if !os(iOS) || targetEnvironment(simulator)
+#if !os(iOS) || targetEnvironment(simulator) || targetEnvironment(macCatalyst)
         stopCaptureTap(preservingIntent: false, resetResampler: false)
 #endif
 
@@ -847,10 +1139,11 @@ final class AudioEngine: ObservableObject {
         inputLevel = 0
 #if targetEnvironment(macCatalyst)
         isCapturing = false
-        // Keep the input tap installed with its admission gate sealed. Removing
-        // a tap can reconfigure native I/O and interrupt queued receive audio.
-        // Microphone drain can overlap incoming speech. Keep the healthy
-        // receive timeline intact so release cannot discard the peer's reply.
+        let finishedCapture = nativeMicrophoneCapture
+        nativeMicrophoneCapture = nil
+        await finishedCapture?.stopAndWait()
+        try? configureAudioSession()
+        // Receive I/O never restarts when the independent microphone closes.
         if isRunning && engine.isRunning {
             if !playerNode.isPlaying { playerNode.play() }
             ensurePlaybackOutputRoute()
@@ -877,6 +1170,10 @@ final class AudioEngine: ObservableObject {
         capturePreparationFailed = false
         invalidateCaptureStart(preservingIntent: false)
         captureRecoveryFailureCount = 0
+#if targetEnvironment(macCatalyst)
+        nativeMicrophoneCapture?.stop()
+        nativeMicrophoneCapture = nil
+#endif
         stopPlaybackTimeline(reason: "stop-all")
         engine.stop()
         if engine.attachedNodes.contains(playerNode) {
@@ -1044,6 +1341,10 @@ final class AudioEngine: ObservableObject {
 #if os(watchOS)
         // watchOS owns route selection and does not expose iOS route preferences.
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [])
+#elseif targetEnvironment(macCatalyst)
+        // Native microphone capture opens the selected Core Audio device.
+        // The receive session never requests a Bluetooth call profile.
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
 #elseif targetEnvironment(simulator)
         // Simulator has limited VoIP I/O support; prefer stable playback.
         try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
@@ -1127,6 +1428,13 @@ final class AudioEngine: ObservableObject {
     }
 
     func setInputDevice(id: String?) {
+#if targetEnvironment(macCatalyst)
+        if selectedInputDeviceID != id, captureRequested || isCapturing {
+            invalidateCaptureStart(preservingIntent: false)
+            nativeMicrophoneCapture = nil
+            onCaptureSuspended?()
+        }
+#endif
         selectedInputDeviceID = id
         AudioRoutePreferences.save(inputUID: id)
 #if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
@@ -1138,7 +1446,11 @@ final class AudioEngine: ObservableObject {
     }
 
     private func refreshAvailableInputDevices(session: AVAudioSession = .sharedInstance()) {
-#if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
+#if targetEnvironment(macCatalyst)
+        availableInputDevices = MacMicrophoneDevices.available().map {
+            AudioInputDevice(id: $0.uid, name: $0.name, portType: $0.isBluetooth ? "Bluetooth" : "Microphone")
+        }
+#elseif os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
         availableInputDevices = (session.availableInputs ?? []).map {
             AudioInputDevice(id: $0.uid, name: $0.portName, portType: $0.portType.rawValue)
         }.sorted {
@@ -1150,7 +1462,11 @@ final class AudioEngine: ObservableObject {
     }
 
     private func applyPreferredInput(session: AVAudioSession) {
-#if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
+#if targetEnvironment(macCatalyst)
+        // Core Audio selection belongs to the capture I/O unit. Never change
+        // the Mac's default microphone or output device.
+        return
+#elseif os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
         do {
             guard let selectedInputDeviceID else {
                 guard session.preferredInput != nil else { return }
@@ -1484,6 +1800,9 @@ final class AudioEngine: ObservableObject {
 
     private func recoverCaptureTapFormat(generation: UInt64) async -> AVAudioFormat? {
         guard isCaptureRequestCurrent(generation) else { return nil }
+#if targetEnvironment(macCatalyst)
+        return nil // Native device capture does not use the playback input node.
+#else
         let session = AVAudioSession.sharedInstance()
 
         // A confirmed 0 Hz route needs a real session + graph rebuild. Waiting
@@ -1533,7 +1852,7 @@ final class AudioEngine: ObservableObject {
         }
 
         VoiceDiagnosticLog.record("capture recovery stage=fallback-category result=waiting")
-        let recoveredInputNode = engine.inputNode
+        let recoveredInputNode = microphoneNode
         let secondaryAttempt = await resolveCaptureTapFormat(
             inputNode: recoveredInputNode,
             maxAttempts: 20,
@@ -1550,6 +1869,7 @@ final class AudioEngine: ObservableObject {
         }
         VoiceDiagnosticLog.record("capture recovery stage=fallback-category result=unavailable")
         return nil
+#endif
     }
 
     @discardableResult
@@ -1638,33 +1958,21 @@ final class AudioEngine: ObservableObject {
     }
 
     private func activateCaptureGraphAfterInstallingTap() -> Bool {
+#if targetEnvironment(macCatalyst)
+        return false // Native capture has independent Core Audio device I/O.
+#else
+
         // Starting the output graph before installing the input tap can leave
         // the input branch idle even though the engine reports running.
         let wasRunning = engine.isRunning
-#if targetEnvironment(macCatalyst)
-        // Engine stop/start invalidates the player's running clock on Catalyst.
-        // Preserve processed speech, reset the player before restarting I/O,
-        // and leave the decoded playout buffer available for its normal drain.
-        if let rendered = renderedPlaybackSampleTime { playbackHistory.prune(renderedSampleTime: rendered) }
-        let retainedReceive = playbackHistory.samples
-        trimPlaybackTimeline(reason: "capture-graph-restart")
-#endif
+
         do {
             if wasRunning { engine.stop() }
             try engine.start()
-#if targetEnvironment(macCatalyst)
-            if !retainedReceive.isEmpty, let format = captureFormat,
-               let retainedBuffer = playbackBuffer(fromProcessedSamples: retainedReceive, format: format) {
-                // stop() resets the player timeline to zero; its previous render
-                // cursor may remain visible until the restarted graph renders.
-                schedulePlaybackBuffer(retainedBuffer, startingAt: 0)
-            }
-#endif
+
             playerNode.play()
             isRunning = engine.isRunning
-#if targetEnvironment(macCatalyst)
-            playbackRouteSignature = currentPlaybackRouteSignature()
-#endif
+
             recordEngineAudit("capture-graph-start-complete previousRunning=\(wasRunning)")
             logger.info("Capture graph started with input tap installed previousEngineRunning=\(wasRunning)")
         } catch {
@@ -1674,6 +1982,7 @@ final class AudioEngine: ObservableObject {
             return false
         }
         return true
+#endif
     }
 
     private func acceptCaptureDSPResult(_ result: CaptureDSPProcessor.Result, sourceSampleCount: Int, fresh: Bool) {
@@ -1778,7 +2087,9 @@ final class AudioEngine: ObservableObject {
     }
 
     private func normalizePreferredInputIfNeeded(session: AVAudioSession) {
-#if !os(watchOS) && !targetEnvironment(simulator)
+#if targetEnvironment(macCatalyst)
+        return
+#elseif !os(watchOS) && !targetEnvironment(simulator)
         guard session.isInputAvailable else { return }
         if selectedInputDeviceID != nil {
             applyPreferredInput(session: session)
@@ -1884,7 +2195,7 @@ final class AudioEngine: ObservableObject {
             playerNode.play()
             logRouteDiagnostics(context: "full-reset-engine-started")
 
-            let liveInputNode = engine.inputNode
+            let liveInputNode = microphoneNode
             let recoveredFormat = await resolveCaptureTapFormat(
                 inputNode: liveInputNode,
                 maxAttempts: 30,
@@ -2006,9 +2317,14 @@ final class AudioEngine: ObservableObject {
             captureRequested = false
         }
         if tapInstalled {
-            engine.inputNode.removeTap(onBus: 0)
+#if !targetEnvironment(macCatalyst)
+            microphoneNode.removeTap(onBus: 0)
+#endif
             tapInstalled = false
         }
+#if targetEnvironment(macCatalyst)
+        nativeMicrophoneCapture?.stop()
+#endif
         tapVersion &+= 1
         captureTapGate.resetFirstBuffer()
         isCaptureReady = false
@@ -2173,8 +2489,12 @@ final class AudioEngine: ObservableObject {
         // cache its actual format once a capture tap is installed.
         let inputSignature: String
         if tapInstalled {
-            let input = engine.inputNode.outputFormat(forBus: 0)
+#if targetEnvironment(macCatalyst)
+            inputSignature = "native-capture"
+#else
+            let input = microphoneNode.outputFormat(forBus: 0)
             inputSignature = "\(input.sampleRate):\(input.channelCount)"
+#endif
         } else { inputSignature = "idle" }
         let output = engine.outputNode.outputFormat(forBus: 0)
         return "\(endpoints)|\(session.category.rawValue)|\(session.mode.rawValue)|\(session.sampleRate)|\(inputSignature)|\(output.sampleRate):\(output.channelCount)"
@@ -2188,6 +2508,11 @@ final class AudioEngine: ObservableObject {
         guard playbackDesired || captureRequested else { return }
         let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
         if reason == .categoryChange {
+#if targetEnvironment(macCatalyst)
+            let category = AVAudioSession.sharedInstance().category
+            if AVAudioSession.sharedInstance().mode == .default,
+               category == .playback { return }
+#endif
             recoverAudioDevice(for: .categoryChange(inputUsable: hasUsableCaptureRoute()))
             return
         }
@@ -2248,9 +2573,13 @@ final class AudioEngine: ObservableObject {
     }
 
     private func hasUsableCaptureRoute() -> Bool {
-        let inputNode = engine.inputNode
+#if targetEnvironment(macCatalyst)
+        return nativeMicrophoneCapture != nil || !captureRequested
+#else
+        let inputNode = microphoneNode
         let outputFormat = inputNode.outputFormat(forBus: 0)
         return isUsableHardwareFormat(outputFormat)
+#endif
     }
 
     private func handleInterruption(typeValue: UInt, optionsValue: UInt) {

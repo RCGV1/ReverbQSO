@@ -8,6 +8,46 @@ import UIKit
 
 @MainActor
 final class AudioEngineDeviceRecoveryTests: XCTestCase {
+    func testMacReceiveDoesNotReserveHeadsetMicrophoneAndReleaseRestoresPlayback() async throws {
+#if DEBUG && targetEnvironment(macCatalyst)
+        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
+            throw XCTSkip("Mac microphone route audit is opt-in")
+        }
+        guard MicrophoneAccess.status == .granted else { throw XCTSkip("Microphone permission must already be granted") }
+        let priorInput = AudioRoutePreferences.inputUID()
+        defer { AudioRoutePreferences.save(inputUID: priorInput) }
+        AudioRoutePreferences.save(inputUID: nil)
+        let engine = AudioEngine()
+        defer { engine.stopAll() }
+        let session = AVAudioSession.sharedInstance()
+        var encodedBytes = 0
+        engine.onCapturedAudio = { encodedBytes += $0.count }
+        engine.startPlayback()
+        XCTAssertTrue(engine.isRunning)
+        XCTAssertEqual(session.category, .playback, "Receive-only radio must not activate a headset microphone")
+        XCTAssertEqual(session.mode, .default)
+        XCTAssertFalse(engine.isCaptureReady)
+        let started = await engine.startCapture(requestPermission: false)
+        XCTAssertTrue(started)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(engine.isCapturing)
+        XCTAssertTrue(engine.isCaptureReady, "Native microphone must deliver actual PCM callbacks")
+        XCTAssertGreaterThan(encodedBytes, 0, "PTT must deliver encoded microphone packets")
+        XCTAssertEqual(session.category, .playback, "Native capture must not change the receive session")
+        XCTAssertEqual(session.mode, .default, "Voice-chat mode forces Bluetooth call routing")
+        XCTAssertFalse(session.categoryOptions.contains(.allowBluetoothHFP), "Automatic input should preserve stereo headphones")
+        _ = await engine.stopCaptureAndFlushPendingBuffers()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(engine.isCapturing)
+        XCTAssertFalse(engine.isCaptureReady, "Release must retire the native microphone tap")
+        XCTAssertEqual(session.category, .playback)
+        XCTAssertTrue(engine.isRunning)
+        print("Mac route audit after release category=\(session.category.rawValue) mode=\(session.mode.rawValue) outputs=\(session.currentRoute.outputs.map(\.portType.rawValue))")
+#else
+        throw XCTSkip("Requires opted-in Mac Catalyst microphone route audit")
+#endif
+    }
+
     func testMacIntersamplePeaksStayBelowFullScaleAfterNativeResampling() async throws {
 #if DEBUG && targetEnvironment(macCatalyst)
         guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
@@ -167,18 +207,18 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
         XCTAssertGreaterThan(energies.map { $0["audibleSeconds"] ?? 0 }.max() ?? 0, 0.18,
                              "The queued synthetic tone tail must render across PTT release")
         XCTAssertFalse(engine.isCapturing)
-        XCTAssertTrue(engine.isCaptureReady)
+        XCTAssertFalse(engine.isCaptureReady)
         let postReleaseAudible = try await captureMacReceiveTone(engine, label: "post-release")
         XCTAssertGreaterThan(postReleaseAudible, 0.18, "Receive tone queued after release must render")
         let sealedBytes = payloadBytes
         try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(payloadBytes, sealedBytes, "Retained tap must not encode while PTT is released")
+        XCTAssertEqual(payloadBytes, sealedBytes, "Closed microphone must not encode while PTT is released")
         let beforeSecondPTT = engine.auditPlaybackSnapshot
         let restarted = await engine.startCapture(requestPermission: false)
         XCTAssertTrue(restarted)
         XCTAssertTrue(engine.isCapturing)
         try await Task.sleep(for: .milliseconds(500))
-        XCTAssertGreaterThan(payloadBytes, sealedBytes, "Second PTT must renew DSP delivery from the retained tap")
+        XCTAssertGreaterThan(payloadBytes, sealedBytes, "Second PTT must renew microphone capture and DSP delivery")
         XCTAssertEqual(engine.auditPlaybackSnapshot["graphReplacements"], beforeSecondPTT["graphReplacements"])
         XCTAssertEqual(engine.auditPlaybackSnapshot["timelineResets"], beforeSecondPTT["timelineResets"])
         _ = await engine.stopCaptureAndFlushPendingBuffers()
@@ -191,7 +231,7 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
 #endif
     }
 
-    func testMacFirstPTTRestoresReceiveToneQueuedBeforeGraphRestart() async throws {
+    func testMacFirstPTTPreservesReceiveToneQueuedBeforeCaptureStarts() async throws {
 #if DEBUG && targetEnvironment(macCatalyst)
         guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
             throw XCTSkip("Mac mixer audit is opt-in")
@@ -217,7 +257,7 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
         let started = await engine.startCapture(requestPermission: false)
         XCTAssertTrue(started)
         XCTAssertEqual(engine.auditPlaybackSnapshot["actualEngineRunning"], 1)
-        XCTAssertEqual(engine.auditPlaybackSnapshot["timelineResets"], (before["timelineResets"] ?? 0) + 1)
+        XCTAssertEqual(engine.auditPlaybackSnapshot["timelineResets"], before["timelineResets"])
         XCTAssertEqual(engine.auditPlaybackSnapshot["graphReplacements"], before["graphReplacements"])
         XCTAssertEqual(engine.auditPlaybackSnapshot["backlogTrims"], 0)
         XCTAssertEqual(engine.auditPlaybackSnapshot["trimmedSamples"], 0)
@@ -236,10 +276,10 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
         }
         print("Restart tone audibleSeconds=\(audibleSeconds) schedule=\(engine.auditPlaybackSchedule.suffix(6))")
         XCTAssertGreaterThan(audibleSeconds.max() ?? 0, 0.18,
-                             "Receive speech queued before the first PTT must survive the capture graph restart")
+                             "Receive speech queued before the first PTT must survive native microphone startup")
         XCTAssertEqual(report["writeErrors"], 0)
         XCTAssertEqual(report["droppedTapBuffers"], 0)
-        XCTAssertEqual(engine.auditPlaybackSnapshot["timelineResets"], (before["timelineResets"] ?? 0) + 1)
+        XCTAssertEqual(engine.auditPlaybackSnapshot["timelineResets"], before["timelineResets"])
 #else
         throw XCTSkip("Requires opted-in Mac Catalyst mixer audit")
 #endif

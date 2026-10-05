@@ -9,7 +9,8 @@ enum LiveTransportAudioPortPayloadKind: Equatable {
     /// Control is checked first because legacy RTCP can share voice's 0xC0
     /// prefix and may legally arrive on the audio port.
     static func classify(_ data: Data) -> Self? {
-        if !EchoLinkControlPacketCodec.parseEvents(from: data).isEmpty { return .control }
+        if !EchoLinkControlPacketCodec.parseEvents(from: data).isEmpty
+            || EchoLinkControlPacketCodec.isValidReceptionReport(data) { return .control }
         guard let datagram = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(data) else {
             return .control
         }

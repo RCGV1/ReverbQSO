@@ -196,6 +196,35 @@ enum EchoLinkControlPacketCodec {
         return []
     }
 
+    /// Reports prove liveness, but do not acknowledge a new EchoLink QSO.
+    static func isValidReceptionReport(_ data: Data) -> Bool {
+        let bytes = [UInt8](data)
+        var offset = 0
+        var foundReport = false
+        while offset + 4 <= bytes.count {
+            let version = bytes[offset] >> 6
+            guard version == 2 || version == 3 else { return false }
+            let length = (((Int(bytes[offset + 2]) << 8) | Int(bytes[offset + 3])) + 1) * 4
+            guard length >= 4, offset + length <= bytes.count else { return false }
+            var bodyLength = length
+            if bytes[offset] & 0x20 != 0 {
+                guard offset + length == bytes.count else { return false }
+                let padding = Int(bytes[offset + length - 1])
+                guard padding > 0, padding <= length - 4 else { return false }
+                bodyLength -= padding
+            }
+            let type = bytes[offset + 1]
+            guard (200...204).contains(type) else { return false }
+            if type == rtcpPayloadTypeRR || type == rtcpPayloadTypeSR {
+                let minimumLength = (type == rtcpPayloadTypeRR ? 8 : 28) + Int(bytes[offset] & 0x1F) * 24
+                guard bodyLength >= minimumLength, bodyLength.isMultiple(of: 4) else { return false }
+                foundReport = true
+            }
+            offset += length
+        }
+        return foundReport && offset == bytes.count
+    }
+
     // MARK: - Private
 
     private static func rtcpHeaderByte(
@@ -796,6 +825,8 @@ final class EchoLinkConnectionService: ObservableObject {
     private static let handshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7), .seconds(10), .seconds(10), .seconds(10), .seconds(10)]
     private static let relayHandshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7), .seconds(10)]
     private var handshakeWaiter: (sessionID: UUID, id: UUID, continuation: CheckedContinuation<Bool, Error>)?
+    private var peerAudioPort: UInt16 = 5198
+    private var peerControlPort: UInt16 = 5199
     private static let keepAliveInterval = Duration.seconds(10)
     private static let peerTimeoutInterval = Duration.seconds(50)
 
@@ -1073,6 +1104,8 @@ final class EchoLinkConnectionService: ObservableObject {
         }
 
         let station = resolvedStation
+        peerAudioPort = UInt16(exactly: station.port).flatMap { $0 > 0 ? $0 : nil } ?? Self.audioPort
+        peerControlPort = peerAudioPort < UInt16.max ? peerAudioPort + 1 : Self.controlPort
         logger.info("Connecting station=\(station.callsign, privacy: .public) host=\(station.ipAddress, privacy: .public) as=\(self.localCallsign, privacy: .public)")
         let newSession = QSOSession(station: station)
         resetAudioDiagnostics()
@@ -1915,7 +1948,7 @@ final class EchoLinkConnectionService: ObservableObject {
         } else if let relayClient {
             try await relayClient.sendData(data, to: host, port: Self.controlPort)
         } else if let controlSocket {
-            try await controlSocket.send(data, to: host, port: Self.controlPort)
+            try await controlSocket.send(data, to: host, port: peerControlPort)
         } else {
             throw ConnectionError.notConnected
         }
@@ -1930,7 +1963,7 @@ final class EchoLinkConnectionService: ObservableObject {
         } else if let relayClient {
             try await relayClient.sendData(data, to: host, port: Self.controlPort)
         } else if let audioSocket {
-            try await audioSocket.send(data, to: host, port: Self.controlPort)
+            try await audioSocket.send(data, to: host, port: peerControlPort)
         } else {
             throw ConnectionError.notConnected
         }
@@ -1945,7 +1978,7 @@ final class EchoLinkConnectionService: ObservableObject {
         } else if let relayClient {
             try await relayClient.sendData(data, to: host, port: Self.audioPort)
         } else if let audioSocket {
-            try await audioSocket.send(data, to: host, port: Self.audioPort)
+            try await audioSocket.send(data, to: host, port: peerAudioPort)
         } else {
             throw ConnectionError.notConnected
         }
@@ -2030,7 +2063,7 @@ final class EchoLinkConnectionService: ObservableObject {
                     try await audioSocket.send(
                         queuedPacket.data,
                         to: queuedPacket.remoteHost,
-                        port: Self.audioPort
+                        port: self.peerAudioPort
                     )
                 } else {
                     throw ConnectionError.notConnected
@@ -2175,7 +2208,7 @@ final class EchoLinkConnectionService: ObservableObject {
                         )
                         continue
                     }
-                    await self.handleControlData(datagram.data)
+                    await self.handleControlData(datagram.data, sourcePort: datagram.sourcePort)
                 } catch {
                     guard !Task.isCancelled,
                           self.session?.id == sessionID,
@@ -2253,9 +2286,19 @@ final class EchoLinkConnectionService: ObservableObject {
 
     // MARK: - Message Handling
 
-    private func handleControlData(_ data: Data) async {
+    private func handleControlData(_ data: Data, sourcePort: UInt16? = nil) async {
         guard !data.isEmpty else { return }
-        _ = await handleControlEvents(EchoLinkControlPacketCodec.parseEvents(from: data))
+        let events = EchoLinkControlPacketCodec.parseEvents(from: data)
+        // Only the direct control socket supplies a source port, after its
+        // existing peer-host check. Audio-port SDES must not change control.
+        if let sourcePort, sourcePort > 0, events.contains(where: {
+            if case .sdes = $0 { return true }; return false
+        }) { peerControlPort = sourcePort }
+        if EchoLinkControlPacketCodec.isValidReceptionReport(data),
+           let session, session.state == .connected {
+            resetPeerTimeout(sessionID: session.id)
+        }
+        _ = await handleControlEvents(events)
     }
 
     @discardableResult
@@ -2265,6 +2308,11 @@ final class EchoLinkConnectionService: ObservableObject {
         for event in events {
             switch event {
             case .sdes(let sdes):
+                if proxySession == nil, relayClient == nil,
+                   let item = sdes.privateItems.first(where: { $0.hasPrefix("P") }),
+                   let advertised = UInt16(item.dropFirst()), advertised > 0 {
+                    peerAudioPort = advertised
+                }
                 if sdes.supportsSpeex, audioEngine.isSpeexTransmitAvailable {
                     transmitCodec = .speex
                 }
@@ -2598,6 +2646,12 @@ final class EchoLinkConnectionService: ObservableObject {
 
     func handleAudioData(_ data: Data) async {
         guard session != nil else { return }
+
+        if EchoLinkControlPacketCodec.isValidReceptionReport(data) {
+            if let session, session.state == .connected { resetPeerTimeout(sessionID: session.id) }
+            _ = await handleControlEvents(EchoLinkControlPacketCodec.parseEvents(from: data))
+            return
+        }
 
         if await handleControlEvents(EchoLinkControlPacketCodec.parseEvents(from: data)) {
             return

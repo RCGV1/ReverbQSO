@@ -6,6 +6,71 @@ import XCTest
 
 @MainActor
 final class EchoLinkRelayConnectionTests: XCTestCase {
+    func testDirectPeerAdvertisedAudioPortAndControlSourceAreHonored() async throws {
+        let peerControl = try BoundUDPSocket(localPort: 0)
+        defer { peerControl.close() }
+        let peerAudio = try BoundUDPSocket(localPort: 0)
+        defer { peerAudio.close() }
+        let peerReplyControl = try BoundUDPSocket(localPort: 0)
+        defer { peerReplyControl.close() }
+        let service = EchoLinkConnectionService(
+            networkConfigurationProvider: { .init(mode: .direct, host: "", port: 8100, password: "") })
+        service.authenticatedCallsign = "N0TST"
+        service.callAccessPolicyProvider = { CallAccessPolicy() }
+        service.setBackgroundMuted(true)
+        let chatReceived = expectation(description: "Chat reached advertised audio endpoint")
+        let byeReceived = expectation(description: "BYE reached learned control source")
+        let server = Task {
+            let handshake = try await peerControl.receive()
+            let reply = EchoLinkControlPacketCodec.buildSDESPacket(callsign: "K1MOCK-R",
+                audioPort: peerAudio.actualLocalPort, advertiseSpeex: false)
+            try await peerReplyControl.send(reply, to: handshake.sourceHost, port: handshake.sourcePort)
+            while true {
+                let chat = try await peerAudio.receive()
+                if EchoLinkControlPacketCodec.parseEvents(from: chat.data).contains(where: {
+                    if case .chat = $0 { return true }; return false
+                }) { break }
+            }
+            chatReceived.fulfill()
+            while true {
+                let control = try await peerReplyControl.receive()
+                if EchoLinkControlPacketCodec.parseEvents(from: control.data).contains(where: {
+                    if case .bye = $0 { return true }; return false
+                }) { byeReceived.fulfill(); break }
+            }
+        }
+        defer { server.cancel() }
+        await service.connect(to: Station(callsign: "K1MOCK-R", ipAddress: "127.0.0.1",
+            port: Int(peerControl.actualLocalPort) - 1, type: .repeater))
+        XCTAssertEqual(service.session?.state, .connected)
+        await service.sendChat(message: "Local endpoint regression")
+        await fulfillment(of: [chatReceived], timeout: 3)
+        await service.disconnect()
+        await fulfillment(of: [byeReceived], timeout: 3)
+        // Close sockets before awaiting the fixture so a failed expectation
+        // cannot strand it in a receive indefinitely.
+        peerControl.close()
+        peerAudio.close()
+        peerReplyControl.close()
+        try await server.value
+    }
+
+    func testReceptionReportsKeepConnectedPeerAliveButDoNotAcknowledgeHandshake() async throws {
+        let service = EchoLinkConnectionService()
+        service.setBackgroundMuted(true)
+        service.session = QSOSession(station: Station(callsign: "K1MOCK", ipAddress: "127.0.0.1"),
+                                     state: .connecting)
+        let rr = Data([0xC0, 201, 0, 1, 0, 0, 0, 1])
+        await service.handleAudioData(rr)
+        XCTAssertEqual(service.session?.state, .connecting)
+        await service.handleAudioData(EchoLinkControlPacketCodec.buildSDESPacket(callsign: "K1MOCK"))
+        try await Task.sleep(for: .seconds(25))
+        await service.handleAudioData(rr)
+        try await Task.sleep(for: .seconds(30))
+        XCTAssertEqual(service.session?.state, .connected)
+        await service.disconnect()
+    }
+
     func testImmediateRetryKeepsItsOwnCancellableAttempt() async throws {
         let relay = try BoundUDPSocket(localPort: 0)
         defer { relay.close() }
