@@ -483,25 +483,27 @@ final class WatchAppModel: NSObject, ObservableObject {
     }
 
     func beginCallCQ(preferences: CallCQPreferences) {
-        let backend: any CallCQBackend
-        if isLocalDemoMode {
-            backend = DemoCallCQBackend(
-                stations: LocalDemoAccount.stations,
-                policy: CallAccessPolicyStore.load(demo: true)
-            )
-        } else {
+        let service = CallCQService(backendFactory: { [weak self] preferences in
+            guard let self else {
+                return FailingCallCQBackend(error: CallCQBackendError.transportUnavailable)
+            }
+            if self.isLocalDemoMode {
+                return DemoCallCQBackend(
+                    stations: LocalDemoAccount.stations,
+                    policy: CallAccessPolicyStore.load(demo: true)
+                )
+            }
             do {
-                backend = try directoryService.makeLiveCallCQBackend(
-                    callsign: callsign,
+                return try await self.directoryService.makeLiveCallCQBackend(
+                    callsign: self.callsign,
                     preferences: preferences,
-                    recentCallsigns: localRecents.filter { $0.type != .conference }.map(\.callsign),
+                    recentCallsigns: self.localRecents.filter { $0.type != .conference }.map(\.callsign),
                     policy: CallAccessPolicyStore.load()
                 )
             } catch {
-                backend = FailingCallCQBackend(error: error)
+                return FailingCallCQBackend(error: error)
             }
-        }
-        let service = CallCQService(backend: backend)
+        })
         callCQService = service
         Task { await service.start(preferences: preferences) }
     }

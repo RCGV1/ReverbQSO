@@ -7,6 +7,36 @@ import XCTest
 
 @MainActor
 final class ProxyDirectoryRefreshTests: XCTestCase {
+    private final class CQCapturingClient: CallCQClientProtocol, @unchecked Sendable {
+        var address: String?
+        func register(_ registration: CallCQRegistration, password: String) async throws {
+            address = registration.internetAddress
+        }
+        func find(callsign: String, password: String) async throws -> CallCQPollResponse {
+            .matched(callsign: "K1MATCH", internetAddress: "192.0.2.10")
+        }
+        func cancel(callsign: String, password: String) async {}
+    }
+
+    func testCQAdvertisesAuthenticatedProxyAddressWhenRegistrationHasNoAddress() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (directory, _) = makeService(proxy: proxy)
+        await directory.login(callsign: "N0TEST", password: "directory-password")
+        XCTAssertTrue(directory.isLoggedIn)
+        let registration = CallCQRegistration(callsign: "N0TEST", nodeType: "U", internetAddress: nil,
+            countryCode: "US", isReachable: true, acceptCountryCodes: [], acceptLanguageCodes: ["en"],
+            declineCallsigns: [], acceptNodeTypes: ["U"])
+        let client = CQCapturingClient()
+        let backend = LiveCallCQBackend(registration: registration, password: "cq-test", directory: directory,
+            policy: CallAccessPolicy(), client: client, pollDelay: .zero)
+        _ = try await backend.waitForMatch(preferences: .default)
+        XCTAssertEqual(client.address, "127.0.0.1", "Advertise the authenticated tunnel, not an empty proxy preference")
+        XCTAssertFalse(directory.isAvailableForCalls)
+        await directory.logout()
+    }
+
     func testOverlappingRefreshesAreSerializedAndLatestRefreshSucceeds() async throws {
         let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
         try await proxy.start()

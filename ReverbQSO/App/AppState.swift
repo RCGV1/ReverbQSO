@@ -413,7 +413,7 @@ final class AppState: ObservableObject {
             }
         }
         do {
-            return try directoryService.makeLiveCallCQBackend(
+            return try await directoryService.makeLiveCallCQBackend(
                 callsign: currentUser,
                 preferences: preferences,
                 recentCallsigns: recentConnectionsService.recents

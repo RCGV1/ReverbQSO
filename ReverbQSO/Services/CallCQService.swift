@@ -17,6 +17,7 @@ final class CallCQService: ObservableObject, Identifiable {
     private var backend: (any CallCQBackend)?
     private let backendFactory: ((CallCQPreferences) async -> any CallCQBackend)?
     private var requestTask: Task<Station, Error>?
+    private var cleanupTask: Task<Void, Never>?
     private var generation: UInt64 = 0
 
     init(backend: any CallCQBackend) {
@@ -34,6 +35,11 @@ final class CallCQService: ObservableObject, Identifiable {
         generation &+= 1
         let requestGeneration = generation
         state = .waiting
+
+        // CQ cancel is keyed only by callsign. Do not let its response race
+        // a replacement register for the same account.
+        await cleanupTask?.value
+        guard requestGeneration == generation, state == .waiting else { return }
 
         let activeBackend: any CallCQBackend
         if let backendFactory {
@@ -64,10 +70,19 @@ final class CallCQService: ObservableObject, Identifiable {
 
     func cancel() async {
         generation &+= 1
-        requestTask?.cancel()
+        let oldRequest = requestTask
+        let oldBackend = backend
+        let predecessor = cleanupTask
+        oldRequest?.cancel()
         requestTask = nil
+        let cleanup = Task {
+            await predecessor?.value
+            await oldBackend?.cancel()
+            _ = await oldRequest?.result
+        }
+        cleanupTask = cleanup
         state = .idle
-        await backend?.cancel()
+        await cleanup.value
     }
 
     func reset() {
@@ -95,6 +110,7 @@ final class LiveCallCQBackend: CallCQBackend {
     private let usesDirectSockets: Bool
     private var directSocketPair: DirectCQSocketPair?
     private var cancelled = false
+    private var operationTask: Task<Station, Error>?
 
     init(registration: CallCQRegistration, password: String, directory: EchoLinkDirectoryService,
          policy: CallAccessPolicy, client: any CallCQClientProtocol = CallCQHTTPClient(),
@@ -109,10 +125,39 @@ final class LiveCallCQBackend: CallCQBackend {
     }
 
     func waitForMatch(preferences: CallCQPreferences) async throws -> Station {
-        cancelled = false
+        try Task.checkCancellation()
+        // A backend replaced before its start task ran is retired permanently.
+        // Retries use a fresh backend, coordinated by the directory service.
+        guard !cancelled, operationTask == nil else { throw CancellationError() }
+        let operation = Task { try await self.findMatch(preferences: preferences) }
+        operationTask = operation
+        defer { operationTask = nil }
+        return try await withTaskCancellationHandler {
+            try await operation.value
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
+    private func findMatch(preferences: CallCQPreferences) async throws -> Station {
+        var availabilityRevision: UInt64?
+        var registrationStarted = false
         do {
+            try Task.checkCancellation()
             if usesDirectSockets {
                 directSocketPair = try directory.reserveDirectCQSocketPair()
+            }
+            if !directory.isAvailableForCalls {
+                let revision = directory.availabilityRevision &+ 1
+                guard await directory.setAvailableForCalls(true) else {
+                    throw directory.error ?? CallCQBackendError.transportUnavailable
+                }
+                availabilityRevision = revision
+            }
+            // Public proxy preferences may have no host. Availability recovery
+            // can also replace the tunnel, so read its actual endpoint now.
+            if let address = try await directory.currentCQProxyAddress() {
+                registration = registration.replacingInternetAddress(address)
             }
             if let address = registration.internetAddress,
                !CallCQIPv4Resolver.isIPv4(address) {
@@ -120,13 +165,12 @@ final class LiveCallCQBackend: CallCQBackend {
                     try await CallCQIPv4Resolver.resolve(address)
                 )
             }
+            try Task.checkCancellation()
+            guard !cancelled else { throw CancellationError() }
+            registrationStarted = true
             try await client.register(registration, password: password)
-            guard !cancelled else {
-                // A cancel can overtake an in-flight registration. Cancel once
-                // more after registration completes so no late queue entry remains.
-                await sendCleanupCancel()
-                throw CancellationError()
-            }
+            try Task.checkCancellation()
+            guard !cancelled else { throw CancellationError() }
             while !cancelled {
                 try await Task.sleep(for: pollDelay)
                 try Task.checkCancellation()
@@ -149,7 +193,11 @@ final class LiveCallCQBackend: CallCQBackend {
                         throw CallCQBackendError.server("The matched station is blocked by Call Restrictions.")
                     }
                     // Remove the matched queue entry before handing the socket reservation to QSO.
-                    await sendCleanupCancel()
+                    await sendCleanupCancel(registered: registrationStarted, availabilityRevision: availabilityRevision)
+                    registrationStarted = false
+                    availabilityRevision = nil
+                    try Task.checkCancellation()
+                    guard !cancelled else { throw CancellationError() }
                     if let directSocketPair {
                         directory.holdMatchedCQSocketPair(directSocketPair)
                         self.directSocketPair = nil
@@ -162,25 +210,32 @@ final class LiveCallCQBackend: CallCQBackend {
             cancelled = true
             directSocketPair?.close()
             directSocketPair = nil
-            await sendCleanupCancel()
+            await sendCleanupCancel(registered: registrationStarted, availabilityRevision: availabilityRevision)
             throw error
         }
     }
 
     func cancel() async {
-        guard !cancelled else { return }
         cancelled = true
-        directSocketPair?.close()
-        directSocketPair = nil
-        await sendCleanupCancel()
+        let operation = operationTask
+        operation?.cancel()
+        // The operation owns cleanup, including a register or find already
+        // in flight. Waiting here avoids duplicate and late callsign cancels.
+        _ = await operation?.result
     }
 
     /// Cleanup must outlive cancellation of the request task that detected it.
-    private func sendCleanupCancel() async {
+    private func sendCleanupCancel(registered: Bool, availabilityRevision: UInt64?) async {
         let callsign = registration.callsign
         let localPassword = password
         let httpClient = client
-        await Task { await httpClient.cancel(callsign: callsign, password: localPassword) }.value
+        let directory = directory
+        await Task {
+            if registered { await httpClient.cancel(callsign: callsign, password: localPassword) }
+            if let availabilityRevision, directory.availabilityRevision == availabilityRevision {
+                _ = await directory.setAvailableForCalls(false)
+            }
+        }.value
     }
 
     private static func stationType(for callsign: String) -> Station.StationType {

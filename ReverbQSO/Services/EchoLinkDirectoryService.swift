@@ -35,6 +35,8 @@ final class EchoLinkDirectoryService: ObservableObject {
     @Published var isLoggedIn = false
     @Published private(set) var registeredThroughProxy = false
     @Published private(set) var isAvailableForCalls = false
+    // Count intent, including a no-op ONLINE request by a newly started listener.
+    private(set) var availabilityRevision: UInt64 = 0
     @Published private(set) var lastSuccessfulSnapshotAt: Date?
     @Published var error: Error?
 
@@ -67,6 +69,8 @@ final class EchoLinkDirectoryService: ObservableObject {
     private var keepAliveFailures = DirectoryKeepAliveFailureTracker()
     private var pendingCQSocketPair: DirectCQSocketPair?
     private var pendingCQSocketExpiryTask: Task<Void, Never>?
+    private weak var activeCQBackend: LiveCallCQBackend?
+    private var cqBackendGeneration: UInt64 = 0
 
     init(
         fetchStationsForRefresh: (@MainActor () async throws -> [Station])? = nil,
@@ -127,6 +131,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     @discardableResult
     func setAvailableForCalls(_ available: Bool) async -> Bool {
         guard isLoggedIn else { return false }
+        availabilityRevision &+= 1
         let generation = lifecycleGeneration.current
         let predecessor = availabilityTask
         let task = Task { [weak self] in
@@ -191,6 +196,11 @@ final class EchoLinkDirectoryService: ObservableObject {
                 isLoading = false
             }
         }
+
+        cqBackendGeneration &+= 1
+        await activeCQBackend?.cancel()
+        guard lifecycleGeneration.matches(generation) else { return }
+        activeCQBackend = nil
 
         await client.logout()
         guard lifecycleGeneration.matches(generation) else { return }
@@ -325,6 +335,11 @@ final class EchoLinkDirectoryService: ObservableObject {
         isLoading = false
         error = nil
 
+        cqBackendGeneration &+= 1
+        await activeCQBackend?.cancel()
+        guard lifecycleGeneration.matches(generation) else { return }
+        activeCQBackend = nil
+
         if localDemoAccount == nil { await client.logout() }
         guard lifecycleGeneration.matches(generation) else { return }
         clearPublishedLoginState()
@@ -375,13 +390,35 @@ final class EchoLinkDirectoryService: ObservableObject {
         return current
     }
 
+    /// Advertise the tunnel selected for this login, rather than the public
+    /// proxy preference, which may intentionally contain an empty hostname.
+    func currentCQProxyAddress() async throws -> String? {
+        guard let selection = effectiveTransport, selection.configuration.isEnabled else { return nil }
+        let generation = lifecycleGeneration.current
+        guard isLoggedIn,
+              let session = await proxySessionStore.currentSession(
+                callsign: authenticatedCallsign, configuration: selection.configuration),
+              lifecycleGeneration.matches(generation), isLoggedIn,
+              !session.configuration.host.isEmpty else {
+            throw CallCQBackendError.transportUnavailable
+        }
+        return session.configuration.host
+    }
+
     /// Creates a CQ matcher without exposing the stored account password to UI code.
     func makeLiveCallCQBackend(
         callsign: String,
         preferences: CallCQPreferences,
         recentCallsigns: [String],
         policy: CallAccessPolicy
-    ) throws -> LiveCallCQBackend {
+    ) async throws -> LiveCallCQBackend {
+        cqBackendGeneration &+= 1
+        let generation = cqBackendGeneration
+        // Closing and reopening the CQ sheet creates a new service. Finish
+        // cleanup of the previous service before registering this callsign again.
+        await activeCQBackend?.cancel()
+        try Task.checkCancellation()
+        guard generation == cqBackendGeneration else { throw CancellationError() }
         guard isLoggedIn, let transport = effectiveTransport,
               let password = KeychainService.loadPassword(for: callsign), !password.isEmpty else {
             throw CallCQBackendError.authenticatedTransportUnavailable
@@ -393,13 +430,15 @@ final class EchoLinkDirectoryService: ObservableObject {
             recentCallsigns: recentCallsigns,
             transport: transport
         )
-        return LiveCallCQBackend(
+        let backend = LiveCallCQBackend(
             registration: registration,
             password: password,
             directory: self,
             policy: policy,
             usesDirectSockets: transport.configuration.mode == .direct
         )
+        activeCQBackend = backend
+        return backend
     }
 
     func reserveDirectCQSocketPair() throws -> DirectCQSocketPair {
@@ -534,6 +573,10 @@ final class EchoLinkDirectoryService: ObservableObject {
         isLoading = false
         clearPublishedLoginState()
 
+        cqBackendGeneration &+= 1
+        await activeCQBackend?.cancel()
+        guard lifecycleGeneration.matches(terminalGeneration) else { return }
+        activeCQBackend = nil
         await client.logout()
         guard lifecycleGeneration.matches(terminalGeneration) else { return }
         error = terminalError
