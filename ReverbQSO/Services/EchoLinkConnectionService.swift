@@ -631,6 +631,7 @@ final class EchoLinkConnectionService: ObservableObject {
     private var proxySession: EchoLinkProxySession?
     private var relayClient: EchoLinkRelayClient?
     private var outboundConnectionAttemptID: UUID?
+    private var outboundConnectionTask: (id: UUID, task: Task<Void, Never>)?
     private let audioEngine: AudioEngine
     @Published private(set) var transmitCodec: EchoLinkVoiceCodec = .gsm
     private var activeTransmitCodec: EchoLinkVoiceCodec = .gsm
@@ -1006,15 +1007,26 @@ final class EchoLinkConnectionService: ObservableObject {
 
     /// Connect to a remote EchoLink station.
     func connect(to station: Station, preservingEndpoint: Bool = false) async {
-#if os(iOS) && !targetEnvironment(macCatalyst)
-        // Service entry points include manual reconnect, which bypasses AppState.
-        // Capture the previous session so an expired rejected attempt cannot end it.
-        let previousSessionID = session?.id
+        guard outboundConnectionTask == nil else {
+            error = ConnectionError.alreadyConnected
+            return
+        }
+        let operationID = UUID()
         let operation = Task { @MainActor in
             guard !Task.isCancelled else { return }
             await performConnect(to: station, preservingEndpoint: preservingEndpoint)
         }
+        outboundConnectionTask = (operationID, operation)
+        defer {
+            // A cancelled attempt may finish after its replacement has started.
+            if outboundConnectionTask?.id == operationID { outboundConnectionTask = nil }
+        }
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        // Service entry points include manual reconnect, which bypasses AppState.
+        // Capture the previous session so an expired rejected attempt cannot end it.
+        let previousSessionID = session?.id
         let lifetime = ConnectionAttemptLifetime {
+            guard self.outboundConnectionTask?.id == operationID else { return }
             operation.cancel()
             guard self.session?.id != previousSessionID else { return }
             self.cancelPendingConnection()
@@ -1024,14 +1036,12 @@ final class EchoLinkConnectionService: ObservableObject {
         }
         lifetime.beginApplicationTask(name: "EchoLink peer handshake")
         defer { lifetime.end() }
+#endif
         await withTaskCancellationHandler {
             await operation.value
         } onCancel: {
             operation.cancel()
         }
-#else
-        await performConnect(to: station, preservingEndpoint: preservingEndpoint)
-#endif
     }
 
     private func performConnect(to station: Station, preservingEndpoint: Bool) async {
@@ -1256,12 +1266,20 @@ final class EchoLinkConnectionService: ObservableObject {
     func cancelPendingConnection() {
         guard let pending = session,
               pending.state == .connecting || outboundConnectionAttemptID == pending.id else { return }
+        outboundConnectionTask?.task.cancel()
+        outboundConnectionTask = nil
+        reconnectGeneration &+= 1
+        reconnectCandidate = nil
         tearDown(expectedSessionID: pending.id)
         session = nil
     }
 
     /// Disconnect from the current station.
     func disconnect() async {
+        if session?.state == .connecting {
+            cancelPendingConnection()
+            return
+        }
         if isLocalDemoMode {
             let ended = session
             reconnectGeneration &+= 1

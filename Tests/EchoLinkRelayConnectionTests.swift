@@ -6,6 +6,88 @@ import XCTest
 
 @MainActor
 final class EchoLinkRelayConnectionTests: XCTestCase {
+    func testImmediateRetryKeepsItsOwnCancellableAttempt() async throws {
+        let relay = try BoundUDPSocket(localPort: 0)
+        defer { relay.close() }
+        let service = EchoLinkConnectionService(
+            relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") }
+        )
+        service.authenticatedCallsign = "N0TST"
+        service.callAccessPolicyProvider = { CallAccessPolicy() }
+        service.setBackgroundMuted(true)
+        let firstRegistered = expectation(description: "First attempt sent")
+        let secondRegistered = expectation(description: "Retry sent")
+        let firstEnded = expectation(description: "First attempt cancelled")
+        let secondEnded = expectation(description: "Retry cancelled")
+        let server = Task {
+            _ = try await relay.receive()
+            firstRegistered.fulfill()
+            _ = try await relay.receive()
+            secondRegistered.fulfill()
+        }
+        let first = Task {
+            await service.connect(to: Station(callsign: "K1MOCK", ipAddress: "198.51.100.10"))
+            firstEnded.fulfill()
+        }
+        defer { first.cancel(); server.cancel() }
+        await fulfillment(of: [firstRegistered], timeout: 3)
+        let firstSessionID = service.session?.id
+        service.cancelPendingConnection()
+        let second = Task {
+            await service.connect(to: Station(callsign: "K2MOCK", ipAddress: "198.51.100.11"))
+            secondEnded.fulfill()
+        }
+        defer { second.cancel() }
+        await fulfillment(of: [firstEnded, secondRegistered], timeout: 3)
+        XCTAssertNotEqual(service.session?.id, firstSessionID)
+        XCTAssertEqual(service.session?.station.callsign, "K2MOCK")
+        XCTAssertEqual(service.session?.state, .connecting)
+        service.cancelPendingConnection()
+        await fulfillment(of: [secondEnded], timeout: 1)
+        second.cancel()
+        await first.value
+        await second.value
+        try await server.value
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.error)
+        XCTAssertNil(service.reconnectCandidate)
+    }
+
+    func testCancelDuringRelayRegistrationStopsAttemptWithoutWaitingForTimeout() async throws {
+        let relay = try BoundUDPSocket(localPort: 0)
+        defer { relay.close() }
+        let service = EchoLinkConnectionService(
+            relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") }
+        )
+        service.authenticatedCallsign = "N0TST"
+        service.callAccessPolicyProvider = { CallAccessPolicy() }
+        service.setBackgroundMuted(true)
+        let registrationSent = expectation(description: "Relay registration sent")
+        let attemptEnded = expectation(description: "Cancelled attempt returned promptly")
+        let server = Task {
+            _ = try await relay.receive()
+            registrationSent.fulfill()
+            // A stalled relay never acknowledges the registration.
+        }
+        let operation = Task {
+            await service.connect(to: Station(callsign: "K1MOCK", ipAddress: "198.51.100.10"))
+            attemptEnded.fulfill()
+        }
+        defer { operation.cancel(); server.cancel() }
+        await fulfillment(of: [registrationSent], timeout: 3)
+        XCTAssertEqual(service.session?.state, .connecting)
+        service.cancelPendingConnection()
+        await fulfillment(of: [attemptEnded], timeout: 1)
+        operation.cancel()
+        await operation.value
+        try await server.value
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.error)
+        XCTAssertNil(service.reconnectCandidate)
+    }
+
     func testExpiringPendingHandshakeTearsDownWithoutConnectionErrorOrReconnect() async throws {
         let relay = try BoundUDPSocket(localPort: 0)
         defer { relay.close() }

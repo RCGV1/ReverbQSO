@@ -86,6 +86,11 @@ final class QSOViewModel: ObservableObject {
         timerTask?.cancel()
     }
 
+    func cancelConnection() {
+        connectionService.cancelPendingConnection()
+        timerTask?.cancel()
+    }
+
     func reconnect() async {
         await connectionService.reconnect()
     }

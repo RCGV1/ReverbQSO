@@ -1118,6 +1118,17 @@ struct QSOView: View {
             Text("Connecting...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if viewModel.session?.state == .connecting {
+                Button("Cancel", role: .cancel) {
+                    viewModel.cancelConnection()
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("qso.cancelConnection")
+                .accessibilityHint("Stop connecting and return to the station list")
+            }
         }
     }
 
