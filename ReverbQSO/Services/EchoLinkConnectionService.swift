@@ -641,6 +641,7 @@ final class EchoLinkConnectionService: ObservableObject {
     var resolveStation: ((Station) -> Station)?
     var resolveReconnectStation: (@MainActor (Station) async throws -> Station?)?
     var resolveProxySession: (@MainActor (String) async throws -> EchoLinkProxySession?)?
+    var reportUnansweredProxyHandshake: (@MainActor (EchoLinkProxySession) async -> Void)?
     var consumeReservedDirectSockets: (@MainActor () -> DirectCQSocketPair?)?
     var isConferenceHostActive: (() -> Bool)?
     var authenticatedCallsign: String?
@@ -659,6 +660,8 @@ final class EchoLinkConnectionService: ObservableObject {
     private var controlSocket: BoundUDPSocket?
     private var proxySession: EchoLinkProxySession?
     private var relayClient: EchoLinkRelayClient?
+    private var handshakePeerDatagramCount = 0
+    private let handshakeRetryIntervalsOverride: [Duration]?
     private var outboundConnectionAttemptID: UUID?
     private var outboundConnectionTask: (id: UUID, task: Task<Void, Never>)?
     private let audioEngine: AudioEngine
@@ -877,9 +880,11 @@ final class EchoLinkConnectionService: ObservableObject {
         localDemoAnnouncement: @escaping @MainActor () -> [Data] = { LocalDemoAnnouncement.echoTestPackets() },
         audioEngine injectedAudioEngine: AudioEngine? = nil,
         recordingDefaults: UserDefaults = .standard,
-        recordingFolder: URL? = nil
+        recordingFolder: URL? = nil,
+        handshakeRetryIntervals: [Duration]? = nil
     ) {
         self.audioEngine = injectedAudioEngine ?? AudioEngine()
+        self.handshakeRetryIntervalsOverride = handshakeRetryIntervals
         self.recordingDefaults = recordingDefaults
         self.recordingFolder = recordingFolder
         self.remoteVoiceActivityHold = remoteVoiceActivityHold
@@ -1104,6 +1109,7 @@ final class EchoLinkConnectionService: ObservableObject {
         }
 
         let station = resolvedStation
+        handshakePeerDatagramCount = 0
         peerAudioPort = UInt16(exactly: station.port).flatMap { $0 > 0 ? $0 : nil } ?? Self.audioPort
         peerControlPort = peerAudioPort < UInt16.max ? peerAudioPort + 1 : Self.controlPort
         logger.info("Connecting station=\(station.callsign, privacy: .public) host=\(station.ipAddress, privacy: .public) as=\(self.localCallsign, privacy: .public)")
@@ -1139,6 +1145,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 throw ConnectionError.connectionFailed("Sign in again to select an Automatic connection method.")
             }
             try Task.checkCancellation()
+            VoiceDiagnosticLog.record("handshake started transport=\(storedProxyConfiguration.mode.rawValue)")
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
             // Prepare real receive audio before the first network suspension, while
             // a foreground-initiated call can still activate its audio session.
@@ -1208,7 +1215,7 @@ final class EchoLinkConnectionService: ObservableObject {
             do {
                 try await awaitRemoteHandshakeAcknowledgement(
                     sessionID: sessionID,
-                    retryIntervals: storedProxyConfiguration.mode == .relay ? Self.relayHandshakeRetryIntervals : Self.handshakeRetryIntervals
+                    retryIntervals: handshakeRetryIntervalsOverride ?? (storedProxyConfiguration.mode == .relay ? Self.relayHandshakeRetryIntervals : Self.handshakeRetryIntervals)
                 )
             } catch ConnectionError.handshakeTimedOut where storedProxyConfiguration.mode == .relay {
                 throw ConnectionError.connectionFailed(
@@ -1235,6 +1242,7 @@ final class EchoLinkConnectionService: ObservableObject {
             startKeepAlive(sessionID: sessionID)
             reconnectCandidate = nil
 
+            VoiceDiagnosticLog.record("handshake completed peerDatagrams=\(handshakePeerDatagramCount)")
             logger.info("EchoLink connection established station=\(station.callsign, privacy: .public)")
         } catch is CancellationError {
             guard session?.id == sessionID else { return }
@@ -1242,6 +1250,16 @@ final class EchoLinkConnectionService: ObservableObject {
             session = nil
         } catch {
             guard session?.id == sessionID else { return }
+            if let connectionError = error as? ConnectionError,
+               case .handshakeTimedOut = connectionError,
+               handshakePeerDatagramCount == 0,
+               let failedProxy = proxySession,
+               failedProxy.configuration.mode == .publicProxy,
+               !Task.isCancelled {
+                await reportUnansweredProxyHandshake?(failedProxy)
+                guard session?.id == sessionID else { return }
+            }
+            VoiceDiagnosticLog.record("handshake failed peerDatagrams=\(handshakePeerDatagramCount)")
             guard session?.state != .disconnecting,
                   session?.state != .disconnected else { return }
             logger.error(
@@ -1874,6 +1892,7 @@ final class EchoLinkConnectionService: ObservableObject {
             let info = EchoLinkControlPacketCodec.buildNDATAInfoPacket(
                 message: "Station \(localCallsign)\r\n"
             )
+            VoiceDiagnosticLog.record("handshake attempt=\(index + 1) peerDatagrams=\(handshakePeerDatagramCount)")
             logger.debug("Sending EchoLink handshake attempt=\(index + 1)")
             try await sendControl(data: sdes)
             try await sendAudioPortControl(data: sdes)
@@ -2288,6 +2307,7 @@ final class EchoLinkConnectionService: ObservableObject {
 
     private func handleControlData(_ data: Data, sourcePort: UInt16? = nil) async {
         guard !data.isEmpty else { return }
+        if session?.state == .connecting { handshakePeerDatagramCount += 1 }
         let events = EchoLinkControlPacketCodec.parseEvents(from: data)
         // Only the direct control socket supplies a source port, after its
         // existing peer-host check. Audio-port SDES must not change control.
@@ -2646,6 +2666,7 @@ final class EchoLinkConnectionService: ObservableObject {
 
     func handleAudioData(_ data: Data) async {
         guard session != nil else { return }
+        if session?.state == .connecting, !data.isEmpty { handshakePeerDatagramCount += 1 }
 
         if EchoLinkControlPacketCodec.isValidReceptionReport(data) {
             if let session, session.state == .connected { resetPeerTimeout(sessionID: session.id) }

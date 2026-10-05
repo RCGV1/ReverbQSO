@@ -97,6 +97,9 @@ final class WatchAppModel: NSObject, ObservableObject {
             guard let self else { throw CancellationError() }
             return try await self.directoryService.prepareProxySession(callsign: account)
         }
+        connectionService.reportUnansweredProxyHandshake = { [weak self] failed in
+            await self?.directoryService.reportUnansweredProxyHandshake(failed)
+        }
         connectionService.consumeReservedDirectSockets = { [weak self] in
             self?.directoryService.consumePendingCQSocketPair()
         }

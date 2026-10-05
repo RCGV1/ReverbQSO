@@ -136,6 +136,11 @@ final class AppState: ObservableObject {
                 let directory = self.accountDirectories[account] ?? self.directoryService
                 return try await directory.prepareProxySession(callsign: account)
             }
+            service.reportUnansweredProxyHandshake = { [weak self] failed in
+                guard let self else { return }
+                let directory = self.accountDirectories[failed.callsign] ?? self.directoryService
+                await directory.reportUnansweredProxyHandshake(failed)
+            }
             service.consumeReservedDirectSockets = { [weak self] in
                 guard let self else { return nil }
                 return (self.accountDirectories[callsign] ?? self.directoryService)
@@ -188,6 +193,11 @@ final class AppState: ObservableObject {
             guard let self else { throw CancellationError() }
             let directory = self.accountDirectories[callsign] ?? self.directoryService
             return try await directory.prepareProxySession(callsign: callsign)
+        }
+        connectionService.reportUnansweredProxyHandshake = { [weak self] failed in
+            guard let self else { return }
+            let directory = self.accountDirectories[failed.callsign] ?? self.directoryService
+            await directory.reportUnansweredProxyHandshake(failed)
         }
         connectionService.consumeReservedDirectSockets = { [weak self] in
             guard let self else { return nil }

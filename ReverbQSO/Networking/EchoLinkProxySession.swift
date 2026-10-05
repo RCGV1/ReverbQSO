@@ -363,6 +363,7 @@ actor EchoLinkProxySession {
 @MainActor
 final class EchoLinkProxySessionStore {
     private let configurationProvider: @MainActor () -> EchoLinkProxyConfiguration
+    private let resolveCandidates: @MainActor (EchoLinkProxyConfiguration) async throws -> [EchoLinkProxyConfiguration]
     private var session: EchoLinkProxySession?
     private var requestedConfiguration: EchoLinkProxyConfiguration?
     private var callsign = ""
@@ -370,8 +371,11 @@ final class EchoLinkProxySessionStore {
 
     init(configurationProvider: @escaping @MainActor () -> EchoLinkProxyConfiguration = {
         EchoLinkProxyConfiguration.load()
+    }, resolveCandidates: @escaping @MainActor (EchoLinkProxyConfiguration) async throws -> [EchoLinkProxyConfiguration] = {
+        try await $0.resolvingProxyCandidates()
     }) {
         self.configurationProvider = configurationProvider
+        self.resolveCandidates = resolveCandidates
     }
 
     func currentSession(callsign: String, configuration: EchoLinkProxyConfiguration? = nil) async -> EchoLinkProxySession? {
@@ -415,7 +419,7 @@ final class EchoLinkProxySessionStore {
         self.callsign = ""
         await previousSession?.close()
         guard generation == connectingGeneration else { throw CancellationError() }
-        let resolved = try await requested.resolvingProxyCandidates()
+        let resolved = try await resolveCandidates(requested)
         let candidates = EchoLinkProxyClient.untriedCandidates(resolved, excluding: exclusions)
         guard !candidates.isEmpty else {
             throw EchoLinkProxyClient.ClientError.allCandidatesFailed(["No untried public proxy endpoints are available."])

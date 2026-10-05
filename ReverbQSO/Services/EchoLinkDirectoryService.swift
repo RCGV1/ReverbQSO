@@ -62,6 +62,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     private var availabilityTask: Task<Bool, Never>?
     private var proxyRecoveryTask: Task<Void, Error>?
     private var proxyRecoveryID: UUID?
+    private var unansweredProxySession: EchoLinkProxySession?
     private var authenticatedCallsign = ""
     private var foregroundRefreshTask: Task<Void, Never>?
     private var lifecycleGeneration = DirectoryLifecycleGeneration()
@@ -376,8 +377,15 @@ final class EchoLinkDirectoryService: ObservableObject {
     /// Re-authenticate an unusable tunnel using this login's frozen transport,
     /// so directory TCP and QSO UDP keep the same route for this callsign.
     func prepareProxySession(callsign: String) async throws -> EchoLinkProxySession? {
+        try Task.checkCancellation()
         if localDemoAccount != nil { return nil }
         guard let selection = effectiveTransport, selection.configuration.isEnabled else { return nil }
+        let generation = lifecycleGeneration.current
+        if let failed = unansweredProxySession {
+            try await recoverProxy(for: generation, unanswered: failed)
+            try Task.checkCancellation()
+            guard lifecycleGeneration.matches(generation), isLoggedIn else { throw CancellationError() }
+        }
         if let current = await proxySessionStore.currentSession(callsign: callsign, configuration: selection.configuration) { return current }
 
         guard let password = KeychainService.loadPassword(for: callsign), !password.isEmpty else {
@@ -388,6 +396,17 @@ final class EchoLinkDirectoryService: ObservableObject {
             throw error ?? DirectoryClientError.connectionFailed("Proxy directory login did not complete.")
         }
         return current
+    }
+
+    /// Remember only the current public tunnel; a late failure from a retired
+    /// attempt must not replace a newer session or a custom proxy.
+    func reportUnansweredProxyHandshake(_ failed: EchoLinkProxySession) async {
+        let generation = lifecycleGeneration.current
+        guard isLoggedIn, effectiveTransport?.configuration.mode == .publicProxy,
+              failed.configuration.mode == .publicProxy,
+              let active = await client.activeProxySession(), active === failed,
+              lifecycleGeneration.matches(generation), isLoggedIn else { return }
+        unansweredProxySession = failed
     }
 
     /// Advertise the tunnel selected for this login, rather than the public
@@ -508,13 +527,17 @@ final class EchoLinkDirectoryService: ObservableObject {
         return false
     }
 
-    private func recoverProxy(for generation: UInt64) async throws {
+    private func recoverProxy(for generation: UInt64, unanswered: EchoLinkProxySession? = nil) async throws {
         if let proxyRecoveryTask { return try await proxyRecoveryTask.value }
         guard let selection = effectiveTransport, !authenticatedCallsign.isEmpty,
               let failed = await client.activeProxySession() else { throw CancellationError() }
         // Another caller may already have repaired the tunnel before this
         // queued failure reached us. Keep that fresh connection.
-        if await failed.isUsable() { return }
+        let forced = selection.configuration.mode == .publicProxy && unanswered === failed
+        if !forced, await failed.isUsable() {
+            if unansweredProxySession === unanswered { unansweredProxySession = nil }
+            return
+        }
         // Both actor lookups above can suspend. Share any recovery another
         // refresh started in the meantime instead of replacing its tunnel.
         if let proxyRecoveryTask { return try await proxyRecoveryTask.value }
@@ -531,7 +554,8 @@ final class EchoLinkDirectoryService: ObservableObject {
             guard self.lifecycleGeneration.matches(generation) else { throw CancellationError() }
             try await self.client.recoverProxySession(replacement, replacing: failed)
             guard self.lifecycleGeneration.matches(generation) else { throw CancellationError() }
-            self.logger.info("Reconnected proxy after a failed directory request")
+            if self.unansweredProxySession === failed { self.unansweredProxySession = nil }
+            self.logger.info("Reconnected proxy and renewed directory registration")
         }
         proxyRecoveryTask = task
         proxyRecoveryID = recoveryID
@@ -550,6 +574,7 @@ final class EchoLinkDirectoryService: ObservableObject {
         proxyRecoveryTask?.cancel()
         proxyRecoveryTask = nil
         proxyRecoveryID = nil
+        unansweredProxySession = nil
         _ = refreshGeneration.advance()
         keepAliveTask?.cancel()
         keepAliveTask = nil
@@ -583,6 +608,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     }
 
     private func clearPublishedLoginState() {
+        unansweredProxySession = nil
         authenticatedCallsign = ""
         clearPendingCQSocketPair()
         effectiveTransport = nil

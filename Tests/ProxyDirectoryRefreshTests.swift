@@ -7,6 +7,106 @@ import XCTest
 
 @MainActor
 final class ProxyDirectoryRefreshTests: XCTestCase {
+    func testMatchedControlWithoutSDESAndCancellationDoNotReportUnansweredProxy() async throws {
+        for cancel in [false, true] {
+            let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, replyToControl: !cancel)
+            try await proxy.start()
+            defer { proxy.stop() }
+            let preference = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
+            let candidate = EchoLinkProxyConfiguration(mode: .publicProxy, host: "127.0.0.1", port: proxy.port, password: "PUBLIC")
+            let store = EchoLinkProxySessionStore(configurationProvider: { preference }, resolveCandidates: { _ in [candidate] })
+            let service = EchoLinkDirectoryService(proxySessionStore: store, configurationProvider: { preference },
+                client: DirectoryClient(host: "127.0.0.1"), saveCredentials: { _, _, _ in true })
+            await service.login(callsign: "N0TEST", password: "directory-password")
+            XCTAssertTrue(service.isLoggedIn)
+            let connection = EchoLinkConnectionService(networkConfigurationProvider: { preference },
+                handshakeRetryIntervals: [cancel ? .seconds(5) : .milliseconds(200)])
+            connection.authenticatedCallsign = "N0TEST"
+            connection.setBackgroundMuted(true)
+            connection.resolveProxySession = { try await service.prepareProxySession(callsign: $0) }
+            var reports = 0
+            connection.reportUnansweredProxyHandshake = { _ in reports += 1 }
+            let operation = Task { await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "198.51.100.10")) }
+            await fulfillment(of: [proxy.controlReceived], timeout: 3)
+            if cancel { connection.cancelPendingConnection(); operation.cancel() }
+            await operation.value
+            XCTAssertEqual(reports, 0, cancel ? "Cancellation must not mark a public proxy" : "Matched control is evidence of a working inbound path even without SDES")
+            await service.logout()
+        }
+    }
+
+    func testExplicitRetryReplacesUnansweredPublicProxyAndRegistersBeforeReturning() async throws {
+        let first = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        let second = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await first.start()
+        try await second.start()
+        defer { first.stop(); second.stop() }
+        let preference = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
+        let candidates = [first, second].map {
+            EchoLinkProxyConfiguration(mode: .publicProxy, host: "127.0.0.1", port: $0.port, password: "PUBLIC")
+        }
+        let store = EchoLinkProxySessionStore(configurationProvider: { preference }, resolveCandidates: { _ in candidates })
+        let client = DirectoryClient(host: "127.0.0.1")
+        let service = EchoLinkDirectoryService(proxySessionStore: store, configurationProvider: { preference },
+            client: client, saveCredentials: { _, _, _ in true })
+        await service.login(callsign: "N0TEST", password: "directory-password")
+        XCTAssertTrue(service.isLoggedIn)
+        let unansweredSession = try await service.prepareProxySession(callsign: "N0TEST")
+        let unanswered = try XCTUnwrap(unansweredSession)
+        let sameHealthy = try await service.prepareProxySession(callsign: "N0TEST")
+        XCTAssertTrue(sameHealthy === unanswered)
+        let connection = EchoLinkConnectionService(networkConfigurationProvider: { preference },
+            handshakeRetryIntervals: [.milliseconds(50)])
+        connection.authenticatedCallsign = "N0TEST"
+        connection.setBackgroundMuted(true)
+        connection.resolveProxySession = { try await service.prepareProxySession(callsign: $0) }
+        var reports = 0
+        connection.reportUnansweredProxyHandshake = {
+            reports += 1
+            await service.reportUnansweredProxyHandshake($0)
+        }
+        await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "198.51.100.10"))
+        XCTAssertEqual(reports, 1, "Only an unanswered handshake timeout marks the tunnel")
+        let replacementSession = try await service.prepareProxySession(callsign: "N0TEST")
+        let replacement = try XCTUnwrap(replacementSession)
+        XCTAssertFalse(replacement === unanswered)
+        let replacementConfiguration = await replacement.configuration
+        XCTAssertEqual(replacementConfiguration.port, second.port)
+        XCTAssertEqual(second.authenticatedConnectionCount, 1)
+        XCTAssertEqual(second.registrationRequestCount, 1, "Replacement must register directory before QSO can send")
+        let active = await client.activeProxySession()
+        XCTAssertTrue(active === replacement)
+        await service.reportUnansweredProxyHandshake(unanswered)
+        let afterStaleReport = try await service.prepareProxySession(callsign: "N0TEST")
+        XCTAssertTrue(afterStaleReport === replacement, "Old attempts cannot retire a newer tunnel")
+        await service.logout()
+    }
+
+    func testUnansweredHandshakeDoesNotRotateCustomProxy() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (service, _) = makeService(proxy: proxy)
+        await service.login(callsign: "N0TEST", password: "directory-password")
+        let originalSession = try await service.prepareProxySession(callsign: "N0TEST")
+        let original = try XCTUnwrap(originalSession)
+        let configuration = await original.configuration
+        let connection = EchoLinkConnectionService(networkConfigurationProvider: { configuration },
+            handshakeRetryIntervals: [.milliseconds(50)])
+        connection.authenticatedCallsign = "N0TEST"
+        connection.setBackgroundMuted(true)
+        connection.resolveProxySession = { try await service.prepareProxySession(callsign: $0) }
+        var reports = 0
+        connection.reportUnansweredProxyHandshake = { _ in reports += 1 }
+        await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "198.51.100.10"))
+        XCTAssertEqual(reports, 0)
+        await service.reportUnansweredProxyHandshake(original)
+        let next = try await service.prepareProxySession(callsign: "N0TEST")
+        XCTAssertTrue(next === original)
+        XCTAssertEqual(proxy.authenticatedConnectionCount, 1)
+        await service.logout()
+    }
+
     private final class CQCapturingClient: CallCQClientProtocol, @unchecked Sendable {
         var address: String?
         func register(_ registration: CallCQRegistration, password: String) async throws {
@@ -182,6 +282,9 @@ private final class RefreshTestProxy: @unchecked Sendable {
     }
 
     private let behavior: Behavior
+    private let replyToControl: Bool
+    let controlReceived = XCTestExpectation(description: "outgoing peer control reached local proxy")
+    private var receivedControl = false
     private let listener: NWListener
     private let queue = DispatchQueue(label: "ProxyDirectoryRefreshTests.proxy")
     private let ready = XCTestExpectation(description: "loopback proxy ready")
@@ -196,8 +299,9 @@ private final class RefreshTestProxy: @unchecked Sendable {
     var registrationRequestCount: Int { queue.sync { registrations } }
     var authenticatedConnectionCount: Int { queue.sync { authentications } }
 
-    init(behavior: Behavior) throws {
+    init(behavior: Behavior, replyToControl: Bool = false) throws {
         self.behavior = behavior
+        self.replyToControl = replyToControl
         listener = try NWListener(using: .tcp, on: .any)
         listener.stateUpdateHandler = { [weak self] state in
             if case .ready = state { self?.ready.fulfill() }
@@ -289,7 +393,15 @@ private final class RefreshTestProxy: @unchecked Sendable {
                     sendStationList(on: connection)
                 }
             }
-        case .tcpClose, .udpData, .udpControl, .tcpStatus, .system:
+        case .udpControl:
+            if !receivedControl { receivedControl = true; controlReceived.fulfill() }
+            if replyToControl {
+                // A valid peer RR is deliberately not a handshake acceptance.
+                let frame = try! EchoLinkProxyProtocol.encode(type: .udpControl,
+                    remoteHost: message.remoteHost, payload: Data([0x80, 201, 0, 1, 0, 0, 0, 1]))
+                connection.send(content: frame, completion: .idempotent)
+            }
+        case .tcpClose, .udpData, .tcpStatus, .system:
             break
         }
     }
