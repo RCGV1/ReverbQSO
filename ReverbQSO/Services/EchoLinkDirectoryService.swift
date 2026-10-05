@@ -63,6 +63,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     private var proxyRecoveryTask: Task<Void, Error>?
     private var proxyRecoveryID: UUID?
     private var unansweredProxySession: EchoLinkProxySession?
+    private var unansweredProxyConfigurations: [EchoLinkProxyConfiguration] = []
     private var authenticatedCallsign = ""
     private var foregroundRefreshTask: Task<Void, Never>?
     private var lifecycleGeneration = DirectoryLifecycleGeneration()
@@ -407,6 +408,15 @@ final class EchoLinkDirectoryService: ObservableObject {
               let active = await client.activeProxySession(), active === failed,
               lifecycleGeneration.matches(generation), isLoggedIn else { return }
         unansweredProxySession = failed
+        let configuration = failed.configuration
+        if !unansweredProxyConfigurations.contains(configuration) {
+            unansweredProxyConfigurations.append(configuration)
+            // The public selector returns a bounded candidate list. Retain
+            // only that many recent paths across explicit retries.
+            if unansweredProxyConfigurations.count > EchoLinkPublicProxyListClient.defaultCandidateLimit {
+                unansweredProxyConfigurations.removeFirst()
+            }
+        }
     }
 
     /// Advertise the tunnel selected for this login, rather than the public
@@ -546,7 +556,8 @@ final class EchoLinkDirectoryService: ObservableObject {
         let recoveryID = UUID()
         let task = Task { [weak self] in
             guard let self, self.lifecycleGeneration.matches(generation) else { throw CancellationError() }
-            let exclusions = selection.configuration.mode == .publicProxy ? [failed.configuration] : []
+            let exclusions = selection.configuration.mode == .publicProxy
+                ? self.unansweredProxyConfigurations + [failed.configuration] : []
             guard let replacement = try await self.proxySessionStore.session(
                 callsign: callsign, configuration: selection.configuration, excluding: exclusions
             ) else { throw EchoLinkProxySession.SessionError.directoryClosed }
@@ -565,7 +576,17 @@ final class EchoLinkDirectoryService: ObservableObject {
                 proxyRecoveryID = nil
             }
         }
-        try await task.value
+        do {
+            try await task.value
+        } catch {
+            // A changed/exhausted directory must not permanently strand this
+            // login. The next explicit retry can revisit older candidates,
+            // while still avoiding the most recent unanswered path.
+            if lifecycleGeneration.matches(generation), selection.configuration.mode == .publicProxy {
+                unansweredProxyConfigurations = [failed.configuration]
+            }
+            throw error
+        }
     }
 
     @discardableResult
@@ -575,6 +596,7 @@ final class EchoLinkDirectoryService: ObservableObject {
         proxyRecoveryTask = nil
         proxyRecoveryID = nil
         unansweredProxySession = nil
+        unansweredProxyConfigurations = []
         _ = refreshGeneration.advance()
         keepAliveTask?.cancel()
         keepAliveTask = nil
@@ -609,6 +631,7 @@ final class EchoLinkDirectoryService: ObservableObject {
 
     private func clearPublishedLoginState() {
         unansweredProxySession = nil
+        unansweredProxyConfigurations = []
         authenticatedCallsign = ""
         clearPendingCQSocketPair()
         effectiveTransport = nil

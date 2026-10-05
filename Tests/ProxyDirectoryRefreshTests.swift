@@ -38,11 +38,13 @@ final class ProxyDirectoryRefreshTests: XCTestCase {
     func testExplicitRetryReplacesUnansweredPublicProxyAndRegistersBeforeReturning() async throws {
         let first = try RefreshTestProxy(behavior: .delayFirstRefresh)
         let second = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        let third = try RefreshTestProxy(behavior: .delayFirstRefresh)
         try await first.start()
         try await second.start()
-        defer { first.stop(); second.stop() }
+        try await third.start()
+        defer { first.stop(); second.stop(); third.stop() }
         let preference = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
-        let candidates = [first, second].map {
+        let candidates = [first, second, third].map {
             EchoLinkProxyConfiguration(mode: .publicProxy, host: "127.0.0.1", port: $0.port, password: "PUBLIC")
         }
         let store = EchoLinkProxySessionStore(configurationProvider: { preference }, resolveCandidates: { _ in candidates })
@@ -79,6 +81,21 @@ final class ProxyDirectoryRefreshTests: XCTestCase {
         await service.reportUnansweredProxyHandshake(unanswered)
         let afterStaleReport = try await service.prepareProxySession(callsign: "N0TEST")
         XCTAssertTrue(afterStaleReport === replacement, "Old attempts cannot retire a newer tunnel")
+        await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "198.51.100.10"))
+        XCTAssertEqual(reports, 2)
+        let thirdSession = try await service.prepareProxySession(callsign: "N0TEST")
+        let thirdConfiguration = await thirdSession?.configuration
+        XCTAssertEqual(thirdConfiguration?.port, third.port, "Repeated unanswered attempts must not cycle between the first two proxies")
+        XCTAssertEqual(third.authenticatedConnectionCount, 1)
+        XCTAssertEqual(third.registrationRequestCount, 1)
+        if let thirdSession { await service.reportUnansweredProxyHandshake(thirdSession) }
+        do {
+            _ = try await service.prepareProxySession(callsign: "N0TEST")
+            XCTFail("All three unanswered paths should have been excluded")
+        } catch { }
+        let afterExhaustion = try await service.prepareProxySession(callsign: "N0TEST")
+        let afterExhaustionConfiguration = await afterExhaustion?.configuration
+        XCTAssertEqual(afterExhaustionConfiguration?.port, first.port, "Candidate exhaustion must allow another explicit retry without signing in again")
         await service.logout()
     }
 

@@ -10,6 +10,66 @@ import XCTest
 /// The credential is read in the test process and never logged.
 @MainActor
 final class LiveTransportSmokeTests: XCTestCase {
+    /// Opt-in, receive-only comparison against a requested live station. This
+    /// uses the app's shared directory/proxy recovery path, including retries.
+    func testRequestedStationWithPublicProxyRetry() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["ECHOLINK_RUN_STATION_AUDIT"] == "1" else {
+            throw XCTSkip("Live station audit requires explicit opt-in")
+        }
+        let requested = try XCTUnwrap(environment["ECHOLINK_LIVE_STATION"]).uppercased()
+        let callsign = try XCTUnwrap(environment["ECHOLINK_LIVE_CALLSIGN"])
+        let credentialPath = try XCTUnwrap(environment["ECHOLINK_LIVE_CREDENTIAL_PATH"])
+        let password = try NSAttributedString(url: URL(fileURLWithPath: credentialPath),
+            options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+            .string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !password.isEmpty else { XCTFail("Live credential is empty"); return }
+        let configuration = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
+        let store = EchoLinkProxySessionStore(configurationProvider: { configuration })
+        let directory = EchoLinkDirectoryService(proxySessionStore: store, configurationProvider: { configuration },
+            saveCredentials: { _, _, _ in true })
+        await directory.login(callsign: callsign, password: password, persistAsActive: false)
+        guard directory.isLoggedIn else {
+            await directory.logout()
+            XCTFail("Live directory login failed")
+            return
+        }
+        let connection = EchoLinkConnectionService(networkConfigurationProvider: { configuration })
+        connection.authenticatedCallsign = callsign
+        connection.resolveProxySession = { try await directory.prepareProxySession(callsign: $0) }
+        connection.reportUnansweredProxyHandshake = { await directory.reportUnansweredProxyHandshake($0) }
+        let target = directory.stations.first { $0.callsign.uppercased() == requested }
+        let echo = directory.stations.first { $0.callsign.uppercased() == "*ECHOTEST*" }
+        guard let target, let echo else {
+            await directory.logout()
+            XCTFail("Requested station or EchoTest is absent from the live directory")
+            return
+        }
+        var connected = false
+        for attempt in 1...3 {
+            // A retry replaces an unanswered public proxy before the control
+            // call, so EchoTest verifies that same replacement tunnel.
+            for station in [echo, target] {
+                let proxy = try? await directory.prepareProxySession(callsign: callsign)
+                let endpoint = await proxy?.configuration
+                let started = ContinuousClock.now
+                var inboundPackets = 0
+                connection.onAuditIncomingDatagram = { _ in inboundPackets += 1 }
+                await connection.connect(to: station)
+                let didConnect = connection.session?.state == .connected
+                if didConnect { try? await Task.sleep(for: .seconds(2)) }
+                print("LIVE STATION attempt=\(attempt) station=\(station.callsign) connected=\(didConnect) proxy=\(endpoint?.host ?? "none") elapsed=\(started.duration(to: .now)) audioDatagrams=\(inboundPackets)")
+                if station.callsign == target.callsign { connected = didConnect }
+                await connection.disconnect()
+            }
+            if connected { break }
+        }
+        connection.onAuditIncomingDatagram = nil
+        await directory.logout()
+        await store.close()
+        XCTAssertTrue(connected, "Requested station did not acknowledge through three public proxy attempts")
+    }
+
     func testEchoTestAcrossAvailableTransports() async throws {
         guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_LIVE_TESTS"] == "1" else {
             throw XCTSkip("Live EchoTest checks require explicit opt-in")
