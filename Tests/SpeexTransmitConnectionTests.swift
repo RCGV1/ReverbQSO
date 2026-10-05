@@ -15,6 +15,70 @@ final class SpeexTransmitConnectionTests: XCTestCase {
         try await exerciseTransmission(speexPeer: false)
     }
 
+    func testRemoteDTMFSendsOrderedTonePacketsToGSMAndSpeexPeers() async throws {
+        for speexPeer in [false, true] {
+            let relay = try BoundUDPSocket(localPort: 0)
+            defer { relay.close() }
+            let service = EchoLinkConnectionService(
+                relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
+                networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") })
+            service.authenticatedCallsign = "N0TST"
+            service.callAccessPolicyProvider = { CallAccessPolicy() }
+            let server = Task {
+                let registration = try await relay.receive()
+                try await relay.send(Data([4, 0, 0, 0, 0, 0, 0, 0, 0]),
+                                     to: registration.sourceHost, port: registration.sourcePort)
+                _ = try await relay.receive()
+                var response = EchoLinkControlPacketCodec.buildSDESPacket(
+                    callsign: "K1MOCK-R", advertiseSpeex: speexPeer)
+                let capability = try XCTUnwrap(response.range(of: Data("D0".utf8)))
+                response.replaceSubrange(capability, with: Data("D1".utf8))
+                try await relay.send(Data([1, 198, 51, 100, 10, 0xC3, 0x50, 0x14, 0x4F]) + response,
+                                     to: registration.sourceHost, port: registration.sourcePort)
+                var packets: [Data] = []
+                while packets.count < 4 {
+                    let datagram = try await relay.receive()
+                    guard datagram.data.count >= 19,
+                          datagram.data[5] == 0x14, datagram.data[6] == 0x4E else { continue }
+                    let packet = Data(datagram.data.dropFirst(7))
+                    guard EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet) != nil else { continue }
+                    packets.append(packet)
+                }
+                return packets
+            }
+            defer { server.cancel() }
+            await service.connect(to: Station(callsign: "K1MOCK-R", ipAddress: "198.51.100.10", type: .repeater))
+            XCTAssertEqual(service.session?.state, .connected)
+            XCTAssertTrue(service.canSendRemoteDTMF)
+            service.sendRemoteDTMF("5#")
+            let packets = try await withThrowingTaskGroup(of: [Data].self) { group in
+                group.addTask { try await server.value }
+                group.addTask { try await Task.sleep(for: .seconds(5)); throw Timeout.expired }
+                defer { group.cancelAll(); server.cancel() }
+                let received = try await group.next()
+                return try XCTUnwrap(received)
+            }
+            let tones = try EchoLinkDTMFToneGenerator.generate("5#")
+            let reference = GSMCodec()
+            var previous: EchoLinkVoicePacketMetadata?
+            for (index, packet) in packets.enumerated() {
+                let parsed = try XCTUnwrap(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet))
+                guard case .gsm(let payload) = parsed.packet else { return XCTFail("Remote keypad must use GSM") }
+                let offset = index * 640
+                XCTAssertEqual(payload, GSMCodec.stripHeader(reference.encode(Array(tones[offset..<(offset + 640)]))))
+                let metadata = try XCTUnwrap(parsed.metadata)
+                if let previous {
+                    XCTAssertEqual(metadata.sequenceNumber, previous.sequenceNumber &+ 1)
+                    XCTAssertEqual(metadata.timestamp, previous.timestamp &+ 640)
+                }
+                previous = metadata
+            }
+            for _ in 0..<100 where service.isSendingDTMF { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertFalse(service.isSendingDTMF)
+            await service.disconnect()
+        }
+    }
+
     func testOldSendCompletionCannotChangeReplacementSessionCounters() async throws {
         let relay = try BoundUDPSocket(localPort: 0)
         defer { relay.close() }

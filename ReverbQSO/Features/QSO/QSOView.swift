@@ -13,6 +13,7 @@ struct QSOView: View {
 
     @State private var showChat = false
     @State private var showAudioRoutes = false
+    @State private var showAudioDiagnostics = false
     @State private var showDTMF = false
     @State private var showStationActivity = false
     @State private var showParticipants = false
@@ -22,7 +23,6 @@ struct QSOView: View {
     @FocusState private var isChatFocused: Bool
     #if targetEnvironment(macCatalyst)
     @State private var showDesktopStationInfo = false
-    @State private var showAudioDiagnostics = false
     @State private var participantSearch = ""
     @FocusState private var isRadioFocused: Bool
     @FocusState private var isParticipantSearchFocused: Bool
@@ -60,6 +60,17 @@ struct QSOView: View {
                          ? "" : viewModel.isConnected ? viewModel.stationCallsign : "QSO")
         #endif
         .toolbar {
+            #if !targetEnvironment(macCatalyst)
+            if viewModel.isConnected {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAudioDiagnostics = true } label: {
+                        Label("Audio Stats", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("qso.audioStats")
+                    .accessibilityHint("Show encoding, bitrate, packet loss, and audio buffer delay")
+                }
+            }
+            #endif
             if viewModel.isConnected {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { viewModel.toggleRecording() } label: {
@@ -99,6 +110,19 @@ struct QSOView: View {
         .sheet(isPresented: $showAudioRoutes) {
             audioRouteSheet
         }
+        #if !targetEnvironment(macCatalyst)
+        .sheet(isPresented: $showAudioDiagnostics) {
+            NavigationStack {
+                QSOAudioDiagnosticsView(connectionService: connectionService)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showAudioDiagnostics = false }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+        }
+        #endif
         .sheet(isPresented: $showDTMF) {
             dtmfSheet
         }
