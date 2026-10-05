@@ -21,6 +21,14 @@ struct DirectoryFiltersMenu: View {
             }
 
             Section {
+                Picker("Region", selection: $viewModel.regionFilter) {
+                    Text("All regions").tag(StationRegion?.none)
+                    ForEach(StationRegion.allCases) { region in
+                        Text(region.rawValue).tag(StationRegion?.some(region))
+                    }
+                }
+                .pickerStyle(.menu)
+
                 Button(action: onChooseCountry) {
                     Label(viewModel.countryFilter.isEmpty ? "Country…" : "Country: \(viewModel.countryFilterTitle)",
                           systemImage: "globe")

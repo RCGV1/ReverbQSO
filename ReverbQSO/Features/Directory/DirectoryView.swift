@@ -107,7 +107,14 @@ struct DirectoryView: View {
                 )
             }
             .alert("Error", isPresented: Binding(
-                get: { viewModel.errorMessage != nil },
+                get: {
+                    guard !appState.isAutoLoggingIn else { return false }
+                    if let error = appState.directoryService.error,
+                       !appState.directoryService.isLoggedIn,
+                       !DirectoryRegistrationFailurePolicy.requiresUserSignIn(error),
+                       viewModel.errorMessage == error.localizedDescription { return false }
+                    return viewModel.errorMessage != nil
+                },
                 set: { if !$0 { viewModel.errorMessage = nil } }
             )) {
                 Button("OK", role: .cancel) { viewModel.errorMessage = nil }
@@ -133,6 +140,12 @@ struct DirectoryView: View {
 
     @ViewBuilder
     private var activeFilterButtons: some View {
+        if let region = viewModel.regionFilter {
+            Button { viewModel.regionFilter = nil } label: {
+                removableFilter(region.rawValue)
+            }
+            .accessibilityLabel("Remove region filter, \(region.rawValue)")
+        }
         if viewModel.browseGroup == .nodes, viewModel.typeFilter != nil {
             Button { viewModel.typeFilter = nil } label: {
                 removableFilter(viewModel.nodeTypeTitle)
@@ -141,7 +154,8 @@ struct DirectoryView: View {
         }
         if !viewModel.countryFilter.isEmpty {
             Button { viewModel.countryFilter = "" } label: {
-                removableFilter(viewModel.countryFilterTitle)
+                removableFilter([CountryFlag.emoji(for: viewModel.countryFilter), viewModel.countryFilterTitle]
+                    .compactMap { $0 }.joined(separator: " "))
             }
             .accessibilityLabel("Remove country filter, \(viewModel.countryFilterTitle)")
         }
@@ -162,19 +176,29 @@ struct DirectoryView: View {
 
     private var stationList: some View {
         List {
-            ForEach(viewModel.stations) { station in
-                StationRow(
-                    station: station,
-                    isFavorite: favoritesVM.isFavorite(station),
-                    onSelect: { detailStation = station },
-                    onFavoriteTap: { favoritesVM.toggleFavorite(station) }
-                )
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            if viewModel.sortOrder == .region {
+                ForEach(viewModel.regionSections) { section in
+                    Section(section.title) {
+                        ForEach(section.stations) { station in stationRow(station) }
+                    }
+                }
+            } else {
+                ForEach(viewModel.stations) { station in stationRow(station) }
             }
         }
         .listStyle(.plain)
         .refreshable { await viewModel.refresh() }
         .overlay { listOverlay }
+    }
+
+    private func stationRow(_ station: Station) -> some View {
+        StationRow(
+            station: station,
+            isFavorite: favoritesVM.isFavorite(station),
+            onSelect: { detailStation = station },
+            onFavoriteTap: { favoritesVM.toggleFavorite(station) }
+        )
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
     }
 
     // MARK: - Empty / Loading Overlay

@@ -104,7 +104,13 @@ enum KeychainService {
         guard let data = value.data(using: .utf8) else { return false }
 
         let query = baseQuery(account: account)
-        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        var updates: [String: Any] = [kSecValueData as String: data]
+#if !targetEnvironment(macCatalyst)
+        // Migrate older entries as well as new ones, so a successfully saved
+        // account stays readable for background reconnect after first unlock.
+        updates[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+#endif
+        let updateStatus = SecItemUpdate(query as CFDictionary, updates as CFDictionary)
         if updateStatus == errSecSuccess { return true }
         if updateStatus != errSecItemNotFound {
             logger.error("Credential update failed account=\(account, privacy: .public) status=\(updateStatus)")

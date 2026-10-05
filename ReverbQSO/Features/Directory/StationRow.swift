@@ -49,9 +49,15 @@ struct StationRow: View {
 
             // Main content
             VStack(alignment: .leading, spacing: 3) {
-                Text(station.callsign)
-                    .font(.system(.body, design: .monospaced, weight: .semibold))
-                    .foregroundStyle(station.isBusy ? .secondary : .primary)
+                HStack(spacing: 6) {
+                    if let flag = station.callSignCountryFlag {
+                        Text(flag)
+                            .accessibilityHidden(true)
+                    }
+                    Text(station.callsign)
+                        .font(.system(.body, design: .monospaced, weight: .semibold))
+                        .foregroundStyle(station.isBusy ? .secondary : .primary)
+                }
 
                 if let location = station.locationDisplay {
                     Text(location)
@@ -122,6 +128,7 @@ struct StationRow: View {
 
     private var accessibilityLabel: String {
         var parts = [station.callsign, station.type.displayName]
+        if let country = station.callSignCountryName { parts.append(country) }
         if !station.description.isEmpty { parts.append(station.description) }
         if station.isBusy { parts.append("busy") }
         if isFavorite { parts.append("favorited") }

@@ -5,6 +5,108 @@ import XCTest
 
 @MainActor
 final class LocalDemoAccountTests: XCTestCase {
+    func testTemporaryDirectoryLossDoesNotSignOutTheLocalAccount() async {
+        let app = AppState()
+        app.currentUser = "N0TEST"
+        app.isLoggedIn = true
+        app.directoryService.isLoggedIn = false
+        app.directoryService.error = DirectoryClientError.timeout
+        await app.handleCurrentDirectoryLogout()
+        XCTAssertTrue(app.isLoggedIn, "A network timeout must not remove the local account session")
+        XCTAssertEqual(app.currentUser, "N0TEST")
+        XCTAssertNil(app.loginError)
+    }
+
+    func testSavedAccountOpensImmediatelyAndTemporaryFailureStaysSignedIn() async {
+        let suite = "SavedAccountTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let app = AppState(sessionDefaults: defaults)
+        let started = expectation(description: "restoration started")
+        var pending: CheckedContinuation<Void, Never>?
+        app.restoreSavedAccount(callsign: "n0test", password: "not-a-real-password") { directory, _, _ in
+            started.fulfill()
+            await withCheckedContinuation { pending = $0 }
+            directory.error = DirectoryClientError.timeout
+        }
+        XCTAssertTrue(app.isLoggedIn, "The main interface must not wait for network registration")
+        XCTAssertEqual(app.currentUser, "N0TEST")
+        XCTAssertTrue(app.isAutoLoggingIn)
+        await fulfillment(of: [started], timeout: 2)
+        pending?.resume()
+        for _ in 0..<100 where app.isAutoLoggingIn { await Task.yield() }
+        XCTAssertFalse(app.isAutoLoggingIn)
+        XCTAssertTrue(app.isLoggedIn)
+        XCTAssertNil(app.loginError)
+        await app.logout()
+    }
+
+    func testForegroundRestorationRetriesAndExplicitSignOutCancelsIt() async {
+        let suite = "SavedAccountTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let app = AppState(sessionDefaults: defaults)
+        app.setApplicationActive(true)
+        let restored = expectation(description: "temporary failure recovered")
+        var attempts = 0
+        app.restoreSavedAccount(callsign: "N0TEST", password: "not-a-real-password") { directory, _, _ in
+            attempts += 1
+            if attempts == 1 { directory.error = DirectoryClientError.timeout }
+            else {
+                directory.isLoggedIn = true
+                directory.error = nil
+                restored.fulfill()
+            }
+        }
+        await fulfillment(of: [restored], timeout: 5)
+        XCTAssertTrue(app.isLoggedIn)
+        XCTAssertEqual(attempts, 2)
+        await app.logout()
+        XCTAssertTrue(defaults.bool(forKey: AppState.explicitlySignedOutKey))
+        app.restoreSavedAccount(callsign: "N0TEST", password: "not-a-real-password") { _, _, _ in
+            XCTFail("An explicit sign-out must prevent automatic restoration")
+        }
+        XCTAssertFalse(app.isLoggedIn)
+    }
+
+    func testGenuineCredentialRejectionStillRequiresSignIn() async {
+        let suite = "SavedAccountTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let app = AppState(sessionDefaults: defaults)
+        app.restoreSavedAccount(callsign: "N0TEST", password: "not-a-real-password") { directory, _, _ in
+            directory.error = DirectoryClientError.loginDenied
+        }
+        for _ in 0..<100 where app.isAutoLoggingIn { await Task.yield() }
+        XCTAssertFalse(app.isLoggedIn)
+        XCTAssertNotNil(app.loginError)
+        XCTAssertTrue(defaults.bool(forKey: AppState.explicitlySignedOutKey))
+        await app.logout()
+    }
+
+    func testSignOutDuringRestorationCannotResurrectTheAccount() async {
+        let suite = "SavedAccountTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let app = AppState(sessionDefaults: defaults)
+        let started = expectation(description: "restoration started")
+        let returned = expectation(description: "obsolete sign-in returned")
+        var pending: CheckedContinuation<Void, Never>?
+        app.restoreSavedAccount(callsign: "N0TEST", password: "not-a-real-password") { _, _, _ in
+            started.fulfill()
+            await withCheckedContinuation { pending = $0 }
+            returned.fulfill()
+        }
+        await fulfillment(of: [started], timeout: 2)
+        await app.logout()
+        pending?.resume()
+        await fulfillment(of: [returned], timeout: 2)
+        await Task.yield()
+        XCTAssertFalse(app.isLoggedIn)
+        XCTAssertFalse(app.isAutoLoggingIn)
+        XCTAssertEqual(app.currentUser, "")
+    }
+
     func testReservedLoginUsesNormalAppAndIsolatesRealSavedAccounts() async throws {
         let originalAccounts = KeychainService.savedCallsigns()
         let originalActive = KeychainService.loadCallsign()

@@ -262,6 +262,17 @@ final class DirectoryClientTests: XCTestCase {
         XCTAssertFalse(DirectoryRegistrationFailurePolicy.shouldRetireImmediately(DirectoryClientError.connectionFailed("reset")))
     }
 
+    func testOnlyCredentialOrAccountRejectionsRequireUserSignIn() {
+        for error: DirectoryClientError in [.loginDenied, .accountNotValidated, .accountNotFound, .callsignBarred] {
+            XCTAssertTrue(DirectoryRegistrationFailurePolicy.requiresUserSignIn(error))
+        }
+        for error: DirectoryClientError in [.loginInUse, .timeout, .connectionFailed("reset"), .notConnected, .unexpectedResponse("EOF")] {
+            XCTAssertFalse(DirectoryRegistrationFailurePolicy.requiresUserSignIn(error))
+        }
+        XCTAssertFalse(DirectoryRegistrationFailurePolicy.requiresUserSignIn(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(DirectoryRegistrationFailurePolicy.requiresUserSignIn(nil))
+    }
+
     // MARK: - MD5 Hash Verification
 
     /// Verify that our MD5 implementation produces correct hashes.

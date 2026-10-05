@@ -6,13 +6,13 @@ Browse repeaters and links, call another operator, or use **Call CQ** to find so
 
 ## Features
 
-- **Station browser:** separate Nodes and People, search, sorting, country filters, favorites and reconnectable history.
+- **Station browser:** separate Nodes and People, search, region and country filters, grouped region sorting, country flags, favorites and reconnectable history.
 - **Call CQ:** language, country and station-type preferences; queue cancellation; automatic handoff to the normal QSO interface.
 - **Voice and text:** hold-to-talk PTT, receive/transmit meters, microphone gain, audio routing, participant lists and chat. GSM, G.711 and Speex reception. Speex transmission is selected automatically when the peer advertises support, with GSM fallback for other peers.
 - **Recordings:** explicitly start and stop a QSO recording, play it back, export a WAV file on iPhone/iPad/Mac, or delete it. Incoming personal calls can also be recorded. Silence between audio turns is omitted; each recording is limited to one hour of audio.
 - **Call restrictions:** independently apply callsign, country and station-type rules to incoming and outgoing calls, with an optional callsign allow-list.
 - **Network options:** Direct UDP, Relay, Public Proxy, Custom Proxy and Automatic selection.
-- **Multiple accounts and QSOs:** store credentials in Keychain, switch accounts and select which connected QSO owns audio and PTT.
+- **Multiple accounts and QSOs:** store credentials in Keychain, open saved accounts immediately with quiet directory recovery, switch accounts and select which connected QSO owns audio and PTT.
 - **Apple integration:** native navigation, Mac menu bar companion, Space-to-talk on Mac, iPhone Live Activities and Action Button PTT, plus a standalone or paired Watch client.
 - **Incoming calls:** answer or decline a personal call in Direct mode. Mac also supports network conference hosting.
 

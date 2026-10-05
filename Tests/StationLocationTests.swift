@@ -4,6 +4,30 @@ import XCTest
 @testable import ReverbQSO
 
 final class StationLocationTests: XCTestCase {
+    func testCountryFlagsRequireRecognizedTwoLetterCodes() {
+        XCTAssertEqual(CountryFlag.emoji(for: "US"), "🇺🇸")
+        XCTAssertEqual(CountryFlag.emoji(for: "gb"), "🇬🇧")
+        XCTAssertEqual(CountryFlag.emoji(for: "AU"), "🇦🇺")
+        for invalid: String? in [nil, "", "ZZ", "USA", "12", "åu"] {
+            XCTAssertNil(CountryFlag.emoji(for: invalid))
+        }
+        let portable = Station(callsign: "G/W6ABC-L", description: "Sydney, Australia", ipAddress: "192.0.2.1")
+        XCTAssertEqual(portable.callSignCountryFlag, "🇬🇧")
+        XCTAssertEqual(portable.callSignRegion, .europe)
+        XCTAssertNil(Station(callsign: "*ECHOTEST*", description: "USA", ipAddress: "192.0.2.1").callSignCountryFlag)
+    }
+
+    func testRegionsIncludeCentralAmericaCaribbeanAndAntarctica() {
+        let expected: [(String, StationRegion)] = [
+            ("US", .northAmerica), ("MX", .northAmerica), ("CR", .northAmerica), ("JM", .northAmerica),
+            ("BR", .southAmerica), ("ZA", .africa), ("FR", .europe), ("JP", .asia),
+            ("AU", .oceania), ("FJ", .oceania), ("AQ", .antarctica)
+        ]
+        for (country, region) in expected { XCTAssertEqual(StationRegion.forCountry(country), region, country) }
+        XCTAssertNil(StationRegion.forCountry(nil))
+        XCTAssertNil(StationRegion.forCountry("ZZ"))
+    }
+
 
     func testCallsignCountryIsIndependentOfAdvertisedDescription() {
         let station = Station(

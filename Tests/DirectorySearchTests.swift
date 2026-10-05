@@ -5,6 +5,53 @@ import XCTest
 
 @MainActor
 final class DirectorySearchTests: XCTestCase {
+    func testRegionSortGroupsCountriesAndKeepsUnknownLocationsLast() throws {
+        let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
+        viewModel.ingest(["K6ABC-R", "PY2ABC-R", "VK2ABC-R", "DL1ABC-R", "*ECHOTEST*",
+                          "VE3ABC-R", "F4ABC-R", "ZS6ABC-R", "JA1ABC-R"].map {
+            Station(callsign: $0, ipAddress: "192.0.2.1", type: $0.hasPrefix("*") ? .conference : .repeater)
+        })
+        let ids = Set(viewModel.stations.map(\.id))
+        viewModel.sortOrder = try XCTUnwrap(DirectoryViewModel.SortOrder(rawValue: "Region"))
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["ZS6ABC-R", "JA1ABC-R", "F4ABC-R", "DL1ABC-R",
+                                                          "VE3ABC-R", "K6ABC-R", "VK2ABC-R", "PY2ABC-R", "*ECHOTEST*"])
+        XCTAssertEqual(Set(viewModel.stations.map(\.id)), ids)
+        XCTAssertEqual(viewModel.regionSections.map(\.title), ["Africa", "Asia", "Europe", "North America", "Oceania", "South America", "Other stations"])
+        XCTAssertEqual(viewModel.regionSections.flatMap(\.stations).map(\.id), viewModel.stations.map(\.id))
+    }
+
+    func testRegionAndCountryFiltersRemainConsistentAcrossRefreshAndBrowseChanges() {
+        let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
+        let stations = [
+            Station(callsign: "F4ABC-R", description: "Sydney, Australia", ipAddress: "192.0.2.1", type: .repeater),
+            Station(callsign: "DL1ABC-L", ipAddress: "192.0.2.2", type: .link),
+            Station(callsign: "VK2ABC-L", ipAddress: "192.0.2.3", type: .link),
+            Station(callsign: "G1ABC", ipAddress: "192.0.2.4", type: .user)
+        ]
+        viewModel.ingest(stations)
+        viewModel.sortOrder = .region
+        viewModel.countryFilter = "AU"
+        viewModel.regionFilter = .europe
+        XCTAssertEqual(viewModel.countryFilter, "")
+        XCTAssertEqual(Set(viewModel.availableCountries.map(\.code)), ["FR", "DE"])
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["F4ABC-R", "DL1ABC-L"])
+        let ids = viewModel.stations.map(\.id)
+        viewModel.ingest(stations.map { var copy = $0; copy.description = "Updated"; return copy })
+        XCTAssertEqual(viewModel.stations.map(\.id), ids)
+        XCTAssertEqual(viewModel.regionFilter, .europe)
+        viewModel.browseGroup = .people
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["G1ABC"])
+        XCTAssertEqual(viewModel.availableCountries.map(\.code), ["GB"])
+        viewModel.countryFilter = "AU"
+        XCTAssertNil(viewModel.regionFilter)
+        viewModel.clearFilters()
+        XCTAssertFalse(viewModel.hasActiveFilters)
+        XCTAssertEqual(viewModel.sortOrder, .region)
+        viewModel.browseGroup = .nodes
+        viewModel.searchText = "Europe"
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["F4ABC-R", "DL1ABC-L"])
+    }
+
 
     func testFilterSummaryReflectsEffectiveFiltersWhenBrowsingPeople() {
         let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())

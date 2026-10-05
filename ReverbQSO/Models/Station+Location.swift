@@ -3,6 +3,52 @@
 import Foundation
 import os
 
+enum CountryFlag {
+    private static let validCodes = Set(Locale.Region.isoRegions.map(\.identifier))
+
+    static func emoji(for countryCode: String?) -> String? {
+        guard let code = countryCode?.uppercased(), code.utf8.count == 2,
+              validCodes.contains(code), code.unicodeScalars.allSatisfy({ (65...90).contains($0.value) }) else { return nil }
+        return String(String.UnicodeScalarView(code.unicodeScalars.compactMap {
+            UnicodeScalar(127397 + $0.value)
+        }))
+    }
+}
+
+/// Geographic directory groups, using the platform's country metadata.
+enum StationRegion: String, CaseIterable, Identifiable {
+    case africa = "Africa"
+    case antarctica = "Antarctica"
+    case asia = "Asia"
+    case europe = "Europe"
+    case northAmerica = "North America"
+    case oceania = "Oceania"
+    case southAmerica = "South America"
+
+    var id: Self { self }
+    var sortIndex: Int { Self.allCases.firstIndex(of: self)! }
+
+    static func forCountry(_ countryCode: String?) -> Self? {
+        guard let countryCode else { return nil }
+        return regionsByCountry[countryCode.uppercased()]
+    }
+
+    private static let regionsByCountry: [String: Self] = Dictionary(uniqueKeysWithValues:
+        Locale.Region.isoRegions.compactMap { country -> (String, Self)? in
+            let region: Self
+            if country.identifier == "AQ" { return ("AQ", .antarctica) }
+            switch country.continent?.identifier {
+            case "002": region = .africa
+            case "142": region = .asia
+            case "150": region = .europe
+            case "009": region = .oceania
+            case "019": region = country.containingRegion?.identifier == "005" ? .southAmerica : .northAmerica
+            default: return nil
+            }
+            return (country.identifier, region)
+        })
+}
+
 extension Station {
     private static let locationLogger = Logger(subsystem: "org.reverbqso.app", category: "StationLocation")
     private static let enableLocationParseLogging = ProcessInfo.processInfo.environment["OEL_LOCATION_DEBUG"] == "1"
@@ -50,6 +96,9 @@ extension Station {
         return Locale.current.localizedString(forRegionCode: callSignCountryCode)
             ?? Locale(identifier: "en_US").localizedString(forRegionCode: callSignCountryCode)
     }
+
+    var callSignCountryFlag: String? { CountryFlag.emoji(for: callSignCountryCode) }
+    var callSignRegion: StationRegion? { StationRegion.forCountry(callSignCountryCode) }
 
     private static func parseLocation(from value: String) -> (city: String, countryCode: String?) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

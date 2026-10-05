@@ -15,6 +15,14 @@ final class DirectoryViewModel: ObservableObject {
         var id: String { code }
     }
 
+    struct RegionSection: Identifiable {
+        let region: StationRegion?
+        let stations: [Station]
+
+        var id: String { region?.rawValue ?? "other" }
+        var title: String { region?.rawValue ?? "Other stations" }
+    }
+
     enum BrowseGroup: String, CaseIterable, Identifiable {
         case nodes = "Nodes"
         case people = "People"
@@ -25,6 +33,7 @@ final class DirectoryViewModel: ObservableObject {
     enum SortOrder: String, CaseIterable, Identifiable {
         case callsign = "Callsign"
         case nodeNumber = "Node number"
+        case region = "Region"
 
         var id: Self { self }
     }
@@ -47,8 +56,24 @@ final class DirectoryViewModel: ObservableObject {
     /// Empty means all countries. Values are ISO 3166 codes derived from the
     /// station callsign's ITU allocation, matching EchoLink's Locations list.
     @Published var countryFilter = "" {
-        didSet { rebuildAvailableCountries(); applyLocalFilter() }
+        didSet {
+            if !countryFilter.isEmpty, let regionFilter,
+               StationRegion.forCountry(countryFilter) != regionFilter {
+                self.regionFilter = nil
+            }
+            rebuildAvailableCountries(); applyLocalFilter()
+        }
     }
+    @Published var regionFilter: StationRegion? {
+        didSet {
+            if let regionFilter, !countryFilter.isEmpty,
+               StationRegion.forCountry(countryFilter) != regionFilter {
+                countryFilter = ""
+            }
+            rebuildAvailableCountries(); applyLocalFilter()
+        }
+    }
+    @Published private(set) var regionSections: [RegionSection] = []
     @Published private(set) var availableCountries: [CountryOption] = []
     @Published var sortOrder: SortOrder = .callsign {
         didSet { applyLocalFilter() }
@@ -69,6 +94,7 @@ final class DirectoryViewModel: ObservableObject {
         let station: Station
         let countryCode: String?
         let countryName: String?
+        let region: StationRegion?
         let searchBlob: String
         let compactBlob: String
     }
@@ -88,7 +114,7 @@ final class DirectoryViewModel: ObservableObject {
     // MARK: - Actions
 
     var hasActiveFilters: Bool {
-        !countryFilter.isEmpty || (browseGroup == .nodes && typeFilter != nil)
+        regionFilter != nil || !countryFilter.isEmpty || (browseGroup == .nodes && typeFilter != nil)
     }
 
     var countryFilterTitle: String {
@@ -107,12 +133,13 @@ final class DirectoryViewModel: ObservableObject {
 
     var filterSummary: String {
         let group = browseGroup == .people ? "People" : nodeTypeTitle
-        return "\(group) · \(countryFilterTitle)"
+        return [group, regionFilter?.rawValue, countryFilterTitle].compactMap { $0 }.joined(separator: " · ")
     }
 
     func clearFilters() {
         if browseGroup == .nodes { typeFilter = nil }
         countryFilter = ""
+        regionFilter = nil
     }
 
     func refresh() async {
@@ -202,45 +229,63 @@ final class DirectoryViewModel: ObservableObject {
             )
         }
 
-        let filtered = indexedStations.compactMap { indexed -> Station? in
+        let filtered = indexedStations.filter { indexed in
             let station = indexed.station
             switch browseGroup {
             case .nodes:
-                guard station.type != .user else { return nil }
-                if let typeFilter, station.type != typeFilter { return nil }
+                guard station.type != .user else { return false }
+                if let typeFilter, station.type != typeFilter { return false }
             case .people:
-                guard station.type == .user else { return nil }
+                guard station.type == .user else { return false }
             }
+            if let regionFilter, indexed.region != regionFilter { return false }
             if !selectedCountry.isEmpty, indexed.countryCode != selectedCountry {
-                return nil
+                return false
             }
             guard !query.isEmpty else {
-                return station
+                return true
             }
 
             let tokens = query.split(whereSeparator: \.isWhitespace)
             let tokenMatch = tokens.allSatisfy { indexed.searchBlob.contains(String($0)) }
             let compactMatch = !collapsedQuery.isEmpty && indexed.compactBlob.contains(collapsedQuery)
 
-            return (tokenMatch || compactMatch) ? station : nil
+            return tokenMatch || compactMatch
         }
 
-        switch sortOrder {
-        case .callsign:
-            stations = filtered.sorted {
-                let result = $0.callsign.localizedStandardCompare($1.callsign)
-                if result != .orderedSame { return result == .orderedAscending }
-                if $0.nodeNumber != $1.nodeNumber { return $0.nodeNumber < $1.nodeNumber }
-                return $0.id.uuidString < $1.id.uuidString
+        let sorted = filtered.sorted { lhs, rhs in
+            switch sortOrder {
+            case .region:
+                let leftRank = lhs.region?.sortIndex ?? Int.max
+                let rightRank = rhs.region?.sortIndex ?? Int.max
+                if leftRank != rightRank { return leftRank < rightRank }
+                let countryOrder = (lhs.countryName ?? "").localizedStandardCompare(rhs.countryName ?? "")
+                if countryOrder != .orderedSame { return countryOrder == .orderedAscending }
+            case .nodeNumber:
+                if lhs.station.nodeNumber != rhs.station.nodeNumber { return lhs.station.nodeNumber < rhs.station.nodeNumber }
+            case .callsign: break
             }
-        case .nodeNumber:
-            stations = filtered.sorted {
-                if $0.nodeNumber != $1.nodeNumber { return $0.nodeNumber < $1.nodeNumber }
-                let result = $0.callsign.localizedStandardCompare($1.callsign)
-                return result == .orderedSame
-                    ? $0.id.uuidString < $1.id.uuidString
-                    : result == .orderedAscending
+            let result = lhs.station.callsign.localizedStandardCompare(rhs.station.callsign)
+            if result != .orderedSame { return result == .orderedAscending }
+            if lhs.station.nodeNumber != rhs.station.nodeNumber { return lhs.station.nodeNumber < rhs.station.nodeNumber }
+            return lhs.station.id.uuidString < rhs.station.id.uuidString
+        }
+        stations = sorted.map(\.station)
+        // Build section membership once per filter/snapshot update, preserving
+        // the sort order and IDs instead of regrouping inside SwiftUI's body.
+        if sortOrder == .region {
+            var groups: [StationRegion: [Station]] = [:]
+            var other: [Station] = []
+            for indexed in sorted {
+                if let region = indexed.region { groups[region, default: []].append(indexed.station) }
+                else { other.append(indexed.station) }
             }
+            regionSections = StationRegion.allCases.compactMap { region in
+                groups[region].map { RegionSection(region: region, stations: $0) }
+            }
+            if !other.isEmpty { regionSections.append(RegionSection(region: nil, stations: other)) }
+        } else {
+            regionSections = []
         }
 
         let sample = stations.prefix(3).map(\.callsign).joined(separator: ",")
@@ -255,6 +300,7 @@ final class DirectoryViewModel: ObservableObject {
         var localizedNames: [String: String] = [:]
         indexedStations = allStations.map { station in
             let countryCode = station.callSignCountryCode
+            let region = StationRegion.forCountry(countryCode)
             let countryName = countryCode.map { code in
                 if let cached = localizedNames[code] { return cached }
                 let resolved = Self.localizedCountryName(code) ?? code
@@ -266,6 +312,7 @@ final class DirectoryViewModel: ObservableObject {
                 station.description,
                 countryCode ?? "",
                 countryName ?? "",
+                region?.rawValue ?? "",
                 station.type.displayName,
                 station.type == .user ? "user individual" : "",
                 String(station.nodeNumber)
@@ -275,6 +322,7 @@ final class DirectoryViewModel: ObservableObject {
                 station: station,
                 countryCode: countryCode,
                 countryName: countryName,
+                region: region,
                 searchBlob: normalized(stationBlob),
                 compactBlob: collapsed(stationBlob)
             )
@@ -295,6 +343,7 @@ final class DirectoryViewModel: ObservableObject {
                 guard indexed.station.type != .user else { return }
                 if let typeFilter, indexed.station.type != typeFilter { return }
             }
+            if let regionFilter, indexed.region != regionFilter { return }
             guard let code = indexed.countryCode, let name = indexed.countryName else { return }
             result[code] = name
         }

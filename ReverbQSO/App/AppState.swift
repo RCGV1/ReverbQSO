@@ -12,6 +12,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Published State
 
+    /// The locally remembered account; directory presence can recover separately.
     @Published var isLoggedIn: Bool = false
     @Published var isAutoLoggingIn: Bool = false
     @Published var currentUser: String = ""
@@ -33,6 +34,8 @@ final class AppState: ObservableObject {
     private var accountDirectories: [String: EchoLinkDirectoryService] = [:]
     private var autoLoginTask: Task<Void, Never>?
     private var authenticationGeneration: UInt64 = 0
+    private let sessionDefaults: UserDefaults
+    static let explicitlySignedOutKey = "account.explicitlySignedOut"
 #if targetEnvironment(macCatalyst)
     private var macMenuBarBridge: MacMenuBarBridge?
     private var macMessageNotifier: MacMessageNotifier?
@@ -44,7 +47,8 @@ final class AppState: ObservableObject {
 
     // MARK: - Initialization
 
-    init() {
+    init(sessionDefaults: UserDefaults = .standard) {
+        self.sessionDefaults = sessionDefaults
         let proxySessionStore = EchoLinkProxySessionStore()
 #if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
         if SimulatorDemoData.isEnabled {
@@ -273,6 +277,9 @@ final class AppState: ObservableObject {
 #endif
         isAuthenticating = true
         defer { isAuthenticating = false }
+        autoLoginTask?.cancel()
+        autoLoginTask = nil
+        isAutoLoggingIn = false
         authenticationGeneration &+= 1
         let generation = authenticationGeneration
         loginError = nil
@@ -292,6 +299,7 @@ final class AppState: ObservableObject {
             currentUser = normalized
             savedAccounts = KeychainService.savedCallsigns()
             isLoggedIn = true
+            sessionDefaults.set(false, forKey: Self.explicitlySignedOutKey)
             if connectionService.session == nil {
                 connectionService.authenticatedCallsign = normalized
             }
@@ -299,10 +307,9 @@ final class AppState: ObservableObject {
         } else {
             loginError = target.error?.localizedDescription
                 ?? "Login failed. Check your callsign and password."
-            // Reauthenticating the active directory retires its old session.
-            // Keep the app's signed-in state aligned with that service even
-            // though the directory publisher fired while login was in flight.
-            if target === directoryService && !target.isLoggedIn {
+            let retainsSavedAccount = currentUser == normalized && isLoggedIn
+                && !DirectoryRegistrationFailurePolicy.requiresUserSignIn(target.error)
+            if target === directoryService, !target.isLoggedIn, !retainsSavedAccount {
                 isLoggedIn = false
                 await qsoHub.disconnectAll()
             }
@@ -394,7 +401,18 @@ final class AppState: ObservableObject {
                 qsoHub.lastError = "Sign in to \(callsign) again in Settings."
                 return
             }
-            let directory = EchoLinkDirectoryService()
+            let isPrimary = callsign == currentUser
+            if isPrimary {
+                // A foreground call takes over the same directory object;
+                // it must not create a competing login while restoration runs.
+                authenticationGeneration &+= 1
+                autoLoginTask?.cancel()
+                autoLoginTask = nil
+                isAutoLoggingIn = false
+                isAuthenticating = true
+            }
+            defer { if isPrimary { isAuthenticating = false } }
+            let directory = accountDirectories[callsign] ?? (isPrimary ? directoryService : EchoLinkDirectoryService())
             await directory.login(callsign: callsign, password: password, persistAsActive: callsign == currentUser)
             guard !Task.isCancelled else { return }
             guard directory.isLoggedIn else {
@@ -402,6 +420,7 @@ final class AppState: ObservableObject {
                 return
             }
             accountDirectories[callsign] = directory
+            if isPrimary { startDirectoryRefreshIfEligible() }
         }
         guard !Task.isCancelled else { return }
         qsoHub.lastError = nil
@@ -459,8 +478,13 @@ final class AppState: ObservableObject {
         guard isLoggedIn, !directoryService.isLoggedIn,
               !isAuthenticating, !isAutoLoggingIn, !isSigningOut else { return }
         directoryService.stopForegroundRefreshing()
+        if !DirectoryRegistrationFailurePolicy.requiresUserSignIn(directoryService.error) {
+            if isApplicationActive { attemptAutoLogin() }
+            return
+        }
         isLoggedIn = false
-        loginError = "EchoLink sign-in ended. Sign in again to continue."
+        sessionDefaults.set(true, forKey: Self.explicitlySignedOutKey)
+        loginError = directoryService.error?.localizedDescription
         await conferenceHostService.stop()
         await qsoHub.disconnectAll()
     }
@@ -506,6 +530,7 @@ final class AppState: ObservableObject {
         authenticationGeneration &+= 1
         autoLoginTask?.cancel()
         autoLoginTask = nil
+        isAutoLoggingIn = false
         await conferenceHostService.stop()
         if isDemoMode {
             await qsoHub.disconnectAll()
@@ -535,6 +560,7 @@ final class AppState: ObservableObject {
         }
 #endif
         let oldCallsign = currentUser
+        sessionDefaults.set(true, forKey: Self.explicitlySignedOutKey)
         directoryService.stopForegroundRefreshing()
         await directoryService.logout()
         await qsoHub.disconnect(callsign: currentUser)
@@ -558,6 +584,7 @@ final class AppState: ObservableObject {
         if SimulatorDemoData.isEnabled { return }
 #endif
         if active {
+            if !directoryService.isLoggedIn { attemptAutoLogin() }
             connectionService.resumeAudioWhenApplicationActive()
             for entry in qsoHub.entries {
                 entry.service.resumeAudioWhenApplicationActive()
@@ -625,28 +652,72 @@ final class AppState: ObservableObject {
 
     /// If credentials are stored, silently attempt login on app launch.
     private func attemptAutoLogin() {
-        guard
-            let callsign = KeychainService.loadCallsign(), !callsign.isEmpty,
-            let password = KeychainService.loadPassword(), !password.isEmpty
-        else { return }
+        // Tests restore fake accounts explicitly; never consume an unrelated
+        // saved Keychain account through a simulated foreground notification.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        guard autoLoginTask == nil, !isAuthenticating, !isSigningOut, !isDemoMode,
+              !sessionDefaults.bool(forKey: Self.explicitlySignedOutKey) else { return }
+        let callsign = currentUser.isEmpty ? KeychainService.loadCallsign() : currentUser
+        guard let callsign, !callsign.isEmpty,
+              let password = KeychainService.loadPassword(for: callsign), !password.isEmpty else { return }
+        restoreSavedAccount(callsign: callsign, password: password)
+    }
 
-        guard !LocalDemoAccount.isDemoUsername(callsign) else { return }
-        isAutoLoggingIn = true
+    /// Open the remembered account synchronously, then renew server presence.
+    /// The injected operation lets tests exercise restoration without a server.
+    func restoreSavedAccount(
+        callsign: String,
+        password: String,
+        signIn: (@MainActor (EchoLinkDirectoryService, String, String) async -> Void)? = nil
+    ) {
+        guard autoLoginTask == nil, !isAuthenticating, !isSigningOut, !isDemoMode,
+              !sessionDefaults.bool(forKey: Self.explicitlySignedOutKey),
+              !LocalDemoAccount.isDemoUsername(callsign), !password.isEmpty else { return }
+        let callsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !callsign.isEmpty else { return }
         let directory = directoryService
+        currentUser = callsign
+        accountDirectories[callsign] = directory
+        if !savedAccounts.contains(callsign) { savedAccounts.append(callsign) }
+        isLoggedIn = true
+        loginError = nil
+        if connectionService.session == nil { connectionService.authenticatedCallsign = callsign }
+        isAutoLoggingIn = true
         let generation = authenticationGeneration
-        autoLoginTask = Task {
-            await directory.login(callsign: callsign, password: password)
-            guard !Task.isCancelled, authenticationGeneration == generation, !isDemoMode else { return }
-            isAutoLoggingIn = false
-            if directoryService.isLoggedIn {
-                currentUser = callsign
-                accountDirectories[callsign] = directoryService
-                savedAccounts = KeychainService.savedCallsigns()
-                isLoggedIn = true
-                connectionService.authenticatedCallsign = callsign
-                startDirectoryRefreshIfEligible()
+        autoLoginTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.authenticationGeneration == generation {
+                    self.isAutoLoggingIn = false
+                    self.autoLoginTask = nil
+                }
             }
-            // If auto-login fails, just show the login screen -- no error shown
+            let delays: [Duration] = [.seconds(3), .seconds(10), .seconds(30), .seconds(60)]
+            var attempt = 0
+            while !Task.isCancelled, self.authenticationGeneration == generation, !self.isDemoMode {
+                if let signIn { await signIn(directory, callsign, password) }
+                else { await directory.login(callsign: callsign, password: password) }
+                guard !Task.isCancelled, self.authenticationGeneration == generation, !self.isDemoMode else { return }
+                if directory.isLoggedIn {
+                    self.startDirectoryRefreshIfEligible()
+                    return
+                }
+                if DirectoryRegistrationFailurePolicy.requiresUserSignIn(directory.error) {
+                    self.isLoggedIn = false
+                    self.loginError = directory.error?.localizedDescription
+                    self.sessionDefaults.set(true, forKey: Self.explicitlySignedOutKey)
+                    await self.conferenceHostService.stop()
+                    guard self.authenticationGeneration == generation else { return }
+                    await self.qsoHub.disconnectAll()
+                    return
+                }
+                // iOS may suspend directory traffic in the background. Resume
+                // on foreground instead of converting that interruption to logout.
+                guard self.isApplicationActive else { return }
+                do { try await Task.sleep(for: delays[min(attempt, delays.count - 1)]) }
+                catch { return }
+                attempt += 1
+            }
         }
     }
 }

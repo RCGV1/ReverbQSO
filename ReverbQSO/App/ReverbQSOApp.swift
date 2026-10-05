@@ -45,9 +45,6 @@ private struct RootView: View {
                     permissionsOnboardingCompleted = true
                     dismissedDemoPermissions = true
                 }
-            } else if appState.isAutoLoggingIn {
-                ProgressView("Signing in…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if appState.isLoggedIn {
                 #if targetEnvironment(macCatalyst)
                 MacSidebarView(showPersonalCall: $showPersonalCall)

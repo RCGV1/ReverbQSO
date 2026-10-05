@@ -61,6 +61,10 @@ struct CountryFilterView: View {
 
     private func selectionRow(title: String, code: String) -> some View {
         HStack {
+            if let flag = CountryFlag.emoji(for: code) {
+                Text(flag)
+                    .accessibilityHidden(true)
+            }
             Text(title)
             Spacer()
             if selectedCode == code {

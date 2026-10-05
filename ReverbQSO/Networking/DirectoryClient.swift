@@ -109,6 +109,17 @@ enum DirectoryLoginResponseValidator {
 }
 
 enum DirectoryRegistrationFailurePolicy {
+    /// Losing server presence is different from losing the saved account.
+    /// Transport failures and another active client can recover without asking
+    /// the user to enter the same password again.
+    static func requiresUserSignIn(_ error: Error?) -> Bool {
+        guard let error = error as? DirectoryClientError else { return false }
+        switch error {
+        case .loginDenied, .accountNotValidated, .accountNotFound, .callsignBarred: return true
+        case .loginInUse, .connectionFailed, .timeout, .unexpectedResponse, .notConnected: return false
+        }
+    }
+
     static func shouldRetireImmediately(_ error: Error) -> Bool {
         guard let directoryError = error as? DirectoryClientError else { return false }
 
