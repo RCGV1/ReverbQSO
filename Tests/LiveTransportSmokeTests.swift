@@ -10,6 +10,50 @@ import XCTest
 /// The credential is read in the test process and never logged.
 @MainActor
 final class LiveTransportSmokeTests: XCTestCase {
+    func testEchoTestRemainsConnectedDuringDirectoryRefresh() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["ECHOLINK_RUN_QSO_REFRESH_AUDIT"] == "1" else {
+            throw XCTSkip("Live QSO refresh audit requires explicit opt-in")
+        }
+        let callsign = try XCTUnwrap(environment["ECHOLINK_LIVE_CALLSIGN"])
+        let path = try XCTUnwrap(environment["ECHOLINK_LIVE_CREDENTIAL_PATH"])
+        let password = try NSAttributedString(url: URL(fileURLWithPath: path),
+            options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+            .string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !password.isEmpty else { XCTFail("Live credential is empty"); return }
+        let configuration = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
+        let directory = EchoLinkDirectoryService(configurationProvider: { configuration },
+            saveCredentials: { _, _, _ in true })
+        await directory.login(callsign: callsign, password: password, persistAsActive: false)
+        guard directory.isLoggedIn,
+              let echo = directory.stations.first(where: { $0.callsign.uppercased() == "*ECHOTEST*" }) else {
+            await directory.logout()
+            await directory.closeProxySession()
+            XCTFail("Live EchoTest directory lookup failed")
+            return
+        }
+        let connection = EchoLinkConnectionService(networkConfigurationProvider: { configuration })
+        connection.authenticatedCallsign = callsign
+        connection.setBackgroundMuted(true)
+        connection.resolveProxySession = { try await directory.prepareProxySession(callsign: $0) }
+        var voicePackets = 0
+        connection.onAuditIncomingDatagram = { _ in voicePackets += 1 }
+        await connection.connect(to: echo)
+        for refresh in 1...3 {
+            let refreshed = await directory.refresh()
+            try await Task.sleep(for: .seconds(2))
+            print("LIVE QSO REFRESH attempt=\(refresh) refreshed=\(refreshed) connected=\(connection.session?.state == .connected) voicePackets=\(voicePackets)")
+            XCTAssertTrue(refreshed)
+            XCTAssertEqual(connection.session?.state, .connected)
+            XCTAssertNil(connection.error)
+        }
+        XCTAssertGreaterThan(voicePackets, 0)
+        connection.onAuditIncomingDatagram = nil
+        await connection.disconnect()
+        await directory.logout()
+        await directory.closeProxySession()
+    }
+
     /// Recreate the directory after a process-like tunnel loss, without logging
     /// the old account off. Credentials remain inside the opted-in test host.
     func testSavedAccountRegistrationAfterRepeatedReloads() async throws {

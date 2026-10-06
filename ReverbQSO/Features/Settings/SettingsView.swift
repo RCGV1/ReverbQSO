@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Binding var showPersonalStation: Bool
     @AppStorage(MicrophoneGainSettings.modeKey) private var microphoneGainMode = MicrophoneGainMode.automatic.rawValue
     @AppStorage(MicrophoneGainSettings.key) private var microphoneGain = 1.0
+    @AppStorage("showAudioStats") private var showAudioStats = false
     #if targetEnvironment(macCatalyst)
     @AppStorage(MacMessageNotifier.enabledKey) private var messageNotificationsEnabled = true
     #endif
@@ -97,6 +98,7 @@ struct SettingsView: View {
     #endif
 
     @ViewBuilder private var audioContent: some View {
+        Toggle("Show Audio Stats", isOn: $showAudioStats)
         MicrophonePermissionControl(isEmbeddedInSettings: true)
         Picker("Microphone Gain", selection: $microphoneGainMode) {
             Text("Automatic").tag(MicrophoneGainMode.automatic.rawValue)

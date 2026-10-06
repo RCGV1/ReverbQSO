@@ -153,6 +153,12 @@ actor EchoLinkProxySession {
         do {
             try await awaitDirectoryOpen(host: numericHost, timeout: timeout)
         } catch {
+            if terminalError == nil,
+               case SessionError.directoryOpenFailed = error {
+                // TCP_STATUS rejected this remote directory socket. The
+                // authenticated proxy connection and its UDP path are intact.
+                throw error
+            }
             // Proxy frames have no transaction identifier. Once TCP_OPEN has
             // timed out, a late TCP_STATUS cannot be distinguished from the
             // status for a later request, so retire this authenticated socket.
@@ -178,6 +184,13 @@ actor EchoLinkProxySession {
             }
             return response
         } catch {
+            if terminalError == nil,
+               case SessionError.directoryClosed = error {
+                // A framed TCP_CLOSE is the end of the remote directory
+                // transaction, not the end of the proxy's voice tunnel. The
+                // caller can retry on this same authenticated connection.
+                throw error
+            }
             // A delayed TCP_DATA/TCP_CLOSE is just as uncorrelated as a delayed
             // TCP_STATUS. Retire the socket after any incomplete transaction.
             close()

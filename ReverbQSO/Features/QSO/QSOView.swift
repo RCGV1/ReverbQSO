@@ -14,6 +14,7 @@ struct QSOView: View {
     @State private var showChat = false
     @State private var showAudioRoutes = false
     @State private var showAudioDiagnostics = false
+    @AppStorage("showAudioStats") private var showAudioStats = false
     @State private var showDTMF = false
     @State private var showStationActivity = false
     @State private var showParticipants = false
@@ -61,7 +62,7 @@ struct QSOView: View {
         #endif
         .toolbar {
             #if !targetEnvironment(macCatalyst)
-            if viewModel.isConnected {
+            if viewModel.isConnected && showAudioStats {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAudioDiagnostics = true } label: {
                         Label("Audio Stats", systemImage: "waveform.path.ecg")
@@ -158,6 +159,12 @@ struct QSOView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .onChange(of: showAudioStats) { _, enabled in
+            if !enabled {
+                showAudioDiagnostics = false
+                showAudioRoutes = false
+            }
         }
         .onChange(of: viewModel.session?.state) { _, newState in
             if (newState == .disconnected || newState == nil), connectionService.error == nil {
@@ -624,23 +631,25 @@ struct QSOView: View {
                     } label: {
                         Label("Audio", systemImage: "airplayaudio")
                     }
-                    Button {
-                        showAudioDiagnostics = true
-                    } label: {
-                        Label("Audio Stats", systemImage: "waveform.path.ecg")
-                    }
-                    .accessibilityIdentifier("qso-audio-stats")
-                    .help("Audio codec, bitrate, packet loss, and buffering")
-                    .popover(isPresented: $showAudioDiagnostics) {
-                        NavigationStack {
-                            QSOAudioDiagnosticsView(connectionService: connectionService)
-                                .toolbar {
-                                    ToolbarItem(placement: .topBarTrailing) {
-                                        Button("Done") { showAudioDiagnostics = false }
-                                    }
-                                }
+                    if showAudioStats {
+                        Button {
+                            showAudioDiagnostics = true
+                        } label: {
+                            Label("Audio Stats", systemImage: "waveform.path.ecg")
                         }
-                        .frame(width: 440, height: 600)
+                        .accessibilityIdentifier("qso-audio-stats")
+                        .help("Audio codec, bitrate, packet loss, and buffering")
+                        .popover(isPresented: $showAudioDiagnostics) {
+                            NavigationStack {
+                                QSOAudioDiagnosticsView(connectionService: connectionService)
+                                    .toolbar {
+                                        ToolbarItem(placement: .topBarTrailing) {
+                                            Button("Done") { showAudioDiagnostics = false }
+                                        }
+                                    }
+                            }
+                            .frame(width: 440, height: 600)
+                        }
                     }
                     if supportsRemotePad {
                         Button {
@@ -1249,11 +1258,13 @@ struct QSOView: View {
                     }
                 }
 #endif
-                Section {
-                    NavigationLink {
-                        QSOAudioDiagnosticsView(connectionService: connectionService)
-                    } label: {
-                        Label("Audio Stats", systemImage: "waveform.path.ecg")
+                if showAudioStats {
+                    Section {
+                        NavigationLink {
+                            QSOAudioDiagnosticsView(connectionService: connectionService)
+                        } label: {
+                            Label("Audio Stats", systemImage: "waveform.path.ecg")
+                        }
                     }
                 }
             }

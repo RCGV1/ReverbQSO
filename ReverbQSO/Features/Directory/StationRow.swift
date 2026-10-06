@@ -50,13 +50,13 @@ struct StationRow: View {
             // Main content
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    Text(station.callsign)
+                        .font(.system(.body, design: .monospaced, weight: .semibold))
+                        .foregroundStyle(station.isBusy ? .secondary : .primary)
                     if let flag = station.callSignCountryFlag {
                         Text(flag)
                             .accessibilityHidden(true)
                     }
-                    Text(station.callsign)
-                        .font(.system(.body, design: .monospaced, weight: .semibold))
-                        .foregroundStyle(station.isBusy ? .secondary : .primary)
                 }
 
                 if let location = station.locationDisplay {

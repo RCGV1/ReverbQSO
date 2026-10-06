@@ -7,6 +7,53 @@ import XCTest
 
 @MainActor
 final class ProxyDirectoryRefreshTests: XCTestCase {
+    func testDirectoryCommandFailureKeepsConnectedQSOAndVoiceTunnelAlive() async throws {
+        for behavior in [RefreshTestProxy.Behavior.closeFirstRefresh, .rejectFirstRefreshOpen] {
+            let proxy = try RefreshTestProxy(behavior: behavior, acceptPeerControl: true)
+            try await proxy.start()
+            let (directory, _) = makeService(proxy: proxy)
+            await directory.login(callsign: "N0TEST", password: "directory-password")
+            XCTAssertTrue(directory.isLoggedIn)
+            let prepared = try await directory.prepareProxySession(callsign: "N0TEST")
+            let shared = try XCTUnwrap(prepared)
+            let configuration = await shared.configuration
+            let connection = EchoLinkConnectionService(networkConfigurationProvider: { configuration },
+                handshakeRetryIntervals: [.milliseconds(200)])
+            connection.authenticatedCallsign = "N0TEST"
+            connection.setBackgroundMuted(true)
+            connection.resolveProxySession = { try await directory.prepareProxySession(callsign: $0) }
+            await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "198.51.100.10"))
+            XCTAssertEqual(connection.session?.state, .connected)
+
+            let refreshed = await directory.refresh()
+            XCTAssertTrue(refreshed)
+            let usable = await shared.isUsable()
+            XCTAssertTrue(usable, "A framed directory close must not close the shared UDP tunnel")
+            XCTAssertEqual(connection.session?.state, .connected)
+            XCTAssertNil(connection.error)
+            XCTAssertEqual(proxy.authenticatedConnectionCount, 1, "Keep the proxy's existing voice endpoint")
+            await connection.sendChat(message: "Still connected")
+            for _ in 0..<100 where !connection.incomingChatMessages.contains(where: { !$0.isOutgoing }) {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(connection.incomingChatMessages.contains(where: { !$0.isOutgoing }),
+                "Proxied incoming traffic must still flow after directory recovery")
+            var voicePackets = 0
+            connection.onAuditIncomingDatagram = { _ in voicePackets += 1 }
+            let payload = try XCTUnwrap(GSMCodec.stripHeader(GSMCodec().encode(
+                [Int16](repeating: 0, count: 640))))
+            let packet = EchoLinkAudioPacketCodec.buildLegacyVoicePacket(gsmPayload: payload, sequence: 1)
+            try await shared.sendAudio(packet, to: "198.51.100.10")
+            for _ in 0..<100 where voicePackets == 0 { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertEqual(voicePackets, 1, "Voice packets must still cross the same proxy in both directions")
+            connection.onAuditIncomingDatagram = nil
+            await connection.disconnect()
+            await directory.logout()
+            await directory.closeProxySession()
+            proxy.stop()
+        }
+    }
+
     func testLoginReplacesPublicProxyThatCannotReachTheDirectory() async throws {
         let broken = try RefreshTestProxy(behavior: .rejectDirectoryOpen)
         let healthy = try RefreshTestProxy(behavior: .delayFirstRefresh)
@@ -319,10 +366,13 @@ private final class RefreshTestProxy: @unchecked Sendable {
         case delayFirstRefresh
         case dropFirstRefresh
         case rejectDirectoryOpen
+        case closeFirstRefresh
+        case rejectFirstRefreshOpen
     }
 
     private let behavior: Behavior
     private let replyToControl: Bool
+    private let acceptPeerControl: Bool
     let controlReceived = XCTestExpectation(description: "outgoing peer control reached local proxy")
     private var receivedControl = false
     private let listener: NWListener
@@ -333,15 +383,17 @@ private final class RefreshTestProxy: @unchecked Sendable {
     private var stationRequests = 0
     private var registrations = 0
     private var authentications = 0
+    private var directoryOpens = 0
 
     var port: UInt16 { listener.port!.rawValue }
     var refreshRequestCount: Int { queue.sync { max(0, stationRequests - 1) } }
     var registrationRequestCount: Int { queue.sync { registrations } }
     var authenticatedConnectionCount: Int { queue.sync { authentications } }
 
-    init(behavior: Behavior, replyToControl: Bool = false) throws {
+    init(behavior: Behavior, replyToControl: Bool = false, acceptPeerControl: Bool = false) throws {
         self.behavior = behavior
         self.replyToControl = replyToControl
+        self.acceptPeerControl = acceptPeerControl
         listener = try NWListener(using: .tcp, on: .any)
         listener.stateUpdateHandler = { [weak self] state in
             if case .ready = state { self?.ready.fulfill() }
@@ -411,7 +463,9 @@ private final class RefreshTestProxy: @unchecked Sendable {
     private func handle(_ message: EchoLinkProxyMessage, on connection: NWConnection) {
         switch message.type {
         case .tcpOpen:
-            send(.tcpStatus, payload: behavior == .rejectDirectoryOpen
+            directoryOpens += 1
+            send(.tcpStatus, payload: (behavior == .rejectDirectoryOpen
+                 || (behavior == .rejectFirstRefreshOpen && directoryOpens == 3))
                  ? Data([1, 0, 0, 0]) : Data(repeating: 0, count: 4), on: connection)
         case .tcpData:
             if message.payload.starts(with: Data("-LOGIN\n".utf8)) {
@@ -431,6 +485,10 @@ private final class RefreshTestProxy: @unchecked Sendable {
                         connection.cancel()
                     case .rejectDirectoryOpen:
                         break
+                    case .closeFirstRefresh:
+                        send(.tcpClose, payload: Data(), on: connection)
+                    case .rejectFirstRefreshOpen:
+                        sendStationList(on: connection)
                     }
                 } else {
                     sendStationList(on: connection)
@@ -438,13 +496,25 @@ private final class RefreshTestProxy: @unchecked Sendable {
             }
         case .udpControl:
             if !receivedControl { receivedControl = true; controlReceived.fulfill() }
+            if acceptPeerControl {
+                let frame = try! EchoLinkProxyProtocol.encode(type: .udpControl,
+                    remoteHost: message.remoteHost,
+                    payload: EchoLinkControlPacketCodec.buildSDESPacket(callsign: "TEST-R"))
+                connection.send(content: frame, completion: .idempotent)
+            }
             if replyToControl {
                 // A valid peer RR is deliberately not a handshake acceptance.
                 let frame = try! EchoLinkProxyProtocol.encode(type: .udpControl,
                     remoteHost: message.remoteHost, payload: Data([0x80, 201, 0, 1, 0, 0, 0, 1]))
                 connection.send(content: frame, completion: .idempotent)
             }
-        case .tcpClose, .udpData, .tcpStatus, .system:
+        case .udpData:
+            if acceptPeerControl {
+                let frame = try! EchoLinkProxyProtocol.encode(type: .udpData,
+                    remoteHost: message.remoteHost, payload: message.payload)
+                connection.send(content: frame, completion: .idempotent)
+            }
+        case .tcpClose, .tcpStatus, .system:
             break
         }
     }
