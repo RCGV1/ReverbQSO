@@ -15,6 +15,7 @@ final class AppState: ObservableObject {
     /// The locally remembered account; directory presence can recover separately.
     @Published var isLoggedIn: Bool = false
     @Published var isAutoLoggingIn: Bool = false
+    @Published private(set) var directoryRecoveryError: String?
     @Published var currentUser: String = ""
     @Published var loginError: String?
     @Published private(set) var isDemoMode = false
@@ -283,6 +284,7 @@ final class AppState: ObservableObject {
         authenticationGeneration &+= 1
         let generation = authenticationGeneration
         loginError = nil
+        directoryRecoveryError = nil
         let target = accountDirectories[normalized]
             ?? (currentUser == normalized || !isLoggedIn ? directoryService : EchoLinkDirectoryService())
         await target.login(callsign: normalized, password: password)
@@ -526,6 +528,7 @@ final class AppState: ObservableObject {
 
     func logout() async {
         isSigningOut = true
+        directoryRecoveryError = nil
         defer { isSigningOut = false }
         authenticationGeneration &+= 1
         autoLoginTask?.cancel()
@@ -602,8 +605,23 @@ final class AppState: ObservableObject {
 
     // MARK: - Auto-login
 
+    /// Retry server presence without removing the remembered account.
+    func retryDirectoryRegistration() {
+        guard isLoggedIn, !isDemoMode, !isAuthenticating, !isSigningOut else { return }
+        if directoryService.isLoggedIn {
+            Task { await directoryService.refresh() }
+            return
+        }
+        authenticationGeneration &+= 1
+        autoLoginTask?.cancel()
+        autoLoginTask = nil
+        isAutoLoggingIn = false
+        attemptAutoLogin()
+    }
+
     private func loginLocalDemo(callsign: String) async {
         guard !isSigningOut else { return }
+        directoryRecoveryError = nil
         isAuthenticating = true
         defer { isAuthenticating = false }
         loginError = nil
@@ -683,6 +701,7 @@ final class AppState: ObservableObject {
         loginError = nil
         if connectionService.session == nil { connectionService.authenticatedCallsign = callsign }
         isAutoLoggingIn = true
+        directoryRecoveryError = nil
         let generation = authenticationGeneration
         autoLoginTask = Task { [weak self] in
             guard let self else { return }
@@ -699,9 +718,12 @@ final class AppState: ObservableObject {
                 else { await directory.login(callsign: callsign, password: password) }
                 guard !Task.isCancelled, self.authenticationGeneration == generation, !self.isDemoMode else { return }
                 if directory.isLoggedIn {
+                    self.directoryRecoveryError = nil
                     self.startDirectoryRefreshIfEligible()
                     return
                 }
+                self.directoryRecoveryError = directory.error?.localizedDescription
+                    ?? "The station directory is unavailable."
                 if DirectoryRegistrationFailurePolicy.requiresUserSignIn(directory.error) {
                     self.isLoggedIn = false
                     self.loginError = directory.error?.localizedDescription

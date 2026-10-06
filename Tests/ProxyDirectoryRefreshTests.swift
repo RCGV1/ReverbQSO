@@ -7,6 +7,28 @@ import XCTest
 
 @MainActor
 final class ProxyDirectoryRefreshTests: XCTestCase {
+    func testLoginReplacesPublicProxyThatCannotReachTheDirectory() async throws {
+        let broken = try RefreshTestProxy(behavior: .rejectDirectoryOpen)
+        let healthy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await broken.start()
+        try await healthy.start()
+        defer { broken.stop(); healthy.stop() }
+        let preference = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
+        let candidates = [broken, healthy].map {
+            EchoLinkProxyConfiguration(mode: .publicProxy, host: "127.0.0.1", port: $0.port, password: "PUBLIC")
+        }
+        let store = EchoLinkProxySessionStore(configurationProvider: { preference }, resolveCandidates: { _ in candidates })
+        let service = EchoLinkDirectoryService(proxySessionStore: store, configurationProvider: { preference },
+            client: DirectoryClient(host: "127.0.0.1"), saveCredentials: { _, _, _ in true })
+        await service.login(callsign: "N0TEST", password: "directory-password")
+        XCTAssertTrue(service.isLoggedIn, "A ready proxy can fail to reach the directory; try the next endpoint")
+        XCTAssertEqual(service.stations.first?.callsign, "K6FRESH-R")
+        XCTAssertFalse(service.isLoading)
+        XCTAssertEqual(healthy.authenticatedConnectionCount, 1)
+        await service.logout()
+        await store.close()
+    }
+
     func testMatchedControlWithoutSDESAndCancellationDoNotReportUnansweredProxy() async throws {
         for cancel in [false, true] {
             let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, replyToControl: !cancel)
@@ -296,6 +318,7 @@ private final class RefreshTestProxy: @unchecked Sendable {
     enum Behavior {
         case delayFirstRefresh
         case dropFirstRefresh
+        case rejectDirectoryOpen
     }
 
     private let behavior: Behavior
@@ -388,7 +411,8 @@ private final class RefreshTestProxy: @unchecked Sendable {
     private func handle(_ message: EchoLinkProxyMessage, on connection: NWConnection) {
         switch message.type {
         case .tcpOpen:
-            send(.tcpStatus, payload: Data(repeating: 0, count: 4), on: connection)
+            send(.tcpStatus, payload: behavior == .rejectDirectoryOpen
+                 ? Data([1, 0, 0, 0]) : Data(repeating: 0, count: 4), on: connection)
         case .tcpData:
             if message.payload.starts(with: Data("-LOGIN\n".utf8)) {
                 registrations += 1
@@ -405,6 +429,8 @@ private final class RefreshTestProxy: @unchecked Sendable {
                         }
                     case .dropFirstRefresh:
                         connection.cancel()
+                    case .rejectDirectoryOpen:
+                        break
                     }
                 } else {
                     sendStationList(on: connection)

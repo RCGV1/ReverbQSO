@@ -2,7 +2,7 @@
 
 import Foundation
 
-struct EchoLinkPublicProxy: Identifiable, Equatable, Hashable, Sendable {
+struct EchoLinkPublicProxy: Identifiable, Equatable, Hashable, Sendable, Codable {
     var id: String { "\(host):\(port)" }
     let name: String
     let host: String
@@ -61,6 +61,13 @@ enum EchoLinkPublicProxyListParser {
 enum EchoLinkPublicProxyListClient {
     static let listURL = URL(string: "https://www.echolink.org/proxylist.jsp?lang=en")!
     static let defaultCandidateLimit = 3
+    private static let cacheKey = "network.publicProxyListCache"
+    private static let cacheLifetime: TimeInterval = 24 * 60 * 60
+
+    private struct CachedList: Codable {
+        let fetchedAt: Date
+        let proxies: [EchoLinkPublicProxy]
+    }
 
     enum ListError: Swift.Error, LocalizedError, Equatable {
         case invalidResponse
@@ -74,13 +81,39 @@ enum EchoLinkPublicProxyListClient {
         }
     }
 
-    static func fetch(session: URLSession = .shared) async throws -> [EchoLinkPublicProxy] {
-        let (data, response) = try await session.data(from: listURL)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200..<300).contains(httpResponse.statusCode) else {
-            throw ListError.invalidResponse
+    static func fetch(
+        session: URLSession = .shared,
+        defaults: UserDefaults = .standard,
+        now: Date = .now
+    ) async throws -> [EchoLinkPublicProxy] {
+        do {
+            // Bound discovery separately from proxy authentication. A network
+            // change must not leave launch waiting on URLSession's long default.
+            let request = URLRequest(url: listURL, timeoutInterval: 10)
+            let (data, response) = try await session.data(for: request)
+            try Task.checkCancellation()
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                throw ListError.invalidResponse
+            }
+            let proxies = EchoLinkPublicProxyListParser.parse(data)
+            guard !proxies.isEmpty else { throw ListError.invalidResponse }
+            if proxies.contains(where: \.isReady),
+               let encoded = try? JSONEncoder().encode(CachedList(fetchedAt: now, proxies: proxies)) {
+                defaults.set(encoded, forKey: cacheKey)
+            }
+            return proxies
+        } catch {
+            // Endpoints come only from a successfully verified HTTPS response.
+            // Keep certificate checks intact; never fall back to plain HTTP.
+            try Task.checkCancellation()
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled,
+                  let data = defaults.data(forKey: cacheKey),
+                  let cached = try? JSONDecoder().decode(CachedList.self, from: data),
+                  (0...cacheLifetime).contains(now.timeIntervalSince(cached.fetchedAt)),
+                  cached.proxies.contains(where: \.isReady) else { throw error }
+            return cached.proxies
         }
-        return EchoLinkPublicProxyListParser.parse(data)
     }
 
     static func selectReadyProxy(

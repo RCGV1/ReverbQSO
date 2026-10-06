@@ -10,6 +10,36 @@ import XCTest
 /// The credential is read in the test process and never logged.
 @MainActor
 final class LiveTransportSmokeTests: XCTestCase {
+    /// Recreate the directory after a process-like tunnel loss, without logging
+    /// the old account off. Credentials remain inside the opted-in test host.
+    func testSavedAccountRegistrationAfterRepeatedReloads() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["ECHOLINK_RUN_RELOAD_AUDIT"] == "1" else {
+            throw XCTSkip("Live reload audit requires explicit opt-in")
+        }
+        let callsign = try XCTUnwrap(environment["ECHOLINK_LIVE_CALLSIGN"])
+        let path = try XCTUnwrap(environment["ECHOLINK_LIVE_CREDENTIAL_PATH"])
+        let password = try NSAttributedString(url: URL(fileURLWithPath: path),
+            options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+            .string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !password.isEmpty else { XCTFail("Live credential is empty"); return }
+        let configuration = EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC")
+        for reload in 1...3 {
+            let store = EchoLinkProxySessionStore(configurationProvider: { configuration })
+            let directory = EchoLinkDirectoryService(proxySessionStore: store,
+                configurationProvider: { configuration }, saveCredentials: { _, _, _ in true })
+            let started = ContinuousClock.now
+            await directory.login(callsign: callsign, password: password, persistAsActive: false)
+            print("LIVE RELOAD attempt=\(reload) registered=\(directory.isLoggedIn) stations=\(directory.stations.count) elapsed=\(started.duration(to: .now)) error=\(directory.error?.localizedDescription ?? "none")")
+            XCTAssertTrue(directory.isLoggedIn)
+            XCTAssertFalse(directory.isLoading)
+            XCTAssertFalse(directory.stations.isEmpty)
+            if reload == 3 || !directory.isLoggedIn { await directory.logout() }
+            await store.close()
+            if !directory.isLoggedIn && reload != 3 { return }
+        }
+    }
+
     /// Opt-in, receive-only comparison against a requested live station. This
     /// uses the app's shared directory/proxy recovery path, including retries.
     func testRequestedStationWithPublicProxyRetry() async throws {

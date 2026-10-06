@@ -37,6 +37,7 @@ final class LocalDemoAccountTests: XCTestCase {
         for _ in 0..<100 where app.isAutoLoggingIn { await Task.yield() }
         XCTAssertFalse(app.isAutoLoggingIn)
         XCTAssertTrue(app.isLoggedIn)
+        XCTAssertEqual(app.directoryRecoveryError, DirectoryClientError.timeout.localizedDescription)
         XCTAssertNil(app.loginError)
         await app.logout()
     }
@@ -53,6 +54,8 @@ final class LocalDemoAccountTests: XCTestCase {
             attempts += 1
             if attempts == 1 { directory.error = DirectoryClientError.timeout }
             else {
+                XCTAssertEqual(app.directoryRecoveryError, DirectoryClientError.timeout.localizedDescription,
+                    "Keep the recovery state visible while another attempt is running")
                 directory.isLoggedIn = true
                 directory.error = nil
                 restored.fulfill()
@@ -61,6 +64,7 @@ final class LocalDemoAccountTests: XCTestCase {
         await fulfillment(of: [restored], timeout: 5)
         XCTAssertTrue(app.isLoggedIn)
         XCTAssertEqual(attempts, 2)
+        XCTAssertNil(app.directoryRecoveryError)
         await app.logout()
         XCTAssertTrue(defaults.bool(forKey: AppState.explicitlySignedOutKey))
         app.restoreSavedAccount(callsign: "N0TEST", password: "not-a-real-password") { _, _, _ in

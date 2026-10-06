@@ -187,7 +187,10 @@ struct DirectoryView: View {
             }
         }
         .listStyle(.plain)
-        .refreshable { await viewModel.refresh() }
+        .refreshable {
+            if appState.directoryService.isLoggedIn { await viewModel.refresh() }
+            else { appState.retryDirectoryRegistration() }
+        }
         .overlay { listOverlay }
     }
 
@@ -205,7 +208,17 @@ struct DirectoryView: View {
 
     @ViewBuilder
     private var listOverlay: some View {
-        if viewModel.isLoading && viewModel.stations.isEmpty {
+        if viewModel.stations.isEmpty, let error = appState.directoryRecoveryError,
+           !appState.directoryService.isLoggedIn {
+            ContentUnavailableView {
+                Label("Unable to Load Stations", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Retry") { appState.retryDirectoryRegistration() }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else if viewModel.isLoading && viewModel.stations.isEmpty {
             VStack(spacing: 16) {
                 ProgressView()
                     .scaleEffect(1.3)

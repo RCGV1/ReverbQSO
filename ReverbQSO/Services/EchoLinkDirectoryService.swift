@@ -11,11 +11,23 @@ enum DirectoryPublicProxyRetryPolicy {
         rejectedCandidateCount: Int
     ) -> Bool {
         guard configuration.mode == .publicProxy,
-              rejectedCandidateCount < EchoLinkPublicProxyListClient.defaultCandidateLimit,
-              let proxyError = error as? EchoLinkProxyClient.ClientError else {
+              rejectedCandidateCount < EchoLinkPublicProxyListClient.defaultCandidateLimit else {
             return false
         }
-        return proxyError.isCandidateRejection
+        if let proxyError = error as? EchoLinkProxyClient.ClientError {
+            switch proxyError {
+            case .badPassword, .accessDenied, .connectionFailed, .connectionClosed,
+                 .authenticationTimedOut, .sendTimedOut: return true
+            default: return false
+            }
+        }
+        if let sessionError = error as? EchoLinkProxySession.SessionError {
+            switch sessionError {
+            case .directoryOpenFailed, .directoryClosed, .timedOut: return true
+            case .directoryBusy: return false
+            }
+        }
+        return false
     }
 }
 

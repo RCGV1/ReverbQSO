@@ -45,7 +45,7 @@ final class EchoLinkAutomaticDirectoryTests: XCTestCase {
             error: DirectoryClientError.loginDenied,
             rejectedCandidateCount: 1
         ))
-        XCTAssertFalse(DirectoryPublicProxyRetryPolicy.shouldRetry(
+        XCTAssertTrue(DirectoryPublicProxyRetryPolicy.shouldRetry(
             configuration: publicProxy,
             error: EchoLinkProxyClient.ClientError.connectionClosed,
             rejectedCandidateCount: 1
