@@ -127,6 +127,8 @@ struct SettingsView: View {
     #endif
 
     @ViewBuilder private var audioContent: some View {
+        AudioTestSettingsRows(host: appState.conferenceHostService)
+
         Toggle("Show Audio Stats", isOn: $showAudioStats)
         MicrophonePermissionControl(isEmbeddedInSettings: true)
         Picker("Microphone Gain", selection: $microphoneGainMode) {
@@ -371,6 +373,86 @@ struct SettingsView: View {
             NavigationLink("Licenses") { LicensesView() }
     }
 
+}
+
+private struct AudioTestSettingsRows: View {
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var directoryService: EchoLinkDirectoryService
+    @EnvironmentObject private var qsoHub: QSOHub
+    @ObservedObject var host: EchoLinkConferenceHostService
+    @State private var isLaunching = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Button {
+            Task { await launch() }
+        } label: {
+            Label("Test Audio with EchoTest", systemImage: "waveform")
+        }
+        .disabled(!canLaunch)
+
+        Text("Speak with PTT, then release to hear yourself.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        if let errorMessage {
+            Text(errorMessage)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var canLaunch: Bool {
+        !isLaunching && connectionCanStart
+    }
+
+    private var connectionCanStart: Bool {
+        appState.isLoggedIn
+            && (appState.isDemoMode || directoryService.isLoggedIn)
+            && !appState.isAutoLoggingIn
+            && qsoHub.entries.isEmpty
+            && !hostBlocksConnection
+    }
+
+    private var hostBlocksConnection: Bool {
+        if host.isStarting || host.isStopping { return true }
+        guard host.isRunning else { return false }
+        return !host.isPersonalMode || !host.sessions.isEmpty || host.pendingCall != nil
+    }
+
+    @MainActor
+    private func launch() async {
+        guard canLaunch else { return }
+        isLaunching = true
+        errorMessage = nil
+        defer { isLaunching = false }
+
+        let echoTest: Station?
+        if appState.isDemoMode {
+            echoTest = resolveEchoTest(in: LocalDemoAccount.stations)
+        } else if let current = resolveEchoTest(in: directoryService.stations) {
+            echoTest = current
+        } else {
+            _ = await directoryService.refresh()
+            echoTest = resolveEchoTest(in: directoryService.stations)
+        }
+
+        guard let echoTest else {
+            errorMessage = "EchoTest is unavailable in the current directory."
+            return
+        }
+        guard connectionCanStart else { return }
+
+        await appState.connect(to: echoTest)
+        errorMessage = qsoHub.lastError
+    }
+
+    private func resolveEchoTest(in stations: [Station]) -> Station? {
+        stations.first {
+            $0.callsign.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare("*ECHOTEST*") == .orderedSame
+        } ?? stations.first { $0.nodeNumber == 9999 }
+    }
 }
 
 private struct SavedLoginRemoval: Identifiable {
