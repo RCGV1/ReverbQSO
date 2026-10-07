@@ -7,6 +7,101 @@ import XCTest
 
 @MainActor
 final class ProxyDirectoryRefreshTests: XCTestCase {
+    func testAutomaticDirectTimeoutUsesOneProxyFallbackAndExchangesVoice() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, acceptPeerControl: true)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (directory, _) = makeService(proxy: proxy)
+        await directory.login(callsign: "N0TEST", password: "directory-password")
+        let preference = EchoLinkProxyConfiguration(mode: .automatic, host: "", port: 8100, password: "PUBLIC")
+        let direct = EchoLinkEffectiveTransport(preference: preference,
+            configuration: EchoLinkProxyConfiguration(mode: .direct, host: "", port: 8100, password: ""), relayAddress: nil)
+        let connection = EchoLinkConnectionService(networkConfigurationProvider: { preference },
+            handshakeRetryIntervals: [.milliseconds(50)])
+        connection.authenticatedCallsign = "N0TEST"
+        connection.setBackgroundMuted(true)
+        connection.effectiveTransportProvider = { direct }
+        connection.resolveProxySession = { try await directory.prepareProxySession(callsign: $0) }
+        var fallbackCount = 0
+        connection.prepareAutomaticPublicProxyFallback = { _ in
+            fallbackCount += 1
+            return EchoLinkEffectiveTransport(preference: preference,
+                configuration: EchoLinkProxyConfiguration(mode: .publicProxy, host: "", port: 8100, password: "PUBLIC"),
+                relayAddress: nil)
+        }
+        await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "127.0.0.2"))
+        XCTAssertEqual(fallbackCount, 1)
+        XCTAssertEqual(connection.session?.state, .connected, connection.error?.localizedDescription ?? "")
+        XCTAssertNil(connection.error)
+        await connection.sendChat(message: "Fallback worked")
+        for _ in 0..<100 where !connection.incomingChatMessages.contains(where: { !$0.isOutgoing }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(connection.incomingChatMessages.contains(where: { !$0.isOutgoing }))
+        await connection.disconnect()
+        await directory.logout()
+        await directory.closeProxySession()
+    }
+
+    func testDirectoryTimeoutPreservesVoiceUntilDisconnectThenRecoversDirectory() async throws {
+        let proxy = try RefreshTestProxy(behavior: .stallFirstRefresh, acceptPeerControl: true)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (directory, _) = makeService(proxy: proxy)
+        await directory.login(callsign: "N0TEST", password: "directory-password")
+        XCTAssertTrue(directory.isLoggedIn)
+        let prepared = try await directory.prepareProxySession(callsign: "N0TEST")
+        let shared = try XCTUnwrap(prepared)
+        let configuration = await shared.configuration
+        let connection = EchoLinkConnectionService(networkConfigurationProvider: { configuration },
+            handshakeRetryIntervals: [.milliseconds(200)])
+        connection.authenticatedCallsign = "N0TEST"
+        connection.setBackgroundMuted(true)
+        connection.resolveProxySession = { try await directory.prepareProxySession(callsign: $0) }
+        await connection.connect(to: Station(callsign: "TEST-R", ipAddress: "198.51.100.10"))
+        XCTAssertEqual(connection.session?.state, .connected)
+
+        do {
+            _ = try await shared.serializedDirectoryRequest(Data("s".utf8), host: "127.0.0.1",
+                boundary: .marker(Data("+++".utf8)), timeout: .milliseconds(50))
+            XCTFail("The local directory intentionally stalls")
+        } catch { }
+        let usable = await shared.isUsable()
+        XCTAssertTrue(usable, "A directory timeout must not close a working voice tunnel")
+        let refreshedWhileConnected = await directory.refresh()
+        XCTAssertFalse(refreshedWhileConnected, "Do not reuse an uncorrelated directory channel")
+        XCTAssertTrue(directory.isLoggedIn, "Keep the local account and active QSO")
+        XCTAssertEqual(proxy.authenticatedConnectionCount, 1)
+        XCTAssertEqual(connection.session?.state, .connected)
+        XCTAssertNil(connection.error)
+
+        await connection.sendChat(message: "Voice tunnel survived")
+        for _ in 0..<100 where !connection.incomingChatMessages.contains(where: { !$0.isOutgoing }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(connection.incomingChatMessages.contains(where: { !$0.isOutgoing }))
+        var voicePackets = 0
+        connection.onAuditIncomingDatagram = { _ in voicePackets += 1 }
+        let payload = try XCTUnwrap(GSMCodec.stripHeader(GSMCodec().encode([Int16](repeating: 0, count: 640))))
+        try await shared.sendAudio(EchoLinkAudioPacketCodec.buildLegacyVoicePacket(gsmPayload: payload, sequence: 1),
+            to: "198.51.100.10")
+        for _ in 0..<100 where voicePackets == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(voicePackets, 1)
+        connection.onAuditIncomingDatagram = nil
+        await connection.disconnect()
+        for _ in 0..<100 where proxy.authenticatedConnectionCount < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(proxy.authenticatedConnectionCount, 2,
+            "Hanging up must automatically renew the directory, without a manual refresh")
+        let recovered = await directory.refresh()
+        XCTAssertTrue(recovered, directory.error?.localizedDescription ?? "")
+        XCTAssertEqual(proxy.authenticatedConnectionCount, 2)
+        XCTAssertNil(directory.error)
+        await directory.logout()
+        await directory.closeProxySession()
+    }
+
     func testDirectoryCommandFailureKeepsConnectedQSOAndVoiceTunnelAlive() async throws {
         for behavior in [RefreshTestProxy.Behavior.closeFirstRefresh, .rejectFirstRefreshOpen] {
             let proxy = try RefreshTestProxy(behavior: behavior, acceptPeerControl: true)
@@ -361,13 +456,15 @@ final class ProxyDirectoryRefreshTests: XCTestCase {
     }
 }
 
-private final class RefreshTestProxy: @unchecked Sendable {
+final class RefreshTestProxy: @unchecked Sendable {
     enum Behavior {
         case delayFirstRefresh
         case dropFirstRefresh
         case rejectDirectoryOpen
         case closeFirstRefresh
         case rejectFirstRefreshOpen
+        case stallFirstRefresh
+        case stallRegistration
     }
 
     private let behavior: Behavior
@@ -384,6 +481,8 @@ private final class RefreshTestProxy: @unchecked Sendable {
     private var registrations = 0
     private var authentications = 0
     private var directoryOpens = 0
+    private var stalledRegistrationConnection: NWConnection?
+    let registrationReceived = XCTestExpectation(description: "proxy registration reached local fixture")
 
     var port: UInt16 { listener.port!.rawValue }
     var refreshRequestCount: Int { queue.sync { max(0, stationRequests - 1) } }
@@ -419,6 +518,14 @@ private final class RefreshTestProxy: @unchecked Sendable {
 
     func waitForDelayedRefresh() async {
         _ = await XCTWaiter.fulfillment(of: [delayedRefresh], timeout: 2)
+    }
+
+    func releaseRegistration() {
+        queue.async { [weak self] in
+            guard let self, let connection = self.stalledRegistrationConnection else { return }
+            self.stalledRegistrationConnection = nil
+            self.send(.tcpData, payload: Data("LOGIN-RESULT\nresult:success\n\n".utf8), on: connection)
+        }
     }
 
     private func accept(_ connection: NWConnection) {
@@ -470,7 +577,12 @@ private final class RefreshTestProxy: @unchecked Sendable {
         case .tcpData:
             if message.payload.starts(with: Data("-LOGIN\n".utf8)) {
                 registrations += 1
-                send(.tcpData, payload: Data("LOGIN-RESULT\nresult:success\n\n".utf8), on: connection)
+                if case .stallRegistration = behavior, stalledRegistrationConnection == nil {
+                    stalledRegistrationConnection = connection
+                    registrationReceived.fulfill()
+                } else {
+                    send(.tcpData, payload: Data("LOGIN-RESULT\nresult:success\n\n".utf8), on: connection)
+                }
             } else if message.payload == Data("s".utf8) {
                 stationRequests += 1
                 let ordinal = stationRequests
@@ -488,6 +600,10 @@ private final class RefreshTestProxy: @unchecked Sendable {
                     case .closeFirstRefresh:
                         send(.tcpClose, payload: Data(), on: connection)
                     case .rejectFirstRefreshOpen:
+                        sendStationList(on: connection)
+                    case .stallFirstRefresh:
+                        break
+                    case .stallRegistration:
                         sendStationList(on: connection)
                     }
                 } else {

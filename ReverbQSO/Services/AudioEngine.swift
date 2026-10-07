@@ -21,7 +21,96 @@ struct AudioInputDevice: Identifiable, Equatable {
     let portType: String
 }
 
+enum AudioSessionProfile: Equatable {
+    case highQualityReceive
+    case warmCapture
+    case voiceCapture
+}
+
+struct AudioSessionRoutePolicy {
+    private(set) var prefersHighQualityBluetoothReceive = false
+
+    mutating func observeReceiveRoute(
+        outputPortTypes: [AVAudioSession.Port],
+        outputPreference: AudioOutputPreference
+    ) {
+        prefersHighQualityBluetoothReceive = outputPreference == .system
+            && outputPortTypes.contains(.bluetoothA2DP)
+    }
+
+    mutating func observeIdleRouteChange(
+        outputPortTypes: [AVAudioSession.Port],
+        outputPreference: AudioOutputPreference,
+        removedDevice: Bool
+    ) {
+        guard outputPreference == .system else {
+            prefersHighQualityBluetoothReceive = false
+            return
+        }
+        if outputPortTypes.contains(.bluetoothA2DP) {
+            prefersHighQualityBluetoothReceive = true
+        } else if removedDevice {
+            prefersHighQualityBluetoothReceive = false
+        }
+    }
+
+    func profile(captureRequested: Bool) -> AudioSessionProfile {
+        if captureRequested { return .voiceCapture }
+        return prefersHighQualityBluetoothReceive ? .highQualityReceive : .warmCapture
+    }
+
+    func shouldReplaceEngineGraph(rebuildRequested: Bool, captureRequested: Bool) -> Bool {
+        rebuildRequested || profile(captureRequested: captureRequested) != .highQualityReceive
+    }
+
+    func shouldConfigureInputNode(captureRequested: Bool) -> Bool {
+        profile(captureRequested: captureRequested) != .highQualityReceive
+    }
+}
+
+struct DeferredMicrophoneEligibility {
+    private(set) var hasEligibleInput = false
+
+    mutating func observeHardware(
+        isInputAvailable: Bool,
+        maximumInputChannels: Int,
+        availableInputCount: Int,
+        receiveOnlyCategory: Bool
+    ) {
+        let reportedInput = isInputAvailable || maximumInputChannels > 0 || availableInputCount > 0
+        // AVAudioSession hides input capability under `.playback`. Physical
+        // iOS devices have a built-in microphone, so permission is enough to
+        // permit a later PTT attempt from this receive-only profile. Capture
+        // still validates a live, non-zero input format after playAndRecord is
+        // activated; this flag never declares a tap ready.
+        if reportedInput || receiveOnlyCategory {
+            hasEligibleInput = true
+        }
+    }
+}
+
 #if targetEnvironment(macCatalyst)
+final class MacMicrophoneLifecycleGate: @unchecked Sendable {
+    private let queue: DispatchQueue
+
+    init(label: String) {
+        queue = DispatchQueue(label: label, qos: .userInitiated)
+    }
+
+    func enqueue(_ operation: @escaping @Sendable () -> Void) {
+        queue.async(execute: operation)
+    }
+
+    func perform(_ operation: @escaping @Sendable () -> Void) async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                operation()
+                continuation.resume()
+            }
+        }
+    }
+}
+
 private final class MacMicrophoneCapture: @unchecked Sendable {
     private struct CaptureError: LocalizedError {
         let operation: String
@@ -75,7 +164,9 @@ private final class MacMicrophoneCapture: @unchecked Sendable {
         let context: Unmanaged<CallbackContext>
     }
 
-    private let queue = DispatchQueue(label: "org.reverbqso.mac-microphone", qos: .userInitiated)
+    private static let lifecycleGate = MacMicrophoneLifecycleGate(
+        label: "org.reverbqso.mac-microphone-lifecycle"
+    )
     private let block: AVAudioNodeTapBlock
     private var running: Running?
 
@@ -83,7 +174,7 @@ private final class MacMicrophoneCapture: @unchecked Sendable {
 
     func start(deviceID: AudioDeviceID) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async { [self] in
+            Self.lifecycleGate.enqueue { [self] in
                 do {
                     guard running == nil else { continuation.resume(); return }
                     let asbd = try Self.inputFormat(deviceID: deviceID)
@@ -121,12 +212,12 @@ private final class MacMicrophoneCapture: @unchecked Sendable {
 
     func stop() {
         // Retain this object until device callbacks are retired on its queue.
-        queue.async { [self] in stopOnQueue() }
+        Self.lifecycleGate.enqueue { [self] in stopOnQueue() }
     }
 
     func stopAndWait() async {
         await withCheckedContinuation { continuation in
-            queue.async { [self] in
+            Self.lifecycleGate.enqueue { [self] in
                 stopOnQueue()
                 continuation.resume()
             }
@@ -526,6 +617,8 @@ final class AudioEngine: ObservableObject {
     }
     var onRecordingPCM: (@MainActor ([Int16]) -> Void)?
     private var receiveOutputMuted = false
+    private var audioSessionRoutePolicy = AudioSessionRoutePolicy()
+    private var deferredMicrophoneEligibility = DeferredMicrophoneEligibility()
 #if targetEnvironment(macCatalyst)
     private var playbackRouteSignature: String?
 #endif
@@ -586,6 +679,32 @@ final class AudioEngine: ObservableObject {
     }
 
     var auditPlaybackSchedule: [[String: Double]] { auditScheduleEvents }
+
+    func auditObserveReceiveRoute(
+        outputPortTypes: [AVAudioSession.Port],
+        outputPreference: AudioOutputPreference
+    ) {
+        audioSessionRoutePolicy.observeReceiveRoute(
+            outputPortTypes: outputPortTypes,
+            outputPreference: outputPreference
+        )
+    }
+
+    func auditAudioSessionProfile(captureRequested: Bool) -> AudioSessionProfile {
+        audioSessionRoutePolicy.profile(captureRequested: captureRequested)
+    }
+
+    func auditObserveIdleRoute(
+        outputPortTypes: [AVAudioSession.Port],
+        outputPreference: AudioOutputPreference,
+        removedDevice: Bool
+    ) {
+        audioSessionRoutePolicy.observeIdleRouteChange(
+            outputPortTypes: outputPortTypes,
+            outputPreference: outputPreference,
+            removedDevice: removedDevice
+        )
+    }
 
     func beginAuditRenderCapture(url: URL) throws -> AudioAuditRenderCapture {
         guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1", engine.isRunning else {
@@ -694,23 +813,31 @@ final class AudioEngine: ObservableObject {
         playerNode.volume = receiveOutputMuted ? 0 : 1
         engine = AVAudioEngine()
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-        do {
-            try microphoneNode.setVoiceProcessingEnabled(true)
-            // Software gain handles automatic/manual levels. Keep voice I/O
-            // echo cancellation, but do not run two competing gain controls.
-            microphoneNode.isVoiceProcessingAGCEnabled = false
-            VoiceDiagnosticLog.record("fresh engine voice processing enabled AGC=\(microphoneNode.isVoiceProcessingAGCEnabled)")
-        } catch {
-            VoiceDiagnosticLog.record("fresh engine voice processing unavailable error=\(error.localizedDescription)")
-            // Discard any partially configured I/O unit before using the
-            // proven unprocessed path on devices that reject voice I/O.
-            engine = AVAudioEngine()
+        if audioSessionRoutePolicy.shouldConfigureInputNode(captureRequested: captureRequested) {
+            do {
+                try microphoneNode.setVoiceProcessingEnabled(true)
+                // Software gain handles automatic/manual levels. Keep voice I/O
+                // echo cancellation, but do not run two competing gain controls.
+                microphoneNode.isVoiceProcessingAGCEnabled = false
+                VoiceDiagnosticLog.record("fresh engine voice processing enabled AGC=\(microphoneNode.isVoiceProcessingAGCEnabled)")
+            } catch {
+                VoiceDiagnosticLog.record("fresh engine voice processing unavailable error=\(error.localizedDescription)")
+                // Discard any partially configured I/O unit before using the
+                // proven unprocessed path on devices that reject voice I/O.
+                engine = AVAudioEngine()
+            }
         }
 #endif
         isConfigured = false
         isRunning = false
         installAudioSessionObserversIfNeeded()
-#if !targetEnvironment(macCatalyst)
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        if audioSessionRoutePolicy.shouldConfigureInputNode(captureRequested: captureRequested) {
+            let freshInput = microphoneNode
+            let format = freshInput.outputFormat(forBus: 0)
+            VoiceDiagnosticLog.record("fresh engine input format channels=\(format.channelCount) rate=\(format.sampleRate)")
+        }
+#elseif !targetEnvironment(macCatalyst)
         let freshInput = microphoneNode
         let format = freshInput.outputFormat(forBus: 0)
         VoiceDiagnosticLog.record("fresh engine input format channels=\(format.channelCount) rate=\(format.sampleRate)")
@@ -789,6 +916,7 @@ final class AudioEngine: ObservableObject {
 
     /// Start playback/capture engine so received audio can be rendered even when not transmitting.
     func startPlayback(rebuildGraph: Bool = false) {
+        let isNewPlaybackRequest = !playbackDesired
         playbackDesired = true
         automaticPlaybackAllowed = true
         guard !isAudioInterrupted, !isRunning else { return }
@@ -796,12 +924,27 @@ final class AudioEngine: ObservableObject {
         RecordingAudioSession.shared.beginLiveAudio(owner: self)
         do {
             installAudioSessionObserversIfNeeded()
+            reloadRoutePreferences()
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+            if isNewPlaybackRequest {
+                observeDeferredMicrophoneEligibility(session: AVAudioSession.sharedInstance())
+                audioSessionRoutePolicy.observeReceiveRoute(
+                    outputPortTypes: AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType),
+                    outputPreference: outputPreference
+                )
+            }
+#endif
             try configureAudioSession()
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
             // Build the input node only after the session owns a hardware mic
             // route. Reusing the preactivation engine leaves it at 0 Hz on
             // physical iPhone even though AVAudioSession reports 48 kHz input.
-            replaceEngineAfterSessionActivation()
+            if audioSessionRoutePolicy.shouldReplaceEngineGraph(
+                rebuildRequested: rebuildGraph,
+                captureRequested: false
+            ) {
+                replaceEngineAfterSessionActivation()
+            }
 #else
             if rebuildGraph { replaceEngineAfterSessionActivation() }
 #endif
@@ -851,6 +994,16 @@ final class AudioEngine: ObservableObject {
         capturePreparationFailed = false
         defer {
             if inputPreparationGeneration == preparationGeneration { isPreparingCapture = false }
+        }
+
+        if !requestPermission,
+           audioSessionRoutePolicy.profile(captureRequested: false) == .highQualityReceive {
+            let eligible = MicrophoneAccess.status == .granted
+                && deferredMicrophoneEligibility.hasEligibleInput
+            isCaptureReady = eligible
+            capturePreparationFailed = !eligible
+            VoiceDiagnosticLog.record("deferred Bluetooth microphone warmup eligible=\(eligible)")
+            return eligible
         }
 
         if tapInstalled && engine.isRunning {
@@ -912,7 +1065,10 @@ final class AudioEngine: ObservableObject {
             return true
         }
 #if !targetEnvironment(macCatalyst)
-        guard isPreparingCapture else { return false }
+        guard isPreparingCapture
+                || audioSessionRoutePolicy.profile(captureRequested: false) == .highQualityReceive else {
+            return false
+        }
 #endif
 #endif
         let isContinuingCaptureRequest = captureRequested
@@ -946,6 +1102,9 @@ final class AudioEngine: ObservableObject {
         guard hasPermission else {
             logger.error("Microphone permission denied; capture not started")
             captureRequested = false
+#if os(iOS) && !targetEnvironment(macCatalyst)
+            restoreHighQualityReceiveProfileIfNeeded()
+#endif
             return false
         }
 
@@ -955,13 +1114,26 @@ final class AudioEngine: ObservableObject {
         if !isRunning { startPlayback() }
         guard isRunning else {
             captureRequested = false
+            restoreHighQualityReceiveProfileIfNeeded()
             return false
         }
 
         do {
             try ensureSessionReadyForCapture()
+            if audioSessionRoutePolicy.prefersHighQualityBluetoothReceive {
+                // The receive-only engine deliberately never instantiated an
+                // input node. Build a fresh voice-processing graph only after
+                // PTT has selected the HFP capture route.
+                replaceEngineAfterSessionActivation()
+                try setupEngineIfNeeded()
+                try engine.start()
+                isRunning = engine.isRunning
+            }
         } catch {
             logger.error("Failed to prepare audio session for capture error='\(error.localizedDescription, privacy: .public)'")
+            captureRequested = false
+            restoreHighQualityReceiveProfileIfNeeded()
+            return false
         }
 
 
@@ -990,7 +1162,10 @@ final class AudioEngine: ObservableObject {
         // Fast path: use the resolved format if available.
         if let safeTapFormat = validatedTapFormat(for: inputNode, preferred: selectedFormat),
            installCaptureTap(on: inputNode, format: safeTapFormat, generation: generation) {
-            guard activateCaptureGraphAfterInstallingTap() else { return false }
+            guard activateCaptureGraphAfterInstallingTap() else {
+                restoreHighQualityReceiveProfileIfNeeded()
+                return false
+            }
             if !isPreparingCapture { activateCaptureDelivery(generation: generation) }
             logger.debug(
                 "Capture started using native tap format (selected candidate rate=\(safeTapFormat.sampleRate) channels=\(safeTapFormat.channelCount))"
@@ -1014,7 +1189,10 @@ final class AudioEngine: ObservableObject {
         let recoveredInputNode = microphoneNode
         if let safeTapFormat = validatedTapFormat(for: recoveredInputNode, preferred: selectedFormat),
            installCaptureTap(on: recoveredInputNode, format: safeTapFormat, generation: generation) {
-            guard activateCaptureGraphAfterInstallingTap() else { return false }
+            guard activateCaptureGraphAfterInstallingTap() else {
+                restoreHighQualityReceiveProfileIfNeeded()
+                return false
+            }
             if !isPreparingCapture { activateCaptureDelivery(generation: generation) }
             logger.debug(
                 "Capture started using native tap format after recovery (rate=\(safeTapFormat.sampleRate) channels=\(safeTapFormat.channelCount))"
@@ -1025,7 +1203,12 @@ final class AudioEngine: ObservableObject {
         logger.error("Capture aborted: input route unavailable (0Hz). Tap not installed to avoid AVAudioEngine crash")
         stopCaptureTap(preservingIntent: true)
         if isCaptureRequestCurrent(generation) {
-            scheduleCaptureRecoveryAfterFailure(reason: "route-unavailable")
+            if audioSessionRoutePolicy.prefersHighQualityBluetoothReceive {
+                captureRequested = false
+                restoreHighQualityReceiveProfileIfNeeded()
+            } else {
+                scheduleCaptureRecoveryAfterFailure(reason: "route-unavailable")
+            }
         }
         return false
 #endif
@@ -1082,6 +1265,9 @@ final class AudioEngine: ObservableObject {
         }
         codec.resetEncodeState()
         resetCaptureEncodingCounters()
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        restoreHighQualityReceiveProfileIfNeeded()
+#endif
 #if targetEnvironment(macCatalyst)
         nativeMicrophoneCapture = nil
         if playbackDesired && isRunning { try? configureAudioSession() }
@@ -1101,6 +1287,10 @@ final class AudioEngine: ObservableObject {
         captureDrainGeneration = generation
 #if !os(iOS) || targetEnvironment(simulator) || targetEnvironment(macCatalyst)
         stopCaptureTap(preservingIntent: false, resetResampler: false)
+#elseif os(iOS)
+        if audioSessionRoutePolicy.prefersHighQualityBluetoothReceive {
+            stopCaptureTap(preservingIntent: false, resetResampler: false)
+        }
 #endif
 
         await barrier.sealAndWait()
@@ -1137,6 +1327,9 @@ final class AudioEngine: ObservableObject {
         captureResamplerState.reset()
         resetCaptureEncodingCounters()
         inputLevel = 0
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        restoreHighQualityReceiveProfileIfNeeded()
+#endif
 #if targetEnvironment(macCatalyst)
         isCapturing = false
         let finishedCapture = nativeMicrophoneCapture
@@ -1153,9 +1346,34 @@ final class AudioEngine: ObservableObject {
         return finalPackets
     }
 
+    private func restoreHighQualityReceiveProfileIfNeeded() {
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        guard playbackDesired,
+              audioSessionRoutePolicy.profile(captureRequested: false) == .highQualityReceive else { return }
+        do {
+            try configureAudioSession()
+            isCaptureReady = MicrophoneAccess.status == .granted
+                && deferredMicrophoneEligibility.hasEligibleInput
+            if !engine.isRunning {
+                isRunning = false
+                startPlayback()
+            } else {
+                isRunning = true
+                if !playerNode.isPlaying { playerNode.play() }
+            }
+        } catch {
+            isCaptureReady = false
+            capturePreparationFailed = true
+            recordAudioFailure(error, operation: "restore-bluetooth-receive")
+        }
+#endif
+    }
+
     /// Fully stop audio playback + capture for session teardown.
     func stopAll() {
         playbackDesired = false
+        audioSessionRoutePolicy = AudioSessionRoutePolicy()
+        deferredMicrophoneEligibility = DeferredMicrophoneEligibility()
         isAudioInterrupted = false
         automaticPlaybackAllowed = true
         audioDeviceRecoveryTask?.cancel()
@@ -1349,21 +1567,26 @@ final class AudioEngine: ObservableObject {
         // Simulator has limited VoIP I/O support; prefer stable playback.
         try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
 #else
-        do {
-            // Note: .allowBluetoothA2DP is NOT supported with .voiceChat mode per Apple docs;
-            // only .allowBluetoothHFP is valid there.
-            try session.setCategory(
-                .playAndRecord,
-                mode: .voiceChat,
-                options: voiceChatRouteOptions
-            )
-        } catch {
-            logger.error("Audio session voiceChat category failed, falling back error='\(error.localizedDescription, privacy: .public)'")
-            try session.setCategory(
-                .playAndRecord,
-                mode: .default,
-                options: fallbackRouteOptions
-            )
+        switch audioSessionRoutePolicy.profile(captureRequested: captureRequested) {
+        case .highQualityReceive:
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        case .warmCapture, .voiceCapture:
+            do {
+                // Note: .allowBluetoothA2DP is NOT supported with .voiceChat mode per Apple docs;
+                // only .allowBluetoothHFP is valid there.
+                try session.setCategory(
+                    .playAndRecord,
+                    mode: .voiceChat,
+                    options: voiceChatRouteOptions
+                )
+            } catch {
+                logger.error("Audio session voiceChat category failed, falling back error='\(error.localizedDescription, privacy: .public)'")
+                try session.setCategory(
+                    .playAndRecord,
+                    mode: .default,
+                    options: fallbackRouteOptions
+                )
+            }
         }
 #if !os(watchOS)
         do {
@@ -1379,6 +1602,7 @@ final class AudioEngine: ObservableObject {
             recordAudioFailure(error, operation: "session-activation")
             throw error
         }
+        observeDeferredMicrophoneEligibility(session: session)
 #if !os(watchOS) && !targetEnvironment(simulator)
         if session.maximumInputNumberOfChannels > 0 {
             try? session.setPreferredInputNumberOfChannels(1)
@@ -1406,17 +1630,35 @@ final class AudioEngine: ObservableObject {
         AudioRoutePreferences.save(output: preference)
 #if !os(watchOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         let session = AVAudioSession.sharedInstance()
-        guard session.category == .playAndRecord else { return }
+        audioSessionRoutePolicy.observeReceiveRoute(
+            outputPortTypes: session.currentRoute.outputs.map(\.portType),
+            outputPreference: preference
+        )
         do {
+            try configureAudioSession()
             // Clear a previous speaker default when Receiver/System is chosen,
             // and preserve the new choice through future session recovery.
-            try session.setCategory(.playAndRecord, mode: session.mode,
-                                    options: session.mode == .voiceChat ? voiceChatRouteOptions : fallbackRouteOptions)
-            switch preference {
-            case .speaker, .receiver:
-                try session.overrideOutputAudioPort(preference == .speaker ? .speaker : .none)
-            case .system:
-                try session.overrideOutputAudioPort(.none)
+            if session.category == .playAndRecord {
+                switch preference {
+                case .speaker, .receiver:
+                    try session.overrideOutputAudioPort(preference == .speaker ? .speaker : .none)
+                case .system:
+                    try session.overrideOutputAudioPort(.none)
+                }
+            }
+            if preference == .system, !captureRequested, !isCapturing {
+                // Removing a Speaker override can expose an A2DP route only
+                // after the override has been cleared. Remember that route
+                // before selecting the receive-only session profile.
+                audioSessionRoutePolicy.observeIdleRouteChange(
+                    outputPortTypes: session.currentRoute.outputs.map(\.portType),
+                    outputPreference: preference,
+                    removedDevice: false
+                )
+                if audioSessionRoutePolicy.profile(captureRequested: false) == .highQualityReceive,
+                   session.category != .playback {
+                    try configureAudioSession()
+                }
             }
         } catch {
             logger.error("Could not select audio output: \(error.localizedDescription, privacy: .public)")
@@ -1458,6 +1700,19 @@ final class AudioEngine: ObservableObject {
         }
 #else
         availableInputDevices = []
+#endif
+    }
+
+    private func observeDeferredMicrophoneEligibility(
+        session: AVAudioSession = .sharedInstance()
+    ) {
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        deferredMicrophoneEligibility.observeHardware(
+            isInputAvailable: session.isInputAvailable,
+            maximumInputChannels: session.maximumInputNumberOfChannels,
+            availableInputCount: session.availableInputs?.count ?? 0,
+            receiveOnlyCategory: session.category == .playback
+        )
 #endif
     }
 
@@ -1720,6 +1975,9 @@ final class AudioEngine: ObservableObject {
     private func stopPlaybackTimeline(reason: String = "stop-playback") {
         resetReceiveProcessing()
         lastReceiveArrival = -Double.infinity
+        outputLevelDecayTask?.cancel()
+        outputLevelDecayTask = nil
+        outputLevel = 0
         trimPlaybackTimeline(reason: reason)
     }
 
@@ -2503,20 +2761,36 @@ final class AudioEngine: ObservableObject {
 
     private func handleRouteChange(reasonValue: UInt) {
         recordEngineAudit("route-change rawReason=\(reasonValue)")
-        refreshAvailableInputDevices()
-        updateOutputRouteName()
-        guard playbackDesired || captureRequested else { return }
+        let session = AVAudioSession.sharedInstance()
+        refreshAvailableInputDevices(session: session)
+        observeDeferredMicrophoneEligibility(session: session)
+        updateOutputRouteName(session: session)
         let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+        let wasHighQualityReceive = audioSessionRoutePolicy.prefersHighQualityBluetoothReceive
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        if (!captureRequested && !isCapturing) || reason == .oldDeviceUnavailable {
+            audioSessionRoutePolicy.observeIdleRouteChange(
+                outputPortTypes: session.currentRoute.outputs.map(\.portType),
+                outputPreference: outputPreference,
+                removedDevice: reason == .oldDeviceUnavailable
+            )
+        }
+#endif
+        guard playbackDesired || captureRequested else { return }
         if reason == .categoryChange {
 #if targetEnvironment(macCatalyst)
             let category = AVAudioSession.sharedInstance().category
             if AVAudioSession.sharedInstance().mode == .default,
                category == .playback { return }
+#elseif os(iOS) && !targetEnvironment(simulator)
+            if audioSessionRoutePolicy.profile(captureRequested: captureRequested) == .highQualityReceive,
+               AVAudioSession.sharedInstance().category == .playback { return }
 #endif
             recoverAudioDevice(for: .categoryChange(inputUsable: hasUsableCaptureRoute()))
             return
         }
-        if reason == .override { return }
+        if reason == .override,
+           wasHighQualityReceive == audioSessionRoutePolicy.prefersHighQualityBluetoothReceive { return }
 #if targetEnvironment(macCatalyst)
         if reason == .unknown || reason == .routeConfigurationChange {
             recoverAudioDevice(for: .routeConfigurationChanged(

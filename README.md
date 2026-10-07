@@ -11,7 +11,7 @@ Browse repeaters and links, call another operator, or use **Call CQ** to find so
 - **Voice and text:** hold-to-talk PTT, receive/transmit meters, microphone gain, audio routing, participant lists and chat. GSM, G.711 and Speex reception. Speex transmission is selected automatically when the peer advertises support, with GSM fallback for other peers.
 - **Recordings:** explicitly start and stop a QSO recording, play it back, export a WAV file on iPhone/iPad/Mac, or delete it. Incoming personal calls can also be recorded. Silence between audio turns is omitted; each recording is limited to one hour of audio.
 - **Call restrictions:** independently apply callsign, country and station-type rules to incoming and outgoing calls, with an optional callsign allow-list.
-- **Network options:** Direct UDP, Relay, Public Proxy, Custom Proxy and Automatic selection. Public Proxy retains verified endpoints for up to 24 hours if its HTTPS list is temporarily unavailable, and tries another endpoint if the first cannot reach the directory.
+- **Network options:** Direct UDP, Relay, Public Proxy, Custom Proxy and Automatic selection. Automatic retries an unanswered Direct or Relay call through Public Proxy. Public Proxy retains verified endpoints for up to 24 hours if its HTTPS list is temporarily unavailable, and tries another endpoint if the first cannot reach the directory.
 - **Multiple accounts and QSOs:** store credentials in Keychain, open saved accounts immediately with quiet directory recovery, switch accounts and select which connected QSO owns audio and PTT.
 - **Apple integration:** native navigation, Mac menu bar companion, Space-to-talk on Mac, iPhone Live Activities and Action Button PTT, plus a standalone or paired Watch client.
 - **Incoming calls:** answer or decline a personal call in Direct mode. Mac also supports network conference hosting.
@@ -24,9 +24,13 @@ Country browsing follows ITU callsign allocations, matching EchoLink’s country
 
 Direct mode needs UDP **5198/5199** to be reachable. Relay provides outgoing calls and cannot receive incoming calls. A public or custom proxy can help on networks that block direct UDP. Personal incoming calls and conference hosting currently require Direct mode; the iPhone incoming listener operates while the app is in the foreground.
 
+If a proxy directory request times out during a QSO, the working voice tunnel is retained. Directory updates and registration resume on a fresh tunnel after the call ends. A failure of the proxy's actual network connection still interrupts the call.
+
 Radio hardware control and full Sysop operation are outside the current scope. Dedicated conference-server registration and proxy-hosted incoming calls are not implemented. CQ wire behavior is covered by offline tests; live matching with another operator has not been verified. Speex transmit/receive behavior is covered by encoded-speech, malformed-packet and localhost transport tests; external station interoperability still needs field testing.
 
 ## Build
+
+Read the [Privacy Policy](https://gist.github.com/RCGV1/3dae4fde3b46ee1fd72e6bacf9b2e9b1). Its source is maintained in [PRIVACY.md](PRIVACY.md). Privacy questions: benjaminfaer@gmail.com.
 
 Requirements: macOS, Xcode with Swift 6 and the iOS/watchOS SDKs, plus [XcodeGen](https://github.com/yonaskolb/XcodeGen). Deployment targets are iOS 17, watchOS 10 and macOS 13 for the menu bar companion.
 

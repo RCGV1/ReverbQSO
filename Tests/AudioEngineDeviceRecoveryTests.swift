@@ -8,6 +8,22 @@ import UIKit
 
 @MainActor
 final class AudioEngineDeviceRecoveryTests: XCTestCase {
+#if targetEnvironment(macCatalyst)
+    func testMacMicrophoneLifecycleSerializesOldStopBeforeNewStart() async {
+        let gate = MacMicrophoneLifecycleGate(label: "AudioEngineDeviceRecoveryTests")
+        let events = LockedAudioEvents()
+
+        gate.enqueue {
+            events.append("old-stop-began")
+            Thread.sleep(forTimeInterval: 0.03)
+            events.append("old-stop-ended")
+        }
+        await gate.perform { events.append("new-start") }
+
+        XCTAssertEqual(events.snapshot, ["old-stop-began", "old-stop-ended", "new-start"])
+    }
+#endif
+
     func testMacReceiveDoesNotReserveHeadsetMicrophoneAndReleaseRestoresPlayback() async throws {
 #if DEBUG && targetEnvironment(macCatalyst)
         guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else {
@@ -428,6 +444,19 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
         XCTAssertFalse(engine.isRunning)
     }
 
+    func testInterruptionClearsReceiveLevelWithDiscardedPlayback() async {
+        let engine = AudioEngine()
+        engine.startPlayback()
+        defer { engine.stopAll() }
+        engine.recordOutputLevel(from: [10_000, -10_000], decayAfter: .seconds(10))
+        XCTAssertGreaterThan(engine.outputLevel, 0)
+
+        postInterruption(.began)
+        await settle()
+
+        XCTAssertEqual(engine.outputLevel, 0)
+    }
+
     func testInterruptionWithoutResumeDoesNotRestartOnReceivedAudio() async {
         let engine = AudioEngine()
         engine.startPlayback()
@@ -491,3 +520,12 @@ final class AudioEngineDeviceRecoveryTests: XCTestCase {
 
     private func settle() async { try? await Task.sleep(for: .milliseconds(150)) }
 }
+
+#if targetEnvironment(macCatalyst)
+private final class LockedAudioEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String] = []
+    func append(_ value: String) { lock.withLock { values.append(value) } }
+    var snapshot: [String] { lock.withLock { values } }
+}
+#endif

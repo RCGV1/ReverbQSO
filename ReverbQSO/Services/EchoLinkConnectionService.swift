@@ -17,11 +17,47 @@ enum ConnectionError: LocalizedError {
         switch self {
         case .alreadyConnected: return "Already connected to a station."
         case .connectionFailed(let reason): return "Connection failed: \(reason)"
-        case .handshakeTimedOut: return "Connection failed: the remote station did not acknowledge the EchoLink handshake."
+        case .handshakeTimedOut: return "The station did not answer. It may be offline or unable to accept calls. Try again or choose another station."
         case .notConnected: return "Not connected to any station."
         case .remoteBye(let message): return message
         case .sendFailed(let reason): return "Send failed: \(reason)"
         }
+    }
+}
+
+enum AutomaticCallFallbackPolicy {
+    static func shouldAttemptBootstrap(
+        preference: EchoLinkProxyConfiguration,
+        failedMode: EchoLinkNetworkMode,
+        error: Error,
+        alreadyAttempted: Bool
+    ) -> Bool {
+        guard preference.mode == .automatic, !alreadyAttempted else { return false }
+        switch (failedMode, error) {
+        case (.relay, EchoLinkRelayClientError.registrationTimedOut),
+             (.relay, EchoLinkRelayClientError.resolutionFailed):
+            return true
+        case (.direct, BoundUDPSocket.SocketError.systemCall(let operation, let code)):
+            return operation == "bind" && code == EADDRINUSE
+        default:
+            return false
+        }
+    }
+
+    static func shouldAttempt(
+        preference: EchoLinkProxyConfiguration,
+        failedMode: EchoLinkNetworkMode,
+        error: Error,
+        peerDatagramCount: Int,
+        alreadyAttempted: Bool
+    ) -> Bool {
+        guard preference.mode == .automatic,
+              failedMode == .direct || failedMode == .relay,
+              !alreadyAttempted,
+              peerDatagramCount == 0,
+              let connectionError = error as? ConnectionError,
+              case .handshakeTimedOut = connectionError else { return false }
+        return true
     }
 }
 
@@ -641,6 +677,7 @@ final class EchoLinkConnectionService: ObservableObject {
     var resolveStation: ((Station) -> Station)?
     var resolveReconnectStation: (@MainActor (Station) async throws -> Station?)?
     var resolveProxySession: (@MainActor (String) async throws -> EchoLinkProxySession?)?
+    var prepareAutomaticPublicProxyFallback: (@MainActor (String) async throws -> EchoLinkEffectiveTransport?)?
     var reportUnansweredProxyHandshake: (@MainActor (EchoLinkProxySession) async -> Void)?
     var consumeReservedDirectSockets: (@MainActor () -> DirectCQSocketPair?)?
     var isConferenceHostActive: (() -> Bool)?
@@ -827,6 +864,7 @@ final class EchoLinkConnectionService: ObservableObject {
     // 10-second retries and total 50-second (20-second relay) wait budget.
     private static let handshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7), .seconds(10), .seconds(10), .seconds(10), .seconds(10)]
     private static let relayHandshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7), .seconds(10)]
+    private static let automaticInitialHandshakeRetryIntervals: [Duration] = [.seconds(1), .seconds(2), .seconds(7)]
     private var handshakeWaiter: (sessionID: UUID, id: UUID, continuation: CheckedContinuation<Bool, Error>)?
     private var peerAudioPort: UInt16 = 5198
     private var peerControlPort: UInt16 = 5199
@@ -1139,8 +1177,10 @@ final class EchoLinkConnectionService: ObservableObject {
             rtpSequence = UInt16.random(in: 0...UInt16.max)
             rtpTimestamp = UInt32.random(in: 0...UInt32.max)
 
-            let selection = effectiveTransportProvider?()
-            let storedProxyConfiguration = selection?.configuration ?? networkConfigurationProvider()
+            var selection = effectiveTransportProvider?()
+            var storedProxyConfiguration = selection?.configuration ?? networkConfigurationProvider()
+            let originalPreference = selection?.preference ?? networkConfigurationProvider()
+            var automaticFallbackAttempted = false
             guard storedProxyConfiguration.mode != .automatic else {
                 throw ConnectionError.connectionFailed("Sign in again to select an Automatic connection method.")
             }
@@ -1153,73 +1193,125 @@ final class EchoLinkConnectionService: ObservableObject {
                 audioEngine.startPlayback()
             }
 #endif
-            if storedProxyConfiguration.mode == .relay {
-                let client: EchoLinkRelayClient
-                if let address = selection?.relayAddress {
-                    client = selectedRelayClientFactory(address)
-                } else {
-                    client = relayClientFactory()
-                }
-                let stream = try await client.connect(callsign: localCallsign)
-                do {
-                    try requireCurrentSession(sessionID)
-                } catch {
-                    await client.close()
-                    throw error
-                }
-                relayClient = client
-                startRelayReceiveLoop(stream: stream, client: client, sessionID: sessionID)
-                if let prepareRelayDirectory {
-                    guard let relayAddress = await client.selectedRelayAddress() else {
-                        throw ConnectionError.connectionFailed("EchoLink Relay did not select an address.")
+            do {
+                if storedProxyConfiguration.mode == .relay {
+                    let client: EchoLinkRelayClient
+                    if let address = selection?.relayAddress {
+                        client = selectedRelayClientFactory(address)
+                    } else {
+                        client = relayClientFactory()
                     }
-                    relayDirectoryAddress = relayAddress
-                    try await prepareRelayDirectory(localCallsign, relayAddress)
-                    try requireCurrentSession(sessionID)
-                }
-                logger.info("EchoLink Relay registered")
-            } else if storedProxyConfiguration.isEnabled {
-                guard let resolveProxySession else {
-                    throw ConnectionError.connectionFailed("EchoLink Proxy directory session is unavailable.")
-                }
-                guard let sharedSession = try await resolveProxySession(localCallsign) else {
-                    throw ConnectionError.connectionFailed("EchoLink Proxy directory session is unavailable.")
-                }
-                try requireCurrentSession(sessionID)
-                proxySession = sharedSession
-                startProxyReceiveLoop(proxySession: sharedSession, sessionID: sessionID)
-                let selectedConfiguration = sharedSession.configuration
-                logger.info("EchoLink Proxy tunnel connected host=\(selectedConfiguration.host, privacy: .public) port=\(selectedConfiguration.port)")
-            } else {
-                // EchoLink peers require these exact source ports. NWConnection may
-                // silently choose ephemeral ports, so use two bound datagram sockets.
-                if let reserved = consumeReservedDirectSockets?(),
-                   let sockets = reserved.takeSockets() {
-                    audioSocket = sockets.audio
-                    controlSocket = sockets.control
+                    let stream = try await client.connect(callsign: localCallsign)
+                    do {
+                        try requireCurrentSession(sessionID)
+                    } catch {
+                        await client.close()
+                        throw error
+                    }
+                    relayClient = client
+                    startRelayReceiveLoop(stream: stream, client: client, sessionID: sessionID)
+                    if let prepareRelayDirectory {
+                        guard let relayAddress = await client.selectedRelayAddress() else {
+                            throw ConnectionError.connectionFailed("EchoLink Relay did not select an address.")
+                        }
+                        relayDirectoryAddress = relayAddress
+                        try await prepareRelayDirectory(localCallsign, relayAddress)
+                        try requireCurrentSession(sessionID)
+                    }
+                    logger.info("EchoLink Relay registered")
+                } else if storedProxyConfiguration.isEnabled {
+                    try await prepareProxyTransport(sessionID: sessionID)
                 } else {
-                    audioSocket = try BoundUDPSocket(localPort: Self.audioPort)
+                    // EchoLink peers require these exact source ports. NWConnection may
+                    // silently choose ephemeral ports, so use two bound datagram sockets.
+                    if let reserved = consumeReservedDirectSockets?(),
+                       let sockets = reserved.takeSockets() {
+                        audioSocket = sockets.audio
+                        controlSocket = sockets.control
+                    } else {
+                        audioSocket = try BoundUDPSocket(localPort: Self.audioPort)
+                        try requireCurrentSession(sessionID)
+                        controlSocket = try BoundUDPSocket(localPort: Self.controlPort)
+                    }
                     try requireCurrentSession(sessionID)
-                    controlSocket = try BoundUDPSocket(localPort: Self.controlPort)
-                }
-                try requireCurrentSession(sessionID)
-                logger.debug("UDP sockets bound localAudio=5198 localControl=5199")
+                    logger.debug("UDP sockets bound localAudio=5198 localControl=5199")
 
-                // Arm receive loops before sending SDES so a fast peer response cannot be missed.
-                startControlReceiveLoop(sessionID: sessionID)
-                startAudioReceiveLoop(sessionID: sessionID)
+                    // Arm receive loops before sending SDES so a fast peer response cannot be missed.
+                    startControlReceiveLoop(sessionID: sessionID)
+                    startAudioReceiveLoop(sessionID: sessionID)
+                }
+            } catch {
+                guard AutomaticCallFallbackPolicy.shouldAttemptBootstrap(
+                    preference: originalPreference,
+                    failedMode: storedProxyConfiguration.mode,
+                    error: error,
+                    alreadyAttempted: automaticFallbackAttempted
+                ), let prepareAutomaticPublicProxyFallback else { throw error }
+
+                automaticFallbackAttempted = true
+                try Task.checkCancellation()
+                await tearDownTransportForFallback(sessionID: sessionID)
+                try requireCurrentSession(sessionID)
+                guard let fallback = try await prepareAutomaticPublicProxyFallback(localCallsign),
+                      fallback.preference.mode == .automatic,
+                      fallback.configuration.mode == .publicProxy else { throw error }
+                try requireCurrentSession(sessionID)
+                selection = fallback
+                storedProxyConfiguration = fallback.configuration
+                VoiceDiagnosticLog.record("bootstrap fallback transport=publicProxy")
+                try await prepareProxyTransport(sessionID: sessionID)
             }
 
             // A local UDP send is not a successful EchoLink connection. Retry the
             // handshake and remain in .connecting until the peer returns SDES.
             do {
+                let retryIntervals = handshakeRetryIntervalsOverride
+                    ?? (automaticFallbackAttempted ? Self.relayHandshakeRetryIntervals
+                        : originalPreference.mode == .automatic
+                            && (storedProxyConfiguration.mode == .direct || storedProxyConfiguration.mode == .relay)
+                            ? Self.automaticInitialHandshakeRetryIntervals
+                            : storedProxyConfiguration.mode == .relay
+                                ? Self.relayHandshakeRetryIntervals : Self.handshakeRetryIntervals)
                 try await awaitRemoteHandshakeAcknowledgement(
                     sessionID: sessionID,
-                    retryIntervals: handshakeRetryIntervalsOverride ?? (storedProxyConfiguration.mode == .relay ? Self.relayHandshakeRetryIntervals : Self.handshakeRetryIntervals)
+                    retryIntervals: retryIntervals
                 )
-            } catch ConnectionError.handshakeTimedOut where storedProxyConfiguration.mode == .relay {
-                throw ConnectionError.connectionFailed(
-                    "Relay could not complete the call. Try Public Proxy in Settings."
+            } catch {
+                guard AutomaticCallFallbackPolicy.shouldAttempt(
+                    preference: originalPreference,
+                    failedMode: storedProxyConfiguration.mode,
+                    error: error,
+                    peerDatagramCount: handshakePeerDatagramCount,
+                    alreadyAttempted: automaticFallbackAttempted
+                ), let prepareAutomaticPublicProxyFallback else {
+                    if let connectionError = error as? ConnectionError,
+                       case .handshakeTimedOut = connectionError,
+                       storedProxyConfiguration.mode == .relay {
+                        throw ConnectionError.connectionFailed(
+                            "Relay could not complete the call. Try Public Proxy in Settings."
+                        )
+                    }
+                    throw error
+                }
+
+                automaticFallbackAttempted = true
+                try Task.checkCancellation()
+                await tearDownTransportForFallback(sessionID: sessionID)
+                try requireCurrentSession(sessionID)
+                guard let fallback = try await prepareAutomaticPublicProxyFallback(localCallsign),
+                      fallback.preference.mode == .automatic,
+                      fallback.configuration.mode == .publicProxy else {
+                    throw error
+                }
+                try requireCurrentSession(sessionID)
+                selection = fallback
+                storedProxyConfiguration = fallback.configuration
+                handshakePeerDatagramCount = 0
+                VoiceDiagnosticLog.record("handshake fallback transport=publicProxy")
+                try await prepareProxyTransport(sessionID: sessionID)
+                try await awaitRemoteHandshakeAcknowledgement(
+                    sessionID: sessionID,
+                    retryIntervals: handshakeRetryIntervalsOverride ?? Self.relayHandshakeRetryIntervals
                 )
             }
             try requireCurrentSession(sessionID)
@@ -1278,6 +1370,36 @@ final class EchoLinkConnectionService: ObservableObject {
                 session = nil
             }
         }
+    }
+
+    private func prepareProxyTransport(sessionID: UUID) async throws {
+        guard let resolveProxySession else {
+            throw ConnectionError.connectionFailed("EchoLink Proxy directory session is unavailable.")
+        }
+        guard let sharedSession = try await resolveProxySession(localCallsign) else {
+            throw ConnectionError.connectionFailed("EchoLink Proxy directory session is unavailable.")
+        }
+        try requireCurrentSession(sessionID)
+        proxySession = sharedSession
+        startProxyReceiveLoop(proxySession: sharedSession, sessionID: sessionID)
+        let selectedConfiguration = sharedSession.configuration
+        logger.info("EchoLink Proxy tunnel connected host=\(selectedConfiguration.host, privacy: .public) port=\(selectedConfiguration.port)")
+    }
+
+    private func tearDownTransportForFallback(sessionID: UUID) async {
+        guard session?.id == sessionID else { return }
+        // Detach this call's state before yielding. Cancellation can start a
+        // replacement call while the old relay or registration closes.
+        let oldRelayClient = relayClient
+        let oldRelayAddress = relayDirectoryAddress
+        let oldCallsign = localCallsign
+        relayClient = nil
+        relayDirectoryAddress = nil
+        if let oldRelayClient { await oldRelayClient.close() }
+        if let finishRelayDirectory, let oldRelayAddress {
+            await finishRelayDirectory(oldCallsign, oldRelayAddress)
+        }
+        tearDown(expectedSessionID: sessionID)
     }
 
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)

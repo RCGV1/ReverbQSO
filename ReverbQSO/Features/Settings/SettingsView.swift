@@ -4,12 +4,14 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @Binding var showPersonalStation: Bool
     @AppStorage(MicrophoneGainSettings.modeKey) private var microphoneGainMode = MicrophoneGainMode.automatic.rawValue
     @AppStorage(MicrophoneGainSettings.key) private var microphoneGain = 1.0
     @AppStorage("showAudioStats") private var showAudioStats = false
     #if targetEnvironment(macCatalyst)
     @AppStorage(MacMessageNotifier.enabledKey) private var messageNotificationsEnabled = true
+    @StateObject private var menuBarLaunchService = MacMenuBarLaunchService()
     #endif
     @StateObject private var viewModel = SettingsViewModel(loadSettings: false)
     @State private var showingAddAccount = false
@@ -17,6 +19,8 @@ struct SettingsView: View {
     @State private var newCallsign = ""
     @State private var newPassword = ""
     @State private var isAddingAccount = false
+    @State private var pendingSavedLoginRemoval: SavedLoginRemoval?
+    @State private var deletionRequestCallsign: EchoLinkDeletionRequest?
 
     init(showPersonalStation: Binding<Bool> = .constant(false)) {
         _showPersonalStation = showPersonalStation
@@ -37,6 +41,7 @@ struct SettingsView: View {
                 Section("Audio") { audioContent }
                 Section("Recording") { RecordingSettingsRows(demo: appState.isDemoMode) }
                 Section("Notifications") { notificationContent }
+                Section("Menu Bar") { menuBarContent }
                 Section("Network") { connectionContent }
                 Section("About") { aboutContent }
             }
@@ -84,6 +89,10 @@ struct SettingsView: View {
             PersonalStationView(host: appState.conferenceHostService)
         }
         #if targetEnvironment(macCatalyst)
+        .onAppear { menuBarLaunchService.refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { menuBarLaunchService.refresh() }
+        }
         .onChange(of: messageNotificationsEnabled) { _, enabled in
             if enabled { MacMessageNotifier.refreshAuthorization() }
         }
@@ -94,6 +103,26 @@ struct SettingsView: View {
     @ViewBuilder private var notificationContent: some View {
         Toggle("Message alerts", isOn: $messageNotificationsEnabled)
         MacMessagePermissionControl(isEmbeddedInSettings: true)
+    }
+
+    @ViewBuilder private var menuBarContent: some View {
+        Toggle("Show ReverbQSO in Menu Bar", isOn: Binding(
+            get: { menuBarLaunchService.isEnabled },
+            set: { menuBarLaunchService.setEnabled($0) }
+        ))
+        Text("Adds quick access to current QSOs and radio controls. When enabled, it opens now and at login.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        if menuBarLaunchService.requiresApproval {
+            Button("Open Login Item Settings") {
+                menuBarLaunchService.openLoginItemSettings()
+            }
+        }
+        if let errorMessage = menuBarLaunchService.errorMessage {
+            Text(errorMessage)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
     }
     #endif
 
@@ -163,7 +192,12 @@ struct SettingsView: View {
                         .disabled(callsign == appState.currentUser)
                         .contextMenu {
                             Button("Remove Saved Account", role: .destructive) {
-                                Task { await appState.removeSavedAccount(callsign) }
+                                pendingSavedLoginRemoval = SavedLoginRemoval(callsign: callsign)
+                            }
+                        }
+                        .swipeActions {
+                            Button("Remove", role: .destructive) {
+                                pendingSavedLoginRemoval = SavedLoginRemoval(callsign: callsign)
                             }
                         }
                     }
@@ -183,6 +217,18 @@ struct SettingsView: View {
                         }
                     }
                 }
+                if !appState.isDemoMode {
+                    Section("EchoLink Account") {
+                        Button {
+                            deletionRequestCallsign = EchoLinkDeletionRequest(callsign: appState.currentUser)
+                        } label: {
+                            Label("Request Account Deletion", systemImage: "person.crop.circle.badge.minus")
+                        }
+                        Text("EchoLink is a separate service. ReverbQSO cannot delete your EchoLink registration.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("Accounts")
             .toolbar {
@@ -192,6 +238,19 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showingAddAccount) { addAccountSheet }
+        .sheet(item: $deletionRequestCallsign) { request in
+            EchoLinkAccountDeletionRequestView(callsign: request.callsign)
+        }
+        .alert(item: $pendingSavedLoginRemoval) { removal in
+            Alert(
+                title: Text("Remove Saved Login?"),
+                message: Text("This removes \(removal.callsign)'s saved password from this device. If it is active, ReverbQSO also signs it out here. It does not delete the EchoLink registration."),
+                primaryButton: .destructive(Text("Remove from ReverbQSO")) {
+                    Task { await appState.removeSavedAccount(removal.callsign) }
+                },
+                secondaryButton: .cancel()
+            )
+        }
         #if targetEnvironment(macCatalyst)
         .frame(minWidth: 420, idealWidth: 480, minHeight: 320, idealHeight: 420)
         #endif
@@ -293,11 +352,11 @@ struct SettingsView: View {
     private var connectionModeExplanation: String {
         switch viewModel.networkMode {
         case .automatic:
-            return "Use Direct when a public local address is available; otherwise discover a relay, with Public Proxy as fallback."
+            return "Choose a connection method automatically. Retry through Public Proxy if Direct or Relay cannot reach the station."
         case .direct:
             return "Connect to stations directly. If calls time out, try Public Proxy."
         case .relay:
-            return "Route calls through an EchoLink relay when direct connections are blocked."
+            return "Outgoing calls through a relay. If a station cannot be reached, try Public Proxy."
         case .publicProxy:
             return "A public proxy is selected automatically unless you choose a server above."
         case .customProxy:
@@ -307,10 +366,116 @@ struct SettingsView: View {
 
     @ViewBuilder private var aboutContent: some View {
             LabeledContent("Version", value: viewModel.appVersion)
+            Link("Privacy Policy", destination: ReverbQSOLinks.privacyPolicy)
             Link("Source Code", destination: viewModel.githubURL)
             NavigationLink("Licenses") { LicensesView() }
     }
 
+}
+
+private struct SavedLoginRemoval: Identifiable {
+    let callsign: String
+    var id: String { callsign }
+}
+
+private struct EchoLinkDeletionRequest: Identifiable {
+    let callsign: String
+    var id: String { callsign }
+}
+
+private struct EchoLinkAccountDeletionRequestView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let callsign: String
+    @State private var email = ""
+    @State private var isSubmitting = false
+    @State private var confirmsSubmission = false
+    @State private var submissionError: String?
+    @State private var didSubmit = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("EchoLink accounts are operated by Synergenics, LLC. ReverbQSO cannot delete your EchoLink registration or confirm that EchoLink completed a request.")
+                }
+
+                Section {
+                    LabeledContent("Callsign", value: callsign)
+                    TextField("Email address", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("EchoLink Account")
+                } footer: {
+                    Text("Use the email address associated with this EchoLink registration. EchoLink may contact you to verify the request.")
+                }
+
+                if didSubmit {
+                    Section {
+                        Label("Deletion request sent to EchoLink support", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Your account is not deleted until EchoLink processes and confirms the request.")
+                    }
+                } else {
+                    Section {
+                        if let submissionError {
+                            Label(submissionError, systemImage: "exclamationmark.circle")
+                                .foregroundStyle(.red)
+                        }
+                        Button("Submit Deletion Request", role: .destructive) {
+                            confirmsSubmission = true
+                        }
+                        .disabled(isSubmitting || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    } footer: {
+                        Text("This sends a request to EchoLink support. It does not immediately delete your registration or remove the saved login from this device.")
+                    }
+                }
+
+                Section("Official Support") {
+                    Link(destination: ReverbQSOLinks.echoLinkSupport) {
+                        Label("Open EchoLink Support Form", systemImage: "arrow.up.right.square")
+                    }
+                }
+            }
+            .navigationTitle("Delete EchoLink Account")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Send deletion request for \(callsign)?",
+            isPresented: $confirmsSubmission,
+            titleVisibility: .visible
+        ) {
+            Button("Send Request", role: .destructive) { submitRequest() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("EchoLink support will receive your callsign, email address, and a request to delete the account. ReverbQSO cannot undo the request or confirm deletion.")
+        }
+        #if targetEnvironment(macCatalyst)
+        .frame(minWidth: 480, minHeight: 440)
+        #endif
+    }
+
+    private func submitRequest() {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        submissionError = nil
+        Task { @MainActor in
+            defer { isSubmitting = false }
+            do {
+                try await EchoLinkAccountDeletionRequester().submit(callsign: callsign, email: email)
+                didSubmit = true
+            } catch {
+                submissionError = error.localizedDescription
+            }
+        }
+    }
 }
 
 private struct PersonalStationSettingsRows: View {

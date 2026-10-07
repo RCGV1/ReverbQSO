@@ -182,13 +182,9 @@ actor SvxLinkPTYTransport {
         guard descriptor >= 0 else {
             throw SvxLinkPTYTransportError.systemCall(operation: "open", code: errno)
         }
-        var info = stat()
-        guard Darwin.fstat(descriptor, &info) == 0 else {
-            let code = errno
-            Darwin.close(descriptor)
-            throw SvxLinkPTYTransportError.systemCall(operation: "fstat", code: code)
-        }
-        guard info.st_mode & mode_t(S_IFMT) == mode_t(S_IFCHR), Darwin.isatty(descriptor) == 1 else {
+        // isatty validates the opened descriptor itself. No filesystem metadata
+        // (including file timestamps) is needed to identify a terminal.
+        guard Darwin.isatty(descriptor) == 1 else {
             Darwin.close(descriptor)
             throw SvxLinkPTYTransportError.notPTY
         }

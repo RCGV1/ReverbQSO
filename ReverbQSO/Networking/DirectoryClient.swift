@@ -330,6 +330,56 @@ actor DirectoryClient {
 
     func activeProxySession() -> EchoLinkProxySession? { proxySession }
 
+    /// Move the remembered registration to a proxy without reading credentials
+    /// again or advertising the previously selected relay's source address.
+    func switchToPublicProxy(_ replacement: EchoLinkProxySession, callsign: String) async throws {
+        guard isLoggedIn, loggedInCallsign == callsign.uppercased() else {
+            throw DirectoryClientError.notConnected
+        }
+        let previousProxy = proxySession
+        let previousRelay = relayExternalAddress
+        let generation = beginLifecycleOperation(clearCredentials: false)
+        proxySession = replacement
+        relayExternalAddress = nil
+        do {
+            try await registerWithFallback(generation: generation, markLoggedIn: true)
+            try ensureCurrent(generation)
+        } catch is CancellationError {
+            if lifecycleGeneration.matches(generation), proxySession === replacement {
+                proxySession = previousProxy
+                relayExternalAddress = previousRelay
+                isLoggedIn = true
+                // The remote directory may have accepted the proxy registration
+                // immediately before cancellation became visible. Restore the
+                // original advertised route from a fresh, non-cancelled task.
+                let compensation = Task {
+                    if let previousRelay {
+                        try await self.registerThroughRelay(address: previousRelay, generation: generation)
+                    } else {
+                        try await self.registerWithFallback(generation: generation, markLoggedIn: true)
+                    }
+                    try self.ensureCurrent(generation)
+                }
+                do {
+                    try await compensation.value
+                } catch {
+                    if lifecycleGeneration.matches(generation), proxySession === previousProxy,
+                       relayExternalAddress == previousRelay {
+                        clearLocalRegistration()
+                    }
+                }
+            }
+            throw CancellationError()
+        } catch {
+            if lifecycleGeneration.matches(generation), proxySession === replacement {
+                proxySession = previousProxy
+                relayExternalAddress = previousRelay
+                isLoggedIn = true
+            }
+            throw error
+        }
+    }
+
     /// A reconnect reuses the credentials and availability already acknowledged
     /// for this directory login. An obsolete recovery cannot replace a new login.
     func recoverProxySession(_ replacement: EchoLinkProxySession, replacing failed: EchoLinkProxySession) async throws {

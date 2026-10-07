@@ -73,6 +73,12 @@ final class LiveTransportMessageBuffer<Element: Sendable>: @unchecked Sendable {
     private var maximumQueuedVoiceMessages = 0
     private var maximumQueuedMessages = 0
 
+    var isFinished: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalResult != nil
+    }
+
     var metricsSnapshot: LiveTransportMessageBufferMetrics {
         lock.lock()
         defer { lock.unlock() }

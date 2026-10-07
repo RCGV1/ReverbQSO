@@ -10,7 +10,8 @@ settings:
     SWIFT_VERSION: 6.0
     TARGETED_DEVICE_FAMILY: "1,2"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "43"
+    DEVELOPMENT_TEAM: FRFXFRT624
     INFOPLIST_FILE: ReverbQSO/Resources/Info.plist
     SWIFT_OBJC_BRIDGING_HEADER: ReverbQSO/App/ReverbQSO-Bridging-Header.h
     HEADER_SEARCH_PATHS:
@@ -30,6 +31,8 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: ReverbQSO
+        excludes:
+          - Resources/ReverbQSOMacStore.entitlements
       - path: ThirdParty/libgsm/src
         excludes:
           - toast.c
@@ -44,6 +47,10 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FRFXFRT624
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": ReverbQSO/Resources/ReverbQSOMac.entitlements
+      configs:
+        Release:
+          "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": ReverbQSO/Resources/ReverbQSOMacStore.entitlements
+          ENABLE_HARDENED_RUNTIME: YES
     dependencies:
       - sdk: AVFoundation.framework
       - sdk: GameController.framework
@@ -53,6 +60,14 @@ targets:
         platformFilter: iOS
       - target: ReverbQSOWatch
         platformFilter: iOS
+      - target: ReverbQSOMenuBar
+        embed: true
+        link: false
+        codeSign: true
+        platformFilter: macOS
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/LoginItems
   ReverbQSOLiveActivity:
     type: app-extension
     platform: iOS
@@ -76,11 +91,13 @@ targets:
     deploymentTarget: "10.0"
     sources:
       - path: ReverbQSO/Features/Recent/RecordingsView.swift
+      - path: Companions/Watch/PrivacyInfo.xcprivacy
       - path: ReverbQSO/Features/Settings/CallRestrictionsView.swift
       - path: ReverbQSO/Features/Settings/RecordingSettingsRows.swift
       - path: Companions/Watch
         excludes:
           - WatchInfo.plist
+          - PrivacyInfo.xcprivacy
       - path: ReverbQSO/Resources/Audio
       - path: ReverbQSO/Models
         excludes:
@@ -137,18 +154,27 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - path: Companions/MenuBar
+        excludes:
+          - ReverbQSOMenuBarStore.entitlements
       - path: ReverbQSO/App/MacMenuBarProtocol.swift
     settings:
       base:
         PRODUCT_NAME: ReverbQSOMenuBar
         PRODUCT_MODULE_NAME: ReverbQSOMenuBar
+        SKIP_INSTALL: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink.menubar
         INFOPLIST_FILE: ""
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: ReverbQSO Menu Bar
         INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_ReverbQSOAppGroupIdentifier: $(DEVELOPMENT_TEAM).com.benjaminfaershtein.ReverbQSO
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FRFXFRT624
+      configs:
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Companions/MenuBar/ReverbQSOMenuBarStore.entitlements
+          ENABLE_HARDENED_RUNTIME: YES
 schemes:
   ReverbQSO:
     build:

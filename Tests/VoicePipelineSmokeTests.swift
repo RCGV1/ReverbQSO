@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import XCTest
+import Combine
 @testable import ReverbQSO
 
 final class VoicePipelineSmokeTests: XCTestCase {
@@ -192,6 +193,45 @@ final class QSOViewModelTests: XCTestCase {
         XCTAssertTrue(didResolve)
         XCTAssertNil(service.session)
         XCTAssertEqual(service.reconnectCandidate, saved)
+    }
+
+    func testReconnectLookupRemainsCancellableAfterPresentationSessionIsCleared() async {
+        let service = EchoLinkConnectionService()
+        let saved = Station(callsign: "N0CALL", ipAddress: "192.0.2.10", nodeNumber: 123)
+        var finishLookup: (() -> Void)?
+        let lookupStarted = expectation(description: "reconnect lookup started")
+        service.resolveReconnectStation = { _ in
+            await withCheckedContinuation { continuation in
+                finishLookup = {
+                    continuation.resume(returning: saved)
+                }
+                lookupStarted.fulfill()
+            }
+        }
+        service.registerReconnectCandidate(saved)
+        let viewModel = QSOViewModel(connectionService: service)
+
+        let reconnectCancelled = expectation(description: "reconnect candidate cleared")
+        var cancellationObservation: AnyCancellable?
+        cancellationObservation = service.$reconnectCandidate.dropFirst().sink { candidate in
+            if candidate == nil {
+                reconnectCancelled.fulfill()
+                cancellationObservation?.cancel()
+            }
+        }
+        let reconnectTask = Task { await service.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+        XCTAssertTrue(service.isReconnecting)
+        XCTAssertTrue(viewModel.canCancelConnection)
+
+        viewModel.cancelConnection()
+        await fulfillment(of: [reconnectCancelled], timeout: 1)
+        finishLookup?()
+        await reconnectTask.value
+        XCTAssertFalse(viewModel.canCancelConnection)
+        XCTAssertFalse(service.isReconnecting)
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.reconnectCandidate)
     }
 
     func testReconnectAllowsOnlyOneFreshLookupAtATime() async {

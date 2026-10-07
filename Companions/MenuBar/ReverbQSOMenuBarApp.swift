@@ -266,10 +266,14 @@ struct ReverbQSOMenuBarApp: App {
                 Button("Directory") { radio.open("directory") }
                 Button("Settings…") { radio.open("settings") }
                 Divider()
-                Toggle("Open at Login", isOn: Binding(
-                    get: { radio.launchAtLogin },
-                    set: { radio.setLaunchAtLogin($0) }
-                ))
+                if radio.managesOwnLoginItem {
+                    Toggle("Open at Login", isOn: Binding(
+                        get: { radio.launchAtLogin },
+                        set: { radio.setLaunchAtLogin($0) }
+                    ))
+                } else {
+                    Button("Manage Menu Bar in ReverbQSO…") { radio.open("settings") }
+                }
                 Divider()
                 Button("Quit Menu Bar App") { NSApplication.shared.terminate(nil) }
             } label: {
@@ -308,7 +312,7 @@ final class MenuBarRadioModel: ObservableObject {
     @Published private(set) var pendingCallID = ""
     @Published private(set) var updatedAt = Date.distantPast
     @Published private(set) var now = Date()
-    @Published private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @Published private(set) var launchAtLogin = false
     @Published private(set) var serviceMessage: String?
     @Published private(set) var isHoldingPTT = false
 
@@ -316,6 +320,8 @@ final class MenuBarRadioModel: ObservableObject {
     private var pollTimer: Timer?
     private var pttTimer: Timer?
     private var heldSessionID: String?
+
+    let managesOwnLoginItem = !MacMenuBarProtocol.isBundledLoginItem(bundleURL: Bundle.main.bundleURL)
 
     var hasFreshState: Bool {
         appRunning && now.timeIntervalSince(updatedAt) >= -5 && now.timeIntervalSince(updatedAt) <= 5
@@ -361,16 +367,15 @@ final class MenuBarRadioModel: ObservableObject {
     }
 
     init() {
+        if managesOwnLoginItem {
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
         statusObserver = DistributedNotificationCenter.default().addObserver(
             forName: MacMenuBarProtocol.state,
             object: nil,
             queue: .main
-        ) { [weak self] notification in
-            let payload = (notification.userInfo ?? [:]).reduce(into: [String: Any]()) { result, item in
-                if let key = item.key as? String { result[key] = item.value }
-            }
-            guard let snapshot = RadioSnapshot(payload: payload) else { return }
-            Task { @MainActor in self?.receive(snapshot) }
+        ) { [weak self] _ in
+            Task { @MainActor in self?.poll() }
         }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
@@ -447,6 +452,10 @@ final class MenuBarRadioModel: ObservableObject {
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
+        guard managesOwnLoginItem else {
+            serviceMessage = "Manage the bundled menu bar app in ReverbQSO Settings."
+            return
+        }
         do {
             if enabled {
                 try SMAppService.mainApp.register()
@@ -464,14 +473,17 @@ final class MenuBarRadioModel: ObservableObject {
     }
 
     private func sendCommand(_ type: String, id: String) {
-        guard hasFreshState, !id.isEmpty else { return }
+        guard hasFreshState, let command = MacMenuBarProtocol.CommandType(rawValue: type),
+              let sessionID = UUID(uuidString: id) else { return }
+        do {
+            try MacMenuBarProtocol.writeCommand(command, id: sessionID)
+        } catch {
+            serviceMessage = "Could not send the command to ReverbQSO."
+            return
+        }
         DistributedNotificationCenter.default().post(
             name: MacMenuBarProtocol.command,
-            object: nil,
-            userInfo: [
-                MacMenuBarProtocol.commandTypeKey: type,
-                MacMenuBarProtocol.commandIDKey: id
-            ]
+            object: nil
         )
         requestState()
     }

@@ -97,6 +97,10 @@ final class WatchAppModel: NSObject, ObservableObject {
             guard let self else { throw CancellationError() }
             return try await self.directoryService.prepareProxySession(callsign: account)
         }
+        connectionService.prepareAutomaticPublicProxyFallback = { [weak self] account in
+            guard let self else { throw CancellationError() }
+            return try await self.directoryService.prepareAutomaticPublicProxyFallback(callsign: account)
+        }
         connectionService.reportUnansweredProxyHandshake = { [weak self] failed in
             await self?.directoryService.reportUnansweredProxyHandshake(failed)
         }

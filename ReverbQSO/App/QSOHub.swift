@@ -9,10 +9,26 @@ final class QSOHub: ObservableObject {
     @MainActor struct Entry: Identifiable {
         let id: UUID
         let callsign: String
-        let mode: EchoLinkNetworkMode
         let service: EchoLinkConnectionService
+        private let fallbackMode: EchoLinkNetworkMode
+        private let modeProvider: @MainActor () -> EchoLinkNetworkMode?
 
         var station: Station? { service.session?.station }
+        var mode: EchoLinkNetworkMode { modeProvider() ?? fallbackMode }
+
+        init(
+            id: UUID,
+            callsign: String,
+            mode: EchoLinkNetworkMode,
+            service: EchoLinkConnectionService,
+            modeProvider: @escaping @MainActor () -> EchoLinkNetworkMode?
+        ) {
+            self.id = id
+            self.callsign = callsign
+            self.service = service
+            self.fallbackMode = mode
+            self.modeProvider = modeProvider
+        }
     }
 
     @Published private(set) var entries: [Entry] = []
@@ -68,7 +84,11 @@ final class QSOHub: ObservableObject {
                 id: id,
                 callsign: callsign,
                 mode: effectiveTransportProvider?(callsign)?.configuration.mode ?? networkConfigurationProvider().mode,
-                service: primary
+                service: primary,
+                modeProvider: { [weak self] in
+                    self?.effectiveTransportProvider?(callsign)?.configuration.mode
+                        ?? self?.networkConfigurationProvider().mode
+                }
             )
         )
         primary.pttPermission = { [weak self] in self?.activeID == id }
@@ -114,7 +134,10 @@ final class QSOHub: ObservableObject {
         service.authenticatedCallsign = callsign
         configure?(service, callsign)
         let id = UUID()
-        let entry = Entry(id: id, callsign: callsign, mode: mode, service: service)
+        let entry = Entry(id: id, callsign: callsign, mode: mode, service: service,
+            modeProvider: { [weak self] in
+                self?.effectiveTransportProvider?(callsign)?.configuration.mode
+            })
         service.pttPermission = { [weak self] in
             guard let self, self.activeID == id else { return false }
             return !self.entries.contains { $0.id != id && $0.service.session?.isPTTActive == true }

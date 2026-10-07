@@ -712,6 +712,9 @@ private struct LoginView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(.tint)
+
+                                Link("Privacy Policy", destination: ReverbQSOLinks.privacyPolicy)
+                                    .font(.subheadline)
                             }
                             .padding(.bottom, 16)
 
@@ -810,6 +813,7 @@ private struct LoginView: View {
             Section {
                 Link("Forgot password?", destination: passwordHelpURL)
                 Button("Register a callsign") { showingRegistration = true }
+                Link("Privacy Policy", destination: ReverbQSOLinks.privacyPolicy)
             }
         }
         .scrollDismissesKeyboard(.interactively)

@@ -40,36 +40,28 @@ final class MacMenuBarBridge {
         observers.append(center.addObserver(forName: MacMenuBarProtocol.releasePTT, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.releasePTT() }
         })
-        observers.append(center.addObserver(forName: MacMenuBarProtocol.command, object: nil, queue: .main) { [weak self] notification in
-            let type = notification.userInfo?[MacMenuBarProtocol.commandTypeKey] as? String
-            let id = notification.userInfo?[MacMenuBarProtocol.commandIDKey] as? String
-            Task { @MainActor in await self?.handleCommand(type: type, id: id) }
+        observers.append(center.addObserver(forName: MacMenuBarProtocol.command, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.consumeCommand() }
         })
         commandTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.consumeReleaseRequest() }
+            Task { @MainActor in
+                self?.consumeReleaseRequest()
+                await self?.consumeCommand()
+            }
         }
         // RX activity does not necessarily change the session value. Poll the
         // radio flags so the menu icon follows voice activity as it happens.
         stateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.publishIfChanged() }
+            Task { @MainActor in self?.publishHeartbeat() }
         }
         publish()
     }
 
-    private var lastPublishedState: [String: String] = [:]
-
-    private func publishIfChanged() {
+    private func publishHeartbeat() {
         expireMenuPTTIfNeeded()
-        let service = qsoHub.activeService
-        let state = [
-            "rx": String(service.isRemoteTransmitting),
-            "tx": String(conferenceHost.isRunning ? conferenceHost.isTransmitting : service.session?.isPTTActive == true),
-            "count": String(qsoHub.entries.count),
-            "active": qsoHub.activeID?.uuidString ?? "",
-            "talker": conferenceHost.talkerCallsign ?? "",
-            "incoming": conferenceHost.pendingCall?.id.uuidString ?? ""
-        ]
-        guard state != lastPublishedState else { return }
+        // The companion treats state older than five seconds as unavailable.
+        // Refresh the file even while idle: sandboxed notifications are only a
+        // wake-up hint, and polling must work without their delivery.
         publish()
     }
 
@@ -90,6 +82,11 @@ final class MacMenuBarBridge {
             connectionService.sendPTT(active: false)
         }
         publish()
+    }
+
+    private func consumeCommand() async {
+        guard let command = MacMenuBarProtocol.consumeCommand() else { return }
+        await handleCommand(type: command.type.rawValue, id: command.id.uuidString)
     }
 
     private func handleCommand(type: String?, id: String?) async {
@@ -155,14 +152,6 @@ final class MacMenuBarBridge {
         let personal = hosting && conferenceHost.isPersonalMode
         let incomingCall = personal && conferenceHost.pendingCall != nil
         let connected = session?.state == .connected
-        lastPublishedState = [
-            "rx": String(connectionService.isRemoteTransmitting),
-            "tx": String(hosting ? conferenceHost.isTransmitting : session?.isPTTActive == true),
-            "count": String(qsoHub.entries.count),
-            "active": qsoHub.activeID?.uuidString ?? "",
-            "talker": conferenceHost.talkerCallsign ?? "",
-            "incoming": conferenceHost.pendingCall?.id.uuidString ?? ""
-        ]
         let sessions: [[String: Any]] = qsoHub.entries.map { entry in
             [
                 "id": entry.id.uuidString,
@@ -201,8 +190,7 @@ final class MacMenuBarBridge {
         }
         DistributedNotificationCenter.default().post(
             name: MacMenuBarProtocol.state,
-            object: nil,
-            userInfo: state
+            object: nil
         )
     }
 }

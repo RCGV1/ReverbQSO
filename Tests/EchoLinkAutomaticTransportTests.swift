@@ -7,6 +7,98 @@ import XCTest
 final class EchoLinkAutomaticTransportTests: XCTestCase {
     private let preference = EchoLinkProxyConfiguration(mode: .automatic, host: "preferred.example", port: 8100, password: "PUBLIC")
 
+    func testCallFallbackIsBoundedToUnansweredAutomaticDirectOrRelayHandshake() {
+        let timeout = ConnectionError.handshakeTimedOut
+        for mode in [EchoLinkNetworkMode.direct, .relay] {
+            XCTAssertTrue(AutomaticCallFallbackPolicy.shouldAttempt(
+                preference: preference,
+                failedMode: mode,
+                error: timeout,
+                peerDatagramCount: 0,
+                alreadyAttempted: false
+            ))
+            XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttempt(
+                preference: preference,
+                failedMode: mode,
+                error: timeout,
+                peerDatagramCount: 0,
+                alreadyAttempted: true
+            ))
+            XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttempt(
+                preference: preference,
+                failedMode: mode,
+                error: timeout,
+                peerDatagramCount: 1,
+                alreadyAttempted: false
+            ))
+        }
+    }
+
+    func testCallFallbackPreservesExplicitPreferencesAndDenials() {
+        for mode in EchoLinkNetworkMode.allCases where mode != .automatic {
+            let explicit = EchoLinkProxyConfiguration(mode: mode, host: "preferred.example", port: 8100, password: "PUBLIC")
+            XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttempt(
+                preference: explicit,
+                failedMode: .direct,
+                error: ConnectionError.handshakeTimedOut,
+                peerDatagramCount: 0,
+                alreadyAttempted: false
+            ))
+        }
+        XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttempt(
+            preference: preference,
+            failedMode: .direct,
+            error: ConnectionError.connectionFailed("Access denied"),
+            peerDatagramCount: 0,
+            alreadyAttempted: false
+        ))
+        XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttempt(
+            preference: preference,
+            failedMode: .publicProxy,
+            error: ConnectionError.handshakeTimedOut,
+            peerDatagramCount: 0,
+            alreadyAttempted: false
+        ))
+    }
+
+    func testCallBootstrapFallbackAllowsOnlyAutomaticReachabilityFailures() {
+        let allowed: [Error] = [
+            EchoLinkRelayClientError.registrationTimedOut,
+            EchoLinkRelayClientError.resolutionFailed,
+            BoundUDPSocket.SocketError.systemCall(operation: "bind", code: EADDRINUSE)
+        ]
+        for error in allowed {
+            XCTAssertTrue(AutomaticCallFallbackPolicy.shouldAttemptBootstrap(
+                preference: preference,
+                failedMode: error is EchoLinkRelayClientError ? .relay : .direct,
+                error: error,
+                alreadyAttempted: false
+            ))
+        }
+
+        let rejected: [Error] = [
+            EchoLinkRelayClientError.registrationRejected,
+            BoundUDPSocket.SocketError.systemCall(operation: "bind", code: EACCES),
+            BoundUDPSocket.SocketError.invalidHost("bad"),
+            ConnectionError.connectionFailed("Access denied"),
+            CancellationError()
+        ]
+        for error in rejected {
+            XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttemptBootstrap(
+                preference: preference,
+                failedMode: .relay,
+                error: error,
+                alreadyAttempted: false
+            ))
+        }
+        XCTAssertFalse(AutomaticCallFallbackPolicy.shouldAttemptBootstrap(
+            preference: preference,
+            failedMode: .relay,
+            error: EchoLinkRelayClientError.registrationTimedOut,
+            alreadyAttempted: true
+        ))
+    }
+
     func testGlobalAddressSelectsDirectWithoutDiscovery() async throws {
         for address in ["8.8.8.8", "1.1.1.1"] {
             let selector = EchoLinkAutomaticTransportSelector(

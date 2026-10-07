@@ -4,6 +4,33 @@ import Foundation
 import Combine
 import os
 
+private final class AutomaticFallbackWaiterRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiterIDs: Set<UUID> = []
+
+    func insert(_ id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        waiterIDs.insert(id)
+    }
+
+    @discardableResult
+    func remove(_ id: UUID) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        waiterIDs.remove(id)
+        return waiterIDs.isEmpty
+    }
+
+    var hasWaiters: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !waiterIDs.isEmpty
+    }
+
+    func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        waiterIDs.removeAll()
+    }
+}
+
 enum DirectoryPublicProxyRetryPolicy {
     static func shouldRetry(
         configuration: EchoLinkProxyConfiguration,
@@ -24,7 +51,7 @@ enum DirectoryPublicProxyRetryPolicy {
         if let sessionError = error as? EchoLinkProxySession.SessionError {
             switch sessionError {
             case .directoryOpenFailed, .directoryClosed, .timedOut: return true
-            case .directoryBusy: return false
+            case .directoryBusy, .directoryDeferred: return false
             }
         }
         return false
@@ -74,6 +101,9 @@ final class EchoLinkDirectoryService: ObservableObject {
     private var availabilityTask: Task<Bool, Never>?
     private var proxyRecoveryTask: Task<Void, Error>?
     private var proxyRecoveryID: UUID?
+    private var automaticFallbackTask: Task<EchoLinkEffectiveTransport, Error>?
+    private var automaticFallbackID: UUID?
+    private var automaticFallbackWaiters: AutomaticFallbackWaiterRegistry?
     private var unansweredProxySession: EchoLinkProxySession?
     private var unansweredProxyConfigurations: [EchoLinkProxyConfiguration] = []
     private var authenticatedCallsign = ""
@@ -411,6 +441,95 @@ final class EchoLinkDirectoryService: ObservableObject {
         return current
     }
 
+    /// A call can discover that the selected Direct/Relay route is unreachable.
+    /// Share one bounded switch per account and retain its Automatic preference.
+    func prepareAutomaticPublicProxyFallback(callsign: String) async throws -> EchoLinkEffectiveTransport? {
+        try Task.checkCancellation()
+        guard isLoggedIn, authenticatedCallsign == callsign.uppercased(),
+              let selection = effectiveTransport, selection.preference.mode == .automatic else { return nil }
+        if selection.configuration.mode == .publicProxy { return selection }
+        if let automaticFallbackTask, let automaticFallbackWaiters {
+            if !automaticFallbackTask.isCancelled, automaticFallbackWaiters.hasWaiters {
+                let waiterID = UUID()
+                automaticFallbackWaiters.insert(waiterID)
+                return try await awaitAutomaticFallback(
+                    automaticFallbackTask, waiterID: waiterID, registry: automaticFallbackWaiters
+                )
+            }
+            automaticFallbackTask.cancel()
+            self.automaticFallbackTask = nil
+            automaticFallbackID = nil
+            self.automaticFallbackWaiters = nil
+        }
+        let generation = lifecycleGeneration.current
+        let fallbackID = UUID()
+        let configuration = EchoLinkProxyConfiguration(
+            mode: .publicProxy,
+            host: selection.preference.host,
+            port: selection.preference.port,
+            password: "PUBLIC"
+        )
+        let fallback = EchoLinkEffectiveTransport(preference: selection.preference,
+            configuration: configuration, relayAddress: nil)
+        let registry = AutomaticFallbackWaiterRegistry()
+        let waiterID = UUID()
+        registry.insert(waiterID)
+        let task = Task { @MainActor [weak self] () throws -> EchoLinkEffectiveTransport in
+            guard let self else { throw CancellationError() }
+            guard let session = try await self.proxySessionStore.session(callsign: callsign, configuration: configuration) else {
+                throw DirectoryClientError.notConnected
+            }
+            try Task.checkCancellation()
+            guard registry.hasWaiters, self.lifecycleGeneration.matches(generation), self.isLoggedIn else {
+                throw CancellationError()
+            }
+            do {
+                try await self.client.switchToPublicProxy(session, callsign: callsign)
+            } catch is CancellationError {
+                if !(await self.client.isLoggedIn) {
+                    await self.retireDirectorySession(with: DirectoryClientError.connectionFailed(
+                        "The original directory registration could not be restored after cancellation."
+                    ))
+                }
+                throw CancellationError()
+            }
+            try Task.checkCancellation()
+            guard registry.hasWaiters, self.lifecycleGeneration.matches(generation), self.isLoggedIn else {
+                throw CancellationError()
+            }
+            self.effectiveTransport = fallback
+            self.registeredThroughProxy = true
+            self.error = nil
+            return fallback
+        }
+        automaticFallbackTask = task
+        automaticFallbackID = fallbackID
+        automaticFallbackWaiters = registry
+        defer {
+            if automaticFallbackID == fallbackID {
+                automaticFallbackTask = nil
+                automaticFallbackID = nil
+                automaticFallbackWaiters = nil
+            }
+        }
+        return try await awaitAutomaticFallback(task, waiterID: waiterID, registry: registry)
+    }
+
+    private func awaitAutomaticFallback(
+        _ task: Task<EchoLinkEffectiveTransport, Error>,
+        waiterID: UUID,
+        registry: AutomaticFallbackWaiterRegistry
+    ) async throws -> EchoLinkEffectiveTransport {
+        return try await withTaskCancellationHandler {
+            defer { registry.remove(waiterID) }
+            let result = try await task.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            if registry.remove(waiterID) { task.cancel() }
+        }
+    }
+
     /// Remember only the current public tunnel; a late failure from a retired
     /// attempt must not replace a newer session or a custom proxy.
     func reportUnansweredProxyHandshake(_ failed: EchoLinkProxySession) async {
@@ -536,7 +655,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     private static func isRecoverableProxyFailure(_ error: Error) -> Bool {
         if let error = error as? EchoLinkProxySession.SessionError {
             switch error {
-            case .directoryClosed, .directoryOpenFailed, .timedOut: return true
+            case .directoryClosed, .directoryOpenFailed, .timedOut, .directoryDeferred: return true
             case .directoryBusy: return false
             }
         }
@@ -556,7 +675,23 @@ final class EchoLinkDirectoryService: ObservableObject {
         // Another caller may already have repaired the tunnel before this
         // queued failure reached us. Keep that fresh connection.
         let forced = selection.configuration.mode == .publicProxy && unanswered === failed
-        if !forced, await failed.isUsable() {
+        if await failed.hasActiveVoiceConsumer(), !(await failed.isDirectoryUsable()) {
+            await failed.recoverDirectoryWhenVoiceEnds { [weak self, weak failed] in
+                Task { @MainActor in
+                    guard let self, let failed, self.lifecycleGeneration.matches(generation), self.isLoggedIn,
+                          let current = await self.client.activeProxySession(), current === failed else { return }
+                    do {
+                        try await self.recoverProxy(for: generation)
+                        _ = await self.refresh()
+                    } catch {
+                        guard self.lifecycleGeneration.matches(generation), self.isLoggedIn else { return }
+                        self.error = error
+                    }
+                }
+            }
+            throw EchoLinkProxySession.SessionError.directoryDeferred
+        }
+        if !forced, await failed.isDirectoryUsable() {
             if unansweredProxySession === unanswered { unansweredProxySession = nil }
             return
         }
@@ -604,6 +739,11 @@ final class EchoLinkDirectoryService: ObservableObject {
     @discardableResult
     private func beginLifecycleOperation() -> UInt64 {
         let generation = lifecycleGeneration.advance()
+        automaticFallbackTask?.cancel()
+        automaticFallbackTask = nil
+        automaticFallbackID = nil
+        automaticFallbackWaiters?.removeAll()
+        automaticFallbackWaiters = nil
         proxyRecoveryTask?.cancel()
         proxyRecoveryTask = nil
         proxyRecoveryID = nil
@@ -622,6 +762,11 @@ final class EchoLinkDirectoryService: ObservableObject {
 
     private func retireDirectorySession(with terminalError: Error) async {
         let terminalGeneration = lifecycleGeneration.advance()
+        automaticFallbackTask?.cancel()
+        automaticFallbackTask = nil
+        automaticFallbackID = nil
+        automaticFallbackWaiters?.removeAll()
+        automaticFallbackWaiters = nil
         proxyRecoveryTask?.cancel()
         proxyRecoveryTask = nil
         proxyRecoveryID = nil
@@ -756,6 +901,13 @@ final class EchoLinkDirectoryService: ObservableObject {
             return true
         } catch {
             guard lifecycleGeneration.matches(generation) else { return false }
+
+            if case EchoLinkProxySession.SessionError.directoryDeferred = error {
+                // A slow directory must not retire a working QSO or its local
+                // account after several keepalive attempts. Renew after it ends.
+                self.error = error
+                return true
+            }
 
             let retireImmediately = DirectoryRegistrationFailurePolicy.shouldRetireImmediately(error)
             let terminal = retireImmediately || keepAliveFailures.recordFailure()

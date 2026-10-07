@@ -87,7 +87,14 @@ final class QSOViewModel: ObservableObject {
     }
 
     func cancelConnection() {
-        connectionService.cancelPendingConnection()
+        if connectionService.isReconnecting {
+            // Reconnect clears the presentation session while it refreshes the
+            // directory. Disconnect advances the service's reconnect generation
+            // so an in-flight lookup cannot install a new session afterward.
+            Task { await connectionService.disconnect() }
+        } else {
+            connectionService.cancelPendingConnection()
+        }
         timerTask?.cancel()
     }
 
@@ -99,6 +106,10 @@ final class QSOViewModel: ObservableObject {
         reconnectCandidate != nil
             && (session == nil || session?.state == .disconnected)
             && !isReconnecting
+    }
+
+    var canCancelConnection: Bool {
+        session?.state == .connecting || connectionService.isReconnecting
     }
 
     func dismissError() {

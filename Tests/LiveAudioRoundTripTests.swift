@@ -296,9 +296,18 @@ final class LiveAudioRoundTripTests: XCTestCase {
                 .write(to: folder.appendingPathComponent("introduction-report.json"))
 #if targetEnvironment(macCatalyst)
             // Exercise the real microphone graph transition before network
-            // replay. Its tap stays sealed; only fixture PCM is transmitted.
+            // replay. PTT remains inactive, so captured packets are discarded
+            // by the connection service and only fixture PCM is transmitted.
             if MicrophoneAccess.status == .granted {
-                let ready = await audio.prepareCaptureInput(requestPermission: false)
+                liveStage = "native-microphone-preflight"
+                let started = await audio.startCapture(requestPermission: false)
+                let readinessDeadline = ProcessInfo.processInfo.systemUptime + 2
+                while started, !audio.isCaptureReady,
+                      ProcessInfo.processInfo.systemUptime < readinessDeadline {
+                    try await Task.sleep(for: .milliseconds(25))
+                }
+                let ready = started && audio.isCaptureReady
+                _ = await audio.stopCaptureAndFlushPendingBuffers()
                 guard ready else { throw AuditError.transmissionUnavailable }
             }
 #endif

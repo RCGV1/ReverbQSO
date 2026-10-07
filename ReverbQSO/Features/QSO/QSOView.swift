@@ -262,9 +262,7 @@ struct QSOView: View {
             participantSummary
         }
 
-        if let audioStatusMessage = visibleAudioStatusMessage {
-            audioStatus(audioStatusMessage)
-        }
+        audioStatusArea
 
         if !viewModel.isConnected {
             sessionProgress
@@ -317,9 +315,7 @@ struct QSOView: View {
                     viewModel.togglePTT(active: active)
                 }
                 levelMeters
-                if let audioStatusMessage = visibleAudioStatusMessage {
-                    audioStatus(audioStatusMessage)
-                }
+                audioStatusArea
                 if viewModel.isSendingDTMF {
                     Label("Sending DTMF tones", systemImage: "circle.grid.3x3.fill")
                         .font(.caption)
@@ -601,9 +597,7 @@ struct QSOView: View {
             chatComposer
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if let audioStatusMessage = visibleAudioStatusMessage {
-                audioStatus(audioStatusMessage).padding(.horizontal, 20)
-            }
+            audioStatusArea.padding(.horizontal, 20)
         }
     }
 
@@ -1127,7 +1121,7 @@ struct QSOView: View {
             Text("Connecting...")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            if viewModel.session?.state == .connecting {
+            if viewModel.canCancelConnection {
                 Button("Cancel", role: .cancel) {
                     viewModel.cancelConnection()
                     dismiss()
@@ -1199,6 +1193,18 @@ struct QSOView: View {
                 Section("Receive Audio") {
                     Label(viewModel.usesWatchAudioOutput ? "Apple Watch" : viewModel.audioOutputRouteName,
                           systemImage: viewModel.usesWatchAudioOutput ? "applewatch" : "speaker.wave.2")
+                }
+
+                if let audioStatusMessage = visibleAudioStatusMessage {
+                    Section("Audio Status") {
+                        Label {
+                            Text(audioStatusMessage)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle")
+                        }
+                        .foregroundStyle(.orange)
+                    }
                 }
 
                 Section("Transmit Audio") {
@@ -1426,23 +1432,37 @@ struct QSOView: View {
         return message
     }
 
-    private func audioStatus(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(message, systemImage: "exclamationmark.triangle")
-                .font(.footnote)
-                .foregroundStyle(.orange)
-                .accessibilityAddTraits(.updatesFrequently)
-
-            #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-            if MicrophoneAccess.status != .granted {
-                MicrophonePermissionControl(isEmbeddedInSettings: true) {
-                    connectionService.prepareMicrophoneAfterPermissionGrant()
-                }
+    private var audioStatusArea: some View {
+        Group {
+            if let message = visibleAudioStatusMessage {
+                audioStatus(message)
+            } else {
+                Color.clear.accessibilityHidden(true)
             }
-            #endif
         }
+        .frame(height: 28)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+    }
+
+    private func audioStatus(_ message: String) -> some View {
+        Button {
+            showAudioRoutes = true
+        } label: {
+            Label {
+                Text(message)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .font(.footnote)
+        .foregroundStyle(.orange)
+        .accessibilityLabel(message)
+        .accessibilityHint("Open Audio for details and microphone access.")
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var connectionStateText: String {

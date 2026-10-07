@@ -14,6 +14,7 @@ actor EchoLinkProxySession {
         case directoryOpenFailed
         case directoryClosed
         case timedOut
+        case directoryDeferred
 
         var errorDescription: String? {
             switch self {
@@ -21,6 +22,7 @@ actor EchoLinkProxySession {
             case .directoryOpenFailed: return "The proxy could not open the EchoLink directory connection."
             case .directoryClosed: return "The proxy directory connection closed before returning a response."
             case .timedOut: return "The proxy directory request timed out."
+            case .directoryDeferred: return "The station list will refresh after your call."
             }
         }
     }
@@ -37,6 +39,9 @@ actor EchoLinkProxySession {
     private var serializedTurnActive = false
     private var directoryTurnWaiters: [(UUID, CheckedContinuation<Void, Error>)] = []
     private var terminalError: Error?
+    private var directoryQuarantined = false
+    private var udpConsumerID: UUID?
+    private var quarantinedDirectoryRecovery: (@Sendable () -> Void)?
 
     private init(client: EchoLinkProxyClient, configuration: EchoLinkProxyConfiguration, callsign: String) {
         self.client = client
@@ -63,9 +68,12 @@ actor EchoLinkProxySession {
 
     func udpMessages() -> AsyncThrowingStream<EchoLinkProxyMessage, Error> {
         udpBuffer?.finish(throwing: CancellationError())
+        let consumerID = UUID()
+        udpConsumerID = consumerID
         let buffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>()
-        buffer.setOnConsumerCancellation { [weak buffer] in
+        buffer.setOnConsumerCancellation { [weak self, weak buffer] in
             buffer?.finish(throwing: CancellationError())
+            Task { await self?.releaseUDPConsumer(consumerID) }
         }
         udpBuffer = buffer
         if let terminalError { buffer.finish(throwing: terminalError) }
@@ -74,6 +82,30 @@ actor EchoLinkProxySession {
 
     func isUsable() -> Bool {
         terminalError == nil
+    }
+
+    func isDirectoryUsable() -> Bool { terminalError == nil && !directoryQuarantined }
+
+    func hasActiveVoiceConsumer() -> Bool {
+        terminalError == nil && udpConsumerID != nil && udpBuffer?.isFinished == false
+    }
+
+    func recoverDirectoryWhenVoiceEnds(_ action: @escaping @Sendable () -> Void) {
+        guard directoryQuarantined, terminalError == nil else { return }
+        if hasActiveVoiceConsumer() {
+            quarantinedDirectoryRecovery = action
+        } else {
+            action()
+        }
+    }
+
+    private func releaseUDPConsumer(_ id: UUID) {
+        guard udpConsumerID == id else { return }
+        udpConsumerID = nil
+        udpBuffer = nil
+        let recovery = quarantinedDirectoryRecovery
+        quarantinedDirectoryRecovery = nil
+        if directoryQuarantined, terminalError == nil { recovery?() }
     }
 
     var inboundAudioMetrics: [String: LiveTransportMessageBufferMetrics] {
@@ -98,6 +130,7 @@ actor EchoLinkProxySession {
     ) async throws -> Data {
         try Task.checkCancellation()
         if let terminalError { throw terminalError }
+        guard !directoryQuarantined else { throw SessionError.directoryDeferred }
         guard !isDirectoryTransactionActive else { throw SessionError.directoryBusy }
         isDirectoryTransactionActive = true
         defer { isDirectoryTransactionActive = false }
@@ -161,8 +194,8 @@ actor EchoLinkProxySession {
             }
             // Proxy frames have no transaction identifier. Once TCP_OPEN has
             // timed out, a late TCP_STATUS cannot be distinguished from the
-            // status for a later request, so retire this authenticated socket.
-            close()
+            // status for a later request, so stop reusing its directory channel.
+            retireDirectory(after: error)
             throw error
         }
         do {
@@ -179,7 +212,7 @@ actor EchoLinkProxySession {
                 // Without a confirmed TCP_CLOSE send, the proxy may keep its
                 // directory stream open and route later data into the next
                 // logical request. Retire the uncorrelatable session.
-                close()
+                retireDirectory(after: error)
                 throw error
             }
             return response
@@ -192,9 +225,21 @@ actor EchoLinkProxySession {
                 throw error
             }
             // A delayed TCP_DATA/TCP_CLOSE is just as uncorrelated as a delayed
-            // TCP_STATUS. Retire the socket after any incomplete transaction.
-            close()
+            // TCP_STATUS. Stop directory reuse after an incomplete transaction.
+            retireDirectory(after: error)
             throw error
+        }
+    }
+
+    private func retireDirectory(after error: Error) {
+        // TCP directory frames have no request identifiers. After a timeout,
+        // never send another directory command on this socket. UDP frames are
+        // independently typed and can safely keep an existing QSO alive.
+        if hasActiveVoiceConsumer(),
+           case SessionError.timedOut = error {
+            directoryQuarantined = true
+        } else {
+            close()
         }
     }
 
@@ -327,6 +372,8 @@ actor EchoLinkProxySession {
     private func failAll(_ error: Error) {
         guard terminalError == nil else { return }
         terminalError = error
+        udpConsumerID = nil
+        quarantinedDirectoryRecovery = nil
         let waiting = directoryTurnWaiters
         directoryTurnWaiters.removeAll()
         for (_, continuation) in waiting { continuation.resume(throwing: error) }
@@ -396,7 +443,7 @@ final class EchoLinkProxySessionStore {
         let normalized = callsign.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let lookupGeneration = generation
         guard requestedConfiguration == requested, self.callsign == normalized,
-              let session, await session.isUsable(), generation == lookupGeneration else { return nil }
+              let session, await canReuse(session), generation == lookupGeneration else { return nil }
         return session
     }
 
@@ -418,7 +465,7 @@ final class EchoLinkProxySessionStore {
         let lookupGeneration = generation
         if requestedConfiguration == requested, self.callsign == normalized, let session,
            !EchoLinkProxyClient.untriedCandidates([session.configuration], excluding: exclusions).isEmpty,
-           await session.isUsable() {
+           await canReuse(session) {
             guard generation == lookupGeneration else { throw CancellationError() }
             return session
         }
@@ -449,6 +496,11 @@ final class EchoLinkProxySessionStore {
         requestedConfiguration = requested
         self.callsign = normalized
         return newSession
+    }
+
+    private func canReuse(_ session: EchoLinkProxySession) async -> Bool {
+        if await session.isDirectoryUsable() { return true }
+        return await session.hasActiveVoiceConsumer()
     }
 
     func close() async {

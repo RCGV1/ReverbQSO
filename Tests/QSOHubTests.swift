@@ -36,6 +36,30 @@ final class QSOHubTests: XCTestCase {
         XCTAssertTrue(hub.lastError?.contains("Direct mode supports one active QSO") == true)
     }
 
+    func testAutomaticDirectFallbackReleasesDirectOwnershipForAnotherAccount() async {
+        let automatic = EchoLinkProxyConfiguration(mode: .automatic, host: "", port: 8100, password: "PUBLIC")
+        var firstMode = EchoLinkNetworkMode.direct
+        let hub = QSOHub(primary: EchoLinkConnectionService(), networkConfigurationProvider: { automatic },
+            connectOperation: { service, station in
+                if station.callsign == "TEST-A" { firstMode = .publicProxy }
+                service.installSimulatorDemoSession(station: station)
+            })
+        hub.effectiveTransportProvider = { account in
+            let mode = account == "N0AAA" ? firstMode : .direct
+            return EchoLinkEffectiveTransport(preference: automatic,
+                configuration: EchoLinkProxyConfiguration(mode: mode, host: "proxy.example", port: 8100,
+                    password: mode == .publicProxy ? "PUBLIC" : ""), relayAddress: nil)
+        }
+
+        _ = await hub.connect(to: Station(callsign: "TEST-A", ipAddress: "127.0.0.1"), as: "N0AAA")
+        let second = await hub.connect(to: Station(callsign: "TEST-B", ipAddress: "127.0.0.2"), as: "N0BBB")
+
+        XCTAssertEqual(hub.entries.map(\.mode), [.publicProxy, .direct])
+        XCTAssertEqual(second.session?.state, .connected)
+        XCTAssertNil(hub.lastError)
+        await hub.disconnectAll()
+    }
+
     func testAccountsUseTheirFrozenEffectiveModesAfterPreferenceChanges() async {
         let automatic = EchoLinkProxyConfiguration(mode: .automatic, host: "", port: 8100, password: "PUBLIC")
         let currentPreference = EchoLinkProxyConfiguration(mode: .direct, host: "", port: 8100, password: "")
