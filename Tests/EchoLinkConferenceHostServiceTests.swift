@@ -39,6 +39,36 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         XCTAssertTrue(host.sessions.isEmpty)
     }
 
+    func testPersonalAnswerRechecksRestrictionChangedWhileCallerWasRinging() async throws {
+        let station = Station(callsign: "N0AAA", ipAddress: "127.0.0.1")
+        let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { [station] })
+        directory.isLoggedIn = true
+        var policy = CallAccessPolicy()
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
+        host.callAccessPolicyProvider = { policy }
+        let controlPort = try availablePort()
+        await host.startPersonal(callsign: "W6HOST", directory: directory, outbound: EchoLinkConnectionService(),
+                                 ports: .init(audio: try availablePort(), control: controlPort), monitorAudio: false)
+        guard host.isRunning else { return XCTFail(host.errorMessage ?? "Could not listen") }
+        defer { Task { await host.stop() } }
+        let caller = try BoundUDPSocket(localPort: 0)
+        defer { caller.close() }
+        try await caller.send(EchoLinkControlPacketCodec.buildSDESPacket(callsign: station.callsign),
+                              to: "127.0.0.1", port: controlPort)
+        try await waitUntil { host.pendingCall != nil }
+
+        policy.blockedCallsigns = [station.callsign]
+        await host.acceptPendingCall()
+
+        let response = try await receive(caller)
+        XCTAssertTrue(EchoLinkControlPacketCodec.parseEvents(from: response.data).contains {
+            if case .bye(let reason) = $0 { return reason?.contains("blocked") == true }; return false
+        }, "Answer must apply the current incoming restrictions")
+        XCTAssertNil(host.pendingCall)
+        XCTAssertTrue(host.sessions.isEmpty)
+        XCTAssertTrue(directory.isAvailableForCalls)
+    }
+
     func testReleasedPTTDuringInputPreparationDoesNotReportStaleFailure() async throws {
         let preparing = expectation(description: "host preparing microphone")
         var finishPreparation: CheckedContinuation<Bool, Never>?
@@ -64,6 +94,31 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         XCTAssertNil(host.talkerCallsign)
         XCTAssertFalse(host.isTransmitting)
         await host.stop()
+    }
+
+    func testDisconnectingLastPersonalPeerReleasesPTTDuringInputPreparation() async throws {
+        let preparing = expectation(description: "host preparing microphone")
+        var finishPreparation: CheckedContinuation<Bool, Never>?
+        let host = EchoLinkConferenceHostService(prepareCaptureInput: {
+            preparing.fulfill()
+            return await withCheckedContinuation { finishPreparation = $0 }
+        })
+        host.installSimulatorDemoIncomingCall()
+        await host.acceptPendingCall()
+        let caller = try XCTUnwrap(host.sessions.first)
+        host.setPTT(active: true)
+        await fulfillment(of: [preparing], timeout: 2)
+
+        await host.disconnect(id: caller.id)
+        for _ in 0..<20 { await Task.yield() }
+        let wasStillTransmitting = host.isTransmitting
+        let staleTalker = host.talkerCallsign
+        // Complete the injected preparation so the test leaves no suspended task.
+        finishPreparation?.resume(returning: false)
+        await host.stop()
+
+        XCTAssertFalse(wasStillTransmitting, "A finished personal QSO must release microphone preparation and PTT")
+        XCTAssertNil(staleTalker)
     }
 
     func testLocalPTTSendsSpeexOnlyToCapablePeerAndFlushesOneShortPacket() async throws {

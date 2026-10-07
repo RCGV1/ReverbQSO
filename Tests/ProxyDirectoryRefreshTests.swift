@@ -7,6 +7,61 @@ import XCTest
 
 @MainActor
 final class ProxyDirectoryRefreshTests: XCTestCase {
+    func testProxyConsumerReleaseBeforeFirstReadDoesNotNeedIteratorCancellation() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (directory, _) = makeService(proxy: proxy)
+        await directory.login(callsign: "N0TEST", password: "directory-password")
+        let prepared = try await directory.prepareProxySession(callsign: "N0TEST")
+        let session = try XCTUnwrap(prepared)
+        let consumerID = UUID()
+        let stream = await session.udpMessages(consumerID: consumerID)
+        let activeBeforeRelease = await session.hasActiveVoiceConsumer()
+        XCTAssertTrue(activeBeforeRelease)
+
+        // The connection may finish before AsyncThrowingStream calls buffer.next().
+        await session.releaseUDPConsumer(consumerID)
+        let activeAfterRelease = await session.hasActiveVoiceConsumer()
+        XCTAssertFalse(activeAfterRelease)
+        withExtendedLifetime(stream) {}
+        await directory.logout()
+        await directory.closeProxySession()
+    }
+
+    func testProxyConsumerStaleCompletionCannotReleaseReplacementStream() async throws {
+        let proxy = try RefreshTestProxy(behavior: .stallFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (directory, _) = makeService(proxy: proxy)
+        await directory.login(callsign: "N0TEST", password: "directory-password")
+        let prepared = try await directory.prepareProxySession(callsign: "N0TEST")
+        let session = try XCTUnwrap(prepared)
+        let previousID = UUID(), replacementID = UUID()
+        let previous = await session.udpMessages(consumerID: previousID)
+        let replacement = await session.udpMessages(consumerID: replacementID)
+        do {
+            _ = try await session.serializedDirectoryRequest(Data("s".utf8), host: "127.0.0.1",
+                boundary: .marker(Data("+++".utf8)), timeout: .milliseconds(50))
+            XCTFail("The local directory intentionally stalls")
+        } catch { }
+        let recovered = expectation(description: "matching consumer completion releases recovery once")
+        recovered.assertForOverFulfill = true
+        await session.recoverDirectoryWhenVoiceEnds { recovered.fulfill() }
+
+        await session.releaseUDPConsumer(previousID)
+        let replacementStillActive = await session.hasActiveVoiceConsumer()
+        XCTAssertTrue(replacementStillActive)
+        await session.releaseUDPConsumer(replacementID)
+        await session.releaseUDPConsumer(replacementID)
+        let activeAfterCompletion = await session.hasActiveVoiceConsumer()
+        XCTAssertFalse(activeAfterCompletion)
+        await fulfillment(of: [recovered], timeout: 1)
+        withExtendedLifetime((previous, replacement)) {}
+        await directory.logout()
+        await directory.closeProxySession()
+    }
+
     func testAutomaticDirectTimeoutUsesOneProxyFallbackAndExchangesVoice() async throws {
         let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, acceptPeerControl: true)
         try await proxy.start()

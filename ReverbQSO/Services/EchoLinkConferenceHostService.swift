@@ -541,6 +541,15 @@ final class EchoLinkConferenceHostService: ObservableObject {
         guard isPersonalMode, let pendingCall,
               !isAnsweringPendingCall,
               machine?.sessions.contains(where: { $0.id == pendingCall.id && $0.state == .pending }) == true else { return }
+        let station = Station(callsign: pendingCall.callsign, ipAddress: pendingCall.sourceIPv4Address,
+                              type: pendingCall.stationType)
+        if let reason = (callAccessPolicyProvider?() ?? CallAccessPolicyStore.load(demo: isLocalDemo)).rejection(
+            for: station, direction: .incoming, countryCode: station.callSignCountryCode
+        ) {
+            errorMessage = reason
+            await declinePendingCall(reason: reason)
+            return
+        }
         isAnsweringPendingCall = true
         defer { isAnsweringPendingCall = false }
         let acknowledgement = EchoLinkControlPacketCodec.buildSDESPacket(
@@ -887,6 +896,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
 
     private func publishSessions() {
         sessions = machine?.sessions.filter { $0.state == .active } ?? []
+        if isPersonalMode, sessions.isEmpty { setPTT(active: false) }
         if sessions.isEmpty { stopRecording() }
         else { prepareSessionRecording() }
         let activeIDs = Set(sessions.map(\.id))

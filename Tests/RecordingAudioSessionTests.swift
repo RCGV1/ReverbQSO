@@ -113,6 +113,36 @@ final class RecordingAudioSessionTests: XCTestCase {
         let id = UUID()
         XCTAssertThrowsError(try audio.beginPlayback(id: id, onStop: {}))
         audio.endPlayback(id: id)
-        XCTAssertEqual(deactivations, 0)
+        XCTAssertEqual(deactivations, 1, "A failed activation must release any partially acquired session")
+    }
+
+    func testFailedReplacementActivationReleasesPreviousPlaybackSession() throws {
+        var activations = 0
+        var sessionActive = false
+        var stoppedPrevious = false
+        var deactivations = 0
+        let audio = RecordingAudioSession(activate: {
+            activations += 1
+            if activations == 2 { throw CocoaError(.fileReadUnknown) }
+            sessionActive = true
+        }, deactivate: {
+            sessionActive = false
+            deactivations += 1
+        })
+        let firstID = UUID(), secondID = UUID()
+        try audio.beginPlayback(id: firstID) {
+            stoppedPrevious = true
+            audio.endPlayback(id: firstID)
+        }
+        XCTAssertTrue(sessionActive)
+
+        XCTAssertThrowsError(try audio.beginPlayback(id: secondID, onStop: {}))
+
+        XCTAssertTrue(stoppedPrevious)
+        XCTAssertFalse(sessionActive, "The stopped recording must not retain audio after replacement fails")
+        XCTAssertEqual(deactivations, 1)
+        audio.endPlayback(id: firstID)
+        audio.endPlayback(id: secondID)
+        XCTAssertEqual(deactivations, 1, "Stale completions must not release another owner's audio")
     }
 }

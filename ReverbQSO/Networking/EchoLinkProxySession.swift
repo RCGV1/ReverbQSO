@@ -66,9 +66,8 @@ actor EchoLinkProxySession {
         return session
     }
 
-    func udpMessages() -> AsyncThrowingStream<EchoLinkProxyMessage, Error> {
+    func udpMessages(consumerID: UUID = UUID()) -> AsyncThrowingStream<EchoLinkProxyMessage, Error> {
         udpBuffer?.finish(throwing: CancellationError())
-        let consumerID = UUID()
         udpConsumerID = consumerID
         let buffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>()
         buffer.setOnConsumerCancellation { [weak self, weak buffer] in
@@ -99,7 +98,9 @@ actor EchoLinkProxySession {
         }
     }
 
-    private func releaseUDPConsumer(_ id: UUID) {
+    /// A receive loop can finish between `next()` calls, before the buffer's
+    /// cancellation handler runs. Its owner must also release on loop exit.
+    func releaseUDPConsumer(_ id: UUID) {
         guard udpConsumerID == id else { return }
         udpConsumerID = nil
         udpBuffer = nil

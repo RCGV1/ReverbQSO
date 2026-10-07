@@ -50,7 +50,14 @@ final class RecordingAudioSession {
         recordingID = nil
         stopRecording = nil
         stop?()
-        try activate()
+        do {
+            try activate()
+        } catch {
+            // Activation may fail after changing the category or activating the session.
+            // Release that claim even when replacement playback never starts.
+            if liveOwners.isEmpty { deactivate() }
+            throw error
+        }
         recordingID = id
         stopRecording = onStop
     }

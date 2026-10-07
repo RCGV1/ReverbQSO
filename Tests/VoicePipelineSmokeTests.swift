@@ -314,6 +314,25 @@ final class QSOViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.hasIncomingMessages)
     }
 
+    func testReadMessagesStayAvailableWithoutBecomingUnreadAfterOutgoingReply() async {
+        let service = EchoLinkConnectionService()
+        let viewModel = QSOViewModel(connectionService: service)
+        service.incomingChatMessages = [
+            ChatMessage(sender: "REMOTE", body: "hello", isOutgoing: false)
+        ]
+        await drainMainQueue()
+        XCTAssertTrue(viewModel.hasIncomingMessages)
+
+        viewModel.markMessagesRead()
+        service.incomingChatMessages.append(
+            ChatMessage(sender: "LOCAL", body: "reply", isOutgoing: true)
+        )
+        await drainMainQueue()
+
+        XCTAssertFalse(viewModel.hasIncomingMessages)
+        XCTAssertTrue(viewModel.hasStationActivity)
+    }
+
     private func drainMainQueue() async {
         for _ in 0..<4 {
             await Task.yield()

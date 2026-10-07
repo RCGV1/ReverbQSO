@@ -98,7 +98,10 @@ struct QSOView: View {
                !(horizontalSizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad) {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showStationActivity = true } label: {
-                        Label("Station messages", systemImage: "text.bubble")
+                        Label(
+                            viewModel.hasIncomingMessages ? "Unread station messages" : "Station messages",
+                            systemImage: viewModel.hasIncomingMessages ? "text.bubble.fill" : "text.bubble"
+                        )
                     }
                     .accessibilityHint("Show information and messages sent by this station")
                 }
@@ -132,6 +135,12 @@ struct QSOView: View {
         }
         .sheet(isPresented: $showParticipants) {
             participantsSheet
+        }
+        .onChange(of: showChat) { _, _ in
+            viewModel.markMessagesRead()
+        }
+        .onChange(of: showStationActivity) { _, _ in
+            viewModel.markMessagesRead()
         }
         .alert("Disconnect", isPresented: $showDisconnectConfirmation) {
             Button("Disconnect", role: .destructive) {
@@ -904,7 +913,7 @@ struct QSOView: View {
     }
 
     private var hasStationActivity: Bool {
-        !viewModel.sysopInfo.isEmpty || viewModel.hasIncomingMessages
+        viewModel.hasStationActivity
     }
 
     private var stationActivitySheet: some View {

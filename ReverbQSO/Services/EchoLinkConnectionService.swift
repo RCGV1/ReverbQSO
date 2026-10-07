@@ -2299,8 +2299,10 @@ final class EchoLinkConnectionService: ObservableObject {
         controlReceiveTask?.cancel()
         controlReceiveTask = Task { [weak self] in
             guard let self else { return }
+            let consumerID = UUID()
+            defer { Task { await proxySession.releaseUDPConsumer(consumerID) } }
             do {
-                for try await message in await proxySession.udpMessages() {
+                for try await message in await proxySession.udpMessages(consumerID: consumerID) {
                     guard self.session?.id == sessionID, self.proxySession === proxySession else { break }
                     guard message.remoteHost == self.session?.station.ipAddress else {
                         self.logger.warning("Dropped proxied datagram from unexpected host=\(message.remoteHost, privacy: .public)")

@@ -44,6 +44,7 @@ final class QSOViewModel: ObservableObject {
     private let connectionService: EchoLinkConnectionService
     private var cancellables = Set<AnyCancellable>()
     private var timerTask: Task<Void, Never>?
+    private var chatNotificationCursor = ChatMessageNotificationCursor()
 
     var localCallsign: String {
         connectionService.localCallsign
@@ -118,6 +119,14 @@ final class QSOViewModel: ObservableObject {
 
     func sendChat(message: String) async {
         await connectionService.sendChat(message: message)
+    }
+
+    func markMessagesRead() {
+        hasIncomingMessages = false
+    }
+
+    var hasStationActivity: Bool {
+        !sysopInfo.isEmpty || !chatMessages.isEmpty
     }
 
     // MARK: - Binding
@@ -216,10 +225,11 @@ final class QSOViewModel: ObservableObject {
             .sink { [weak self] messages in
                 guard let self else { return }
                 self.chatMessages = messages
+                let newIncomingMessages = self.chatNotificationCursor.newIncomingMessages(in: messages)
                 if messages.isEmpty {
                     self.hasIncomingMessages = false
-                } else if !self.hasIncomingMessages {
-                    self.hasIncomingMessages = messages.contains { !$0.isOutgoing }
+                } else if !newIncomingMessages.isEmpty {
+                    self.hasIncomingMessages = true
                 }
             }
             .store(in: &cancellables)
