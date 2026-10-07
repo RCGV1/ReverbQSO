@@ -72,4 +72,38 @@ final class SpacePTTReleaseMonitorTests: XCTestCase {
         monitor.release(second)
     }
 
+    func testOnlyCurrentOwnerCanCancelHeldSpaceForPresentation() {
+        let monitor = SpacePTTReleaseMonitor.shared
+        let currentOwner = UUID()
+        let otherRadio = UUID()
+        var pressCount = 0
+        var releaseCount = 0
+        let presses = monitor.presses.sink { pressCount += 1 }
+        let releases = monitor.releases.sink { releaseCount += 1 }
+        defer {
+            monitor.release(currentOwner)
+            monitor.release(otherRadio)
+            monitor.spaceChanged(isPressed: false, canStart: false)
+        }
+
+        monitor.spaceChanged(isPressed: false, canStart: false)
+        releaseCount = 0
+        monitor.spaceChanged(isPressed: true, canStart: true)
+        XCTAssertEqual(pressCount, 1)
+        XCTAssertTrue(monitor.claim(currentOwner))
+
+        monitor.cancelHold(for: otherRadio)
+        XCTAssertEqual(releaseCount, 0, "A different radio must not cancel the current owner's transmission")
+        XCTAssertFalse(monitor.claim(otherRadio))
+
+        monitor.cancelHold(for: currentOwner)
+        XCTAssertEqual(releaseCount, 1)
+        XCTAssertTrue(monitor.claim(otherRadio), "Presentation cancellation must release ownership")
+
+        monitor.spaceChanged(isPressed: true, canStart: true)
+        XCTAssertEqual(pressCount, 1, "A held physical key must not restart PTT after cancellation")
+
+        withExtendedLifetime((presses, releases)) {}
+    }
+
 }

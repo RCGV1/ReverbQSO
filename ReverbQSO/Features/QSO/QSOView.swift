@@ -554,9 +554,12 @@ struct QSOView: View {
                 isRadioFocused = true
             }
         }
-        .onChange(of: showAudioDiagnostics) { _, shown in
-            if shown { releaseSpacePTT() }
-            else if !isChatFocused && !isParticipantSearchFocused { isRadioFocused = true }
+        .onChange(of: spacePTTPresentationIsBlocking) { _, isBlocking in
+            if isBlocking {
+                SpacePTTReleaseMonitor.shared.cancelHold(for: spacePTTOwner)
+            } else if !isChatFocused && !isParticipantSearchFocused {
+                isRadioFocused = true
+            }
         }
     }
 
@@ -1107,10 +1110,14 @@ struct QSOView: View {
     }
 
     #if targetEnvironment(macCatalyst)
+    private var spacePTTPresentationIsBlocking: Bool {
+        showChat || showAudioRoutes || showAudioDiagnostics || showDTMF
+            || showStationActivity || showParticipants || showDisconnectConfirmation
+            || viewModel.errorMessage != nil
+    }
+
     private var canStartSpacePTT: Bool {
-        isSpacePTTVisible && scenePhase == .active && !showChat && !showAudioRoutes && !showAudioDiagnostics
-            && !showDTMF && !showStationActivity && !showParticipants
-            && !showDisconnectConfirmation && viewModel.errorMessage == nil
+        isSpacePTTVisible && scenePhase == .active && !spacePTTPresentationIsBlocking
             && !isChatFocused && !isParticipantSearchFocused
             && !viewModel.isPTTActive && viewModel.canTransmit
     }

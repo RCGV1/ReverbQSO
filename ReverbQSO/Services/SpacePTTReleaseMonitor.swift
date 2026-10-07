@@ -68,6 +68,13 @@ final class SpacePTTReleaseMonitor {
         if owner == candidate { owner = nil }
     }
 
+    /// End a view-owned hold when that radio presents controls over the QSO.
+    func cancelHold(for candidate: UUID) {
+        guard owner == candidate else { return }
+        owner = nil
+        releases.send(())
+    }
+
     func logEligibility(_ context: String, eligible: Bool, focused: Bool) {
         logger.notice("Space eligibility view=\(context, privacy: .public) eligible=\(eligible) radioFocus=\(focused)")
     }

@@ -1549,18 +1549,21 @@ final class EchoLinkConnectionService: ObservableObject {
         let generation = reconnectGeneration
         defer { isReconnecting = false }
         do {
-            guard let currentStation = try await resolveReconnectStation?(candidate) else {
+            let resolvedStation = try await resolveReconnectStation?(candidate)
+            guard generation == reconnectGeneration,
+                  reconnectCandidate != nil else { return }
+            guard let currentStation = resolvedStation else {
                 error = ConnectionError.connectionFailed(
                     "\(candidate.callsign) is not available in the current EchoLink directory."
                 )
                 return
             }
-            guard generation == reconnectGeneration,
-                  reconnectCandidate != nil else { return }
             await connect(to: currentStation)
         } catch is CancellationError {
             return
         } catch {
+            guard generation == reconnectGeneration,
+                  reconnectCandidate != nil else { return }
             self.error = error
         }
     }

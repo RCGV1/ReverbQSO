@@ -268,6 +268,63 @@ final class QSOViewModelTests: XCTestCase {
         XCTAssertFalse(service.isReconnecting)
     }
 
+    func testDisconnectedReconnectIgnoresLateMissingStationResult() async {
+        let service = EchoLinkConnectionService()
+        let saved = Station(callsign: "N0CALL", ipAddress: "192.0.2.10", nodeNumber: 123)
+        let lookupStarted = expectation(description: "reconnect lookup started")
+        var finishLookup: CheckedContinuation<Station?, Never>?
+        service.resolveReconnectStation = { _ in
+            await withCheckedContinuation { continuation in
+                finishLookup = continuation
+                lookupStarted.fulfill()
+            }
+        }
+        service.registerReconnectCandidate(saved)
+        let reconnectTask = Task { await service.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+
+        await service.disconnect()
+        finishLookup?.resume(returning: nil)
+        await reconnectTask.value
+
+        XCTAssertNil(service.error, "A canceled lookup must not report an unavailable station afterward")
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.reconnectCandidate)
+        XCTAssertFalse(service.isReconnecting)
+    }
+
+    func testCancelledReconnectIgnoresLateDirectoryFailure() async {
+        let service = EchoLinkConnectionService()
+        let saved = Station(callsign: "N0CALL", ipAddress: "192.0.2.10", nodeNumber: 123)
+        let lookupStarted = expectation(description: "reconnect lookup started")
+        var finishLookup: CheckedContinuation<Station?, Error>?
+        service.resolveReconnectStation = { _ in
+            try await withCheckedThrowingContinuation { continuation in
+                finishLookup = continuation
+                lookupStarted.fulfill()
+            }
+        }
+        service.registerReconnectCandidate(saved)
+        let viewModel = QSOViewModel(connectionService: service)
+        let cancelled = expectation(description: "cancel action cleared reconnect candidate")
+        let cancellationObservation = service.$reconnectCandidate.dropFirst().sink { candidate in
+            if candidate == nil { cancelled.fulfill() }
+        }
+        let reconnectTask = Task { await viewModel.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+
+        viewModel.cancelConnection()
+        await fulfillment(of: [cancelled], timeout: 1)
+        finishLookup?.resume(throwing: ConnectionError.connectionFailed("Mock directory refresh failed"))
+        await reconnectTask.value
+        cancellationObservation.cancel()
+
+        XCTAssertNil(service.error, "Cancel must suppress a directory failure returned by the retired lookup")
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.reconnectCandidate)
+        XCTAssertFalse(service.isReconnecting)
+    }
+
     func testAuthenticatedCallsignTakesPrecedenceForHandshakeIdentity() {
         let service = EchoLinkConnectionService()
         service.authenticatedCallsign = "N0TEST"

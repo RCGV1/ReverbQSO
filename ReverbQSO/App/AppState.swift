@@ -593,6 +593,17 @@ final class AppState: ObservableObject {
 
     func setApplicationActive(_ active: Bool) {
         isApplicationActive = active
+        if !active {
+            // A touch or key release may never arrive after foreground focus is lost.
+            // Release TX while keeping the contact and background receive alive.
+            if connectionService.session != nil {
+                connectionService.sendPTT(active: false)
+            }
+            for entry in qsoHub.entries where entry.service !== connectionService {
+                entry.service.sendPTT(active: false)
+            }
+            conferenceHostService.setPTT(active: false)
+        }
 #if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
         if SimulatorDemoData.isEnabled { return }
 #endif

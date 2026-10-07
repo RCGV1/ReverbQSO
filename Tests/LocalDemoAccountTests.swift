@@ -5,6 +5,29 @@ import XCTest
 
 @MainActor
 final class LocalDemoAccountTests: XCTestCase {
+#if targetEnvironment(simulator)
+    func testApplicationInactiveReleasesPTTWithoutEndingTheContact() async throws {
+        let suite = "BackgroundPTTTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let app = AppState(sessionDefaults: defaults)
+        await app.login(callsign: "DEMO", password: "demo")
+        let station = try XCTUnwrap(LocalDemoAccount.stations.first { $0.callsign != "*ECHOTEST*" })
+        await app.connect(to: station)
+        let radio = app.qsoHub.activeService
+        radio.sendPTT(active: true)
+        XCTAssertEqual(radio.session?.isPTTActive, true)
+
+        app.setApplicationActive(false)
+
+        XCTAssertEqual(radio.session?.isPTTActive, false,
+            "Losing foreground must release TX even when no gesture-up arrives")
+        XCTAssertEqual(radio.session?.state, .connected,
+            "Background receive must keep the contact connected")
+        await app.logout()
+    }
+#endif
+
     func testTemporaryDirectoryLossDoesNotSignOutTheLocalAccount() async {
         let app = AppState()
         app.currentUser = "N0TEST"
