@@ -53,13 +53,14 @@ struct FavoritesView: View {
     private var favoritesList: some View {
         List {
             ForEach(viewModel.favorites, id: \.id) { station in
+                let current = currentStation(for: station)
                 HStack {
                     StationRow(
-                        station: station,
+                        station: current,
                         isFavorite: true,
-                        onSelect: { connect(to: station) },
+                        onSelect: current.isRelayOnly ? nil : { connect(to: station) },
                         onFavoriteTap: { viewModel.remove(station) },
-                        selectionHint: "Connect to this station"
+                        selectionHint: current.isRelayOnly ? nil : "Connect to this station"
                     )
                     .disabled(connectingID != nil)
                     if connectingID == station.id { ProgressView().controlSize(.small) }
@@ -93,5 +94,9 @@ struct FavoritesView: View {
             await appState.connect(to: current)
             reconnectError = appState.qsoHub.lastError
         }
+    }
+
+    private func currentStation(for station: Station) -> Station {
+        StationEndpointResolver.resolveStored(station, from: appState.directoryService.stations) ?? station
     }
 }

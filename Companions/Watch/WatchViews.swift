@@ -246,13 +246,24 @@ private struct WatchStationRow: View {
     let station: Station
     let savedStation: Bool
 
+    private var currentStation: Station {
+        StationEndpointResolver.resolveStored(station, from: model.directoryService.stations) ?? station
+    }
+
     var body: some View {
+        stationContent
+    }
+
+    @ViewBuilder
+    private var stationContent: some View {
         Group {
             if model.companionStatus.connected && model.companionStatus.callsign.caseInsensitiveCompare(station.callsign) == .orderedSame {
                 NavigationLink(value: WatchRoute.phoneQSO) { rowLabel }
             } else if let session = model.connectionService.session,
                       session.station.callsign.caseInsensitiveCompare(station.callsign) == .orderedSame {
                 NavigationLink(value: WatchRoute.watchQSO) { rowLabel }
+            } else if currentStation.isRelayOnly {
+                rowLabel
             } else {
                 Button {
                     Task { await model.connect(to: station, savedStation: savedStation) }
@@ -263,18 +274,22 @@ private struct WatchStationRow: View {
             }
         }
         .contextMenu {
-            if model.canUsePhone {
-                Button("Connect on iPhone", systemImage: "iphone") {
-                    Task { await model.connect(to: station, destination: .iPhone, savedStation: savedStation) }
+            if !currentStation.isRelayOnly {
+                if model.canUsePhone {
+                    Button("Connect on iPhone", systemImage: "iphone") {
+                        Task { await model.connect(to: station, destination: .iPhone, savedStation: savedStation) }
+                    }
                 }
-            }
-            if model.isWatchLoggedIn {
-                Button("Connect on Watch", systemImage: "applewatch") {
-                    Task { await model.connect(to: station, destination: .onWatch, savedStation: savedStation) }
+                if model.isWatchLoggedIn {
+                    Button("Connect on Watch", systemImage: "applewatch") {
+                        Task { await model.connect(to: station, destination: .onWatch, savedStation: savedStation) }
+                    }
                 }
             }
         }
-        .accessibilityHint("Connects \(destinationLabel). Long press to choose the other device.")
+        .accessibilityHint(currentStation.isRelayOnly
+            ? ""
+            : "Connects \(destinationLabel). Long press to choose the other device.")
     }
 
     private var rowLabel: some View {
@@ -284,7 +299,8 @@ private struct WatchStationRow: View {
                 Text(destinationLabel).font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            if let destination = model.preferredDestination(for: station) {
+            if !currentStation.isRelayOnly,
+               let destination = model.preferredDestination(for: station) {
                 Image(systemName: destination == .iPhone ? "iphone" : "applewatch")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -293,7 +309,8 @@ private struct WatchStationRow: View {
     }
 
     private var destinationLabel: String {
-        switch model.preferredDestination(for: station) {
+        if currentStation.isRelayOnly { return "Outgoing calls only" }
+        return switch model.preferredDestination(for: station) {
         case .iPhone: "Connect on iPhone"
         case .onWatch: "Connect on Watch"
         case nil: model.isCompanionReachable ? "Sign in to connect" : "iPhone unavailable · sign in on Watch"

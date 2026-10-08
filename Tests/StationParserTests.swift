@@ -4,6 +4,24 @@ import XCTest
 @testable import ReverbQSO
 
 final class StationParserTests: XCTestCase {
+    func testDirectoryRelayMarkerBeforeStatusIdentifiesNonCallableStation() throws {
+        let raw = Data("@@@\n2\nK1ABC\nMobile [r] [ON 12:34]\n123\n192.0.2.1\nK2ABC-R\nHilltop [ON 12:34]\n456\n192.0.2.2\n+++".utf8)
+        let stations = StationParser.parseDirectory(raw: raw)
+        XCTAssertEqual(stations.count, 2)
+        XCTAssertTrue(try XCTUnwrap(stations.first).isRelayOnly)
+        XCTAssertFalse(try XCTUnwrap(stations.last).isRelayOnly)
+    }
+
+    func testSavedStationUsesCurrentRelayEligibilityAndPersistsMarker() throws {
+        let saved = Station(callsign: "K1ABC", ipAddress: "192.0.2.1", nodeNumber: 123)
+        let relay = Station(callsign: "K1ABC", description: "Mobile [R] [ON 12:34]", ipAddress: "192.0.2.2", nodeNumber: 123)
+        let restored = try JSONDecoder().decode(Station.self, from: JSONEncoder().encode(relay))
+        XCTAssertTrue(restored.isRelayOnly)
+        XCTAssertTrue(try XCTUnwrap(StationEndpointResolver.resolveStored(saved, from: [relay])).isRelayOnly)
+        XCTAssertFalse(try XCTUnwrap(StationEndpointResolver.resolveStored(relay, from: [saved])).isRelayOnly)
+        XCTAssertFalse(Station(callsign: "K2ABC-R", description: "Repeater [ON 12:34]", ipAddress: "192.0.2.3").isRelayOnly)
+    }
+
     func testStationTypeDecodesLegacyAndUserRawValues() throws {
         XCTAssertEqual(try JSONDecoder().decode(Station.StationType.self, from: Data("\"L\"".utf8)), .link)
         XCTAssertEqual(try JSONDecoder().decode(Station.StationType.self, from: Data("\"U\"".utf8)), .user)

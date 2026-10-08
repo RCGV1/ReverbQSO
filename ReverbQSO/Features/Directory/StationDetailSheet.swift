@@ -88,7 +88,7 @@ struct StationDetailSheet: View {
                             }
                         }
                         .padding(.horizontal, 24)
-                        if savedCallsigns.count > 1 {
+                        if !station.isRelayOnly, savedCallsigns.count > 1 {
                             Picker("Connect as", selection: $selectedCallsign) {
                                 ForEach(savedCallsigns, id: \.self) { callsign in
                                     Text(callsign).tag(callsign)
@@ -119,25 +119,27 @@ struct StationDetailSheet: View {
                 }
 
                 // Connect button at bottom
-                VStack(spacing: 0) {
-                    Divider()
-                    Button {
-                        onConnect(selectedCallsign.isEmpty ? currentCallsign : selectedCallsign)
-                        dismiss()
-                    } label: {
-                        Label(
-                            station.type == .user ? "Call Operator" : "Connect",
-                            systemImage: "phone.fill"
-                        )
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                if !station.isRelayOnly {
+                    VStack(spacing: 0) {
+                        Divider()
+                        Button {
+                            onConnect(selectedCallsign.isEmpty ? currentCallsign : selectedCallsign)
+                            dismiss()
+                        } label: {
+                            Label(
+                                station.type == .user ? "Call Operator" : "Connect",
+                                systemImage: "phone.fill"
+                            )
+                                .font(.body.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(station.isBusy || !isOnline)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 16)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(station.isBusy || !isOnline)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 16)
                 }
             }
             .navigationTitle(station.type == .user ? "Operator" : "Station")

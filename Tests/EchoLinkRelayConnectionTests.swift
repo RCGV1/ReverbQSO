@@ -6,6 +6,24 @@ import XCTest
 
 @MainActor
 final class EchoLinkRelayConnectionTests: XCTestCase {
+    func testCurrentDirectoryRelayMarkerRejectsSavedStationBeforeTransportSetup() async {
+        var transportLookups = 0
+        let service = EchoLinkConnectionService(networkConfigurationProvider: {
+            transportLookups += 1
+            // Regression failures also stop locally, before opening any sockets.
+            return .init(mode: .automatic, host: "", port: 8100, password: "")
+        })
+        service.callAccessPolicyProvider = { CallAccessPolicy() }
+        let saved = Station(callsign: "K1MOCK", ipAddress: "192.0.2.1", nodeNumber: 123)
+        let current = Station(callsign: "K1MOCK", description: "Mobile [r] [ON 12:34]", ipAddress: "192.0.2.2", nodeNumber: 123)
+        service.resolveStation = { StationEndpointResolver.resolve($0, from: [current]) }
+        await service.connect(to: saved)
+        XCTAssertEqual(transportLookups, 0)
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.reconnectCandidate)
+        XCTAssertEqual(service.error?.localizedDescription, "Connection failed: This station cannot receive calls.")
+    }
+
     func testDirectPeerAdvertisedAudioPortAndControlSourceAreHonored() async throws {
         let peerControl = try BoundUDPSocket(localPort: 0)
         defer { peerControl.close() }

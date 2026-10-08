@@ -62,13 +62,18 @@ struct RecentView: View {
     private var recentsList: some View {
         List {
             ForEach(recentsService.recents) { recent in
-                Button {
-                    reconnect(to: recent.station)
-                } label: {
-                    recentRow(recent)
+                let current = currentStation(for: recent.station)
+                if current.isRelayOnly {
+                    recentRow(recent, showsDisclosure: false)
+                } else {
+                    Button {
+                        reconnect(to: recent.station)
+                    } label: {
+                        recentRow(recent, showsDisclosure: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Reconnect to this station")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Reconnect to this station")
             }
             .onDelete { offsets in
                 recentsService.remove(at: offsets)
@@ -77,7 +82,7 @@ struct RecentView: View {
         .listStyle(.plain)
     }
 
-    private func recentRow(_ recent: RecentConnection) -> some View {
+    private func recentRow(_ recent: RecentConnection, showsDisclosure: Bool) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(recent.station.callsign)
@@ -101,9 +106,11 @@ struct RecentView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -129,6 +136,10 @@ struct RecentView: View {
             await appState.connect(to: current)
             reconnectError = appState.qsoHub.lastError
         }
+    }
+
+    private func currentStation(for station: Station) -> Station {
+        StationEndpointResolver.resolveStored(station, from: appState.directoryService.stations) ?? station
     }
 
     private func formattedDuration(_ duration: TimeInterval) -> String {

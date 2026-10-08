@@ -5,6 +5,19 @@ import XCTest
 
 @MainActor
 final class LocalDemoConnectionTests: XCTestCase {
+    func testRelayOnlyStationRejectedBeforeSessionOrPlayback() async {
+        var playbackCount = 0
+        let service = makeService(localDemoPlayback: { _ in playbackCount += 1 })
+        service.enableLocalDemo(callsign: "DEMO")
+        var station = LocalDemoAccount.stations[0]
+        station.description = "Mobile [r] [ON 12:34]"
+        await service.connect(to: station)
+        XCTAssertNil(service.session)
+        XCTAssertEqual(service.error?.localizedDescription, "Connection failed: This station cannot receive calls.")
+        XCTAssertEqual(playbackCount, 0)
+        await service.disconnect()
+    }
+
     func testOutgoingRestrictionStopsBeforeCreatingDemoSession() async {
         let service = makeService(localDemoPlayback: { _ in })
         service.enableLocalDemo(callsign: "DEMO")

@@ -1159,7 +1159,7 @@ struct QSOView: View {
             Text("73 de \(viewModel.localCallsign)")
                 .font(.system(.title3, design: .monospaced, weight: .medium))
                 .foregroundStyle(.secondary)
-            if let candidate = viewModel.reconnectCandidate {
+            if let candidate = viewModel.reconnectCandidate, !candidate.isRelayOnly {
                 Button {
                     Task { await viewModel.reconnect() }
                 } label: {

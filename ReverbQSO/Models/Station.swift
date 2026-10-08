@@ -14,6 +14,11 @@ struct Station: Identifiable, Codable, Hashable {
     /// EchoLink node number (from the directory listing).
     var nodeNumber: Int
 
+    /// The directory's [r] marker denotes a station that can make calls but cannot receive them.
+    var isRelayOnly: Bool {
+        description.range(of: "[r]", options: .caseInsensitive) != nil
+    }
+
     enum StationType: String, Codable, CaseIterable {
         case user       = "U"
         case link       = "L"

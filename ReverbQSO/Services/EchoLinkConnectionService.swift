@@ -1121,6 +1121,10 @@ final class EchoLinkConnectionService: ObservableObject {
     private func performConnect(to station: Station, preservingEndpoint: Bool) async {
         guard !Task.isCancelled else { return }
         let resolvedStation = (isLocalDemoMode || preservingEndpoint) ? station : (resolveStation?(station) ?? station)
+        guard !resolvedStation.isRelayOnly else {
+            error = ConnectionError.connectionFailed("This station cannot receive calls.")
+            return
+        }
         let accessPolicy = callAccessPolicyProvider?() ?? CallAccessPolicyStore.load(demo: isLocalDemoMode)
         if let reason = accessPolicy.rejection(for: resolvedStation, direction: .outgoing, countryCode: resolvedStation.callSignCountryCode) {
             error = ConnectionError.connectionFailed(reason)

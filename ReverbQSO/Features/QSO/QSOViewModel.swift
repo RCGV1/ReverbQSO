@@ -104,7 +104,7 @@ final class QSOViewModel: ObservableObject {
     }
 
     var canReconnect: Bool {
-        reconnectCandidate != nil
+        reconnectCandidate != nil && reconnectCandidate?.isRelayOnly != true
             && (session == nil || session?.state == .disconnected)
             && !isReconnecting
     }

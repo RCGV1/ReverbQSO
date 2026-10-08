@@ -383,6 +383,13 @@ final class AppState: ObservableObject {
     ) async {
         guard !Task.isCancelled else { return }
         let callsign = requestedCallsign ?? currentUser
+        let currentStation = preservingEndpoint ? station : StationEndpointResolver.resolve(
+            station, from: (accountDirectories[callsign] ?? directoryService).stations
+        )
+        guard !currentStation.isRelayOnly else {
+            qsoHub.lastError = "This station cannot receive calls."
+            return
+        }
         if isDemoMode {
             guard isLoggedIn, savedAccounts.contains(callsign),
                   let localStation = StationEndpointResolver.resolveStored(station, from: LocalDemoAccount.stations) else {

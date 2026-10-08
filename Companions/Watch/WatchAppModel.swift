@@ -435,6 +435,11 @@ final class WatchAppModel: NSObject, ObservableObject {
 
     func connect(to station: Station, destination: WatchControlMode? = nil, savedStation: Bool = false) async {
         connectionError = nil
+        let currentStation = StationEndpointResolver.resolve(station, from: directoryService.stations)
+        guard !currentStation.isRelayOnly else {
+            connectionError = "This station cannot receive calls."
+            return
+        }
         guard let destination = destination ?? preferredDestination(for: station) else {
             connectionError = "Sign in on the Watch or open the paired iPhone app."
             return
