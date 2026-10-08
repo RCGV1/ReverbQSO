@@ -78,6 +78,7 @@ struct DirectoryView: View {
                 let currentStation = liveStation ?? station
                 StationDetailSheet(
                     station: currentStation,
+                    directoryService: appState.directoryService,
                     isOnline: liveStation != nil,
                     isFavorite: favoritesVM.isFavorite(currentStation),
                     currentCallsign: appState.currentUser,
@@ -91,6 +92,7 @@ struct DirectoryView: View {
                         connectToStation(latestStation, as: callsign)
                     }
                 )
+                .environmentObject(appState)
             }
             .sheet(item: $callCQService) { service in
                 CallCQView(service: service) { station in

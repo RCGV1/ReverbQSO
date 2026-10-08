@@ -77,6 +77,7 @@ final class EchoLinkDirectoryService: ObservableObject {
     // Count intent, including a no-op ONLINE request by a newly started listener.
     private(set) var availabilityRevision: UInt64 = 0
     @Published private(set) var lastSuccessfulSnapshotAt: Date?
+    private var observationTracker = StationDirectoryObservationTracker()
     @Published var error: Error?
 
     // MARK: - Filter
@@ -142,14 +143,17 @@ final class EchoLinkDirectoryService: ObservableObject {
         self.proxySessionStore = proxySessionStore
         if self.localDemoAccount != nil {
             isLoggedIn = true
-            stations = LocalDemoAccount.stations
-            lastSuccessfulSnapshotAt = .now
+            publishSnapshot(LocalDemoAccount.stations)
             effectiveTransport = LocalDemoAccount.transport
             applyFilter()
         }
     }
 
     // MARK: - Public API
+
+    func observation(for station: Station) -> StationDirectoryObservation? {
+        observationTracker.observation(for: station)
+    }
 
     func advertiseRelay(address: String) async throws {
         guard isLoggedIn else { throw DirectoryClientError.notConnected }
@@ -301,8 +305,7 @@ final class EchoLinkDirectoryService: ObservableObject {
             }
 
             authenticatedCallsign = cs.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            stations = initialStations
-            lastSuccessfulSnapshotAt = .now
+            publishSnapshot(initialStations)
             applyFilter()
             if !saveCredentials(cs, pw, persistAsActive) {
                 logger.warning("Directory login succeeded but credential storage failed")
@@ -348,8 +351,7 @@ final class EchoLinkDirectoryService: ObservableObject {
             guard !Task.isCancelled,
                   lifecycleGeneration.matches(lifecycle), refreshGeneration.matches(refresh) else { return false }
 
-            stations = refreshedStations
-            lastSuccessfulSnapshotAt = .now
+            publishSnapshot(refreshedStations)
             logger.debug("Refresh fetched stationCount=\(refreshedStations.count)")
             applyFilter()
             return true
@@ -786,6 +788,13 @@ final class EchoLinkDirectoryService: ObservableObject {
         error = terminalError
     }
 
+    private func publishSnapshot(_ snapshot: [Station]) {
+        let observedAt = Date.now
+        observationTracker.record(snapshot, at: observedAt)
+        stations = snapshot
+        lastSuccessfulSnapshotAt = observedAt
+    }
+
     private func clearPublishedLoginState() {
         unansweredProxySession = nil
         unansweredProxyConfigurations = []
@@ -795,6 +804,7 @@ final class EchoLinkDirectoryService: ObservableObject {
         isLoggedIn = false
         isAvailableForCalls = false
         registeredThroughProxy = false
+        observationTracker.reset()
         lastSuccessfulSnapshotAt = nil
         stations = []
         filteredStations = []

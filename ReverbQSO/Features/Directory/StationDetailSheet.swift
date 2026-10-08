@@ -6,6 +6,7 @@ import SwiftUI
 struct StationDetailSheet: View {
 
     let station: Station
+    @ObservedObject var directoryService: EchoLinkDirectoryService
     let isOnline: Bool
     let isFavorite: Bool
     let currentCallsign: String
@@ -14,8 +15,13 @@ struct StationDetailSheet: View {
     var onConnect: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
     @State private var selectedCallsign = ""
     @State private var favoriteState = false
+    @State private var report: StationRFReport?
+    @State private var isLoadingReport = false
+    @State private var reportFailed = false
+    @State private var reportLoadGeneration = UUID()
 
     var body: some View {
         NavigationStack {
@@ -70,6 +76,12 @@ struct StationDetailSheet: View {
 
                             if !station.description.isEmpty {
                                 infoRow(icon: "text.quote", label: "Description", value: station.description)
+                            }
+
+                            directoryDetails
+
+                            if station.type == .link || station.type == .repeater {
+                                stationReport
                             }
 
                             if station.isBusy {
@@ -151,6 +163,9 @@ struct StationDetailSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .task(id: reportTaskID) {
+            await loadStationReport()
+        }
         .onAppear {
             selectedCallsign = currentCallsign
             favoriteState = isFavorite
@@ -158,6 +173,151 @@ struct StationDetailSheet: View {
     }
 
     // MARK: - Subviews
+
+    private var directoryDetails: some View {
+        let observation = directoryService.observation(for: station)
+        let listed = observation != nil || isOnline
+        let lastObserved = observation?.lastSeenAt
+            ?? (isOnline ? directoryService.lastSuccessfulSnapshotAt : nil)
+
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "list.bullet")
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Directory")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(listed ? "Listed" : "Not currently listed")
+                    .font(.subheadline)
+                if listed {
+                    Text(lastObserved.map { "Last observed \(relativeDate($0))" } ?? "Update time unavailable")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let observation, observation.consecutiveSnapshots > 1 {
+                    Text("Seen in \(observation.consecutiveSnapshots) updates")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var stationReport: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Station report")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isLoadingReport {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading report…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if reportFailed {
+                Text("Report unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else if let report {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(report.status)
+                        .font(.subheadline.weight(.medium))
+                    HStack(spacing: 4) {
+                        Text("Updated \(relativeDate(report.updatedAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityValue(report.updatedAt.formatted(date: .complete, time: .shortened))
+                    }
+                    if !report.comment.isEmpty {
+                        Text(report.comment)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            } else {
+                Text("No report available")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Station reports do not confirm call availability.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var reportTaskID: String {
+        "\(station.callsign.uppercased())-\(station.nodeNumber)"
+    }
+
+    @MainActor
+    private func loadStationReport() async {
+        guard station.type == .link || station.type == .repeater else { return }
+
+        let generation = UUID()
+        reportLoadGeneration = generation
+        report = nil
+        reportFailed = false
+        isLoadingReport = true
+        defer {
+            if reportLoadGeneration == generation {
+                isLoadingReport = false
+            }
+        }
+
+        if isOfflineDemo {
+            // Keep simulator demos deterministic and offline. Only the demo repeater
+            // has a local report; other demo stations exercise the empty state.
+            if station.type == .repeater {
+                report = StationRFReport(
+                    callsign: station.callsign,
+                    nodeNumber: station.nodeNumber,
+                    updatedAt: Date.now.addingTimeInterval(-120),
+                    status: "Operational",
+                    comment: "Demo repeater report"
+                )
+            }
+            return
+        }
+
+        do {
+            let fetched = try await StationRFReportClient.shared.report(for: station)
+            guard !Task.isCancelled, reportLoadGeneration == generation else { return }
+            report = fetched
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, reportLoadGeneration == generation else { return }
+            reportFailed = true
+        }
+    }
+
+    private func relativeDate(_ date: Date) -> String {
+        let clampedDate = min(date, .now)
+        return clampedDate.formatted(.relative(presentation: .named))
+    }
+
+    private var isOfflineDemo: Bool {
+        if appState.isDemoMode { return true }
+#if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
+        return SimulatorDemoData.isEnabled
+#else
+        return false
+#endif
+    }
 
     private var typeBadge: some View {
         Text(station.type.displayName)

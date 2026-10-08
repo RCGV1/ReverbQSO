@@ -1,6 +1,6 @@
 # ReverbQSO Privacy Policy
 
-Effective date: October 6, 2026
+Effective date: October 7, 2026
 
 ReverbQSO is an independently developed amateur-radio client for iPhone, iPad, Mac, and Apple Watch. It connects to the EchoLink service and stations you choose. It is not operated by Synergenics, LLC, the provider of EchoLink. This policy describes ReverbQSO's current behavior, including its companion apps.
 
@@ -15,6 +15,7 @@ Privacy contact: **benjaminfaer@gmail.com**. Please do not send passwords, licen
 | Microphone audio, transmitted tones, and text messages | Sent to the station or conference you connect to. Other participants can hear/read them. A relay or proxy you use handles the connection traffic. |
 | IP address, connection metadata, and station availability | Used by EchoLink, stations, and relay/proxy operators to route and maintain connections. A network service can observe the address from which you contact it. |
 | Station directory and participant information | Retrieved to browse stations, apply filters, and show who is in a QSO. Country/region labels are inferred from callsigns and station information; they are not a measurement of your device's location. |
+| Public station status reports | Opening details for a repeater or link retrieves its station-reported RF status and update time from EchoLink's public website over HTTPS. This lookup sends no account credentials; EchoLink can observe the requesting IP address. Reports are cached in memory for five minutes. Directory observations and RF reports indicate recent listings or reports, not proof that a station can accept a call. |
 | Optional support or deletion requests | The information you choose to send goes to the recipient shown in the app or form. Requests about an EchoLink account go to EchoLink support, not the ReverbQSO maintainer. |
 
 The app does not require a separate ReverbQSO cloud account. The maintainer does not operate a server that receives your normal QSO audio, messages, or passwords. ReverbQSO has no advertising, advertising identifier collection, behavioral tracking, or automatic analytics/crash-report upload to the maintainer.

@@ -133,12 +133,14 @@ final class DirectorySearchTests: XCTestCase {
         let firstSucceeded = await first.value
         XCTAssertFalse(firstSucceeded)
         XCTAssertEqual(service.stations[0].ipAddress, "192.0.2.10")
+        XCTAssertNil(service.observation(for: service.stations[0]))
         XCTAssertNil(service.error)
 
         pending[1].resume(returning: [Station(callsign: "K1ABC-R", ipAddress: "203.0.113.30", nodeNumber: 12345)])
         let secondSucceeded = await second.value
         XCTAssertTrue(secondSucceeded)
         XCTAssertEqual(service.stations[0].ipAddress, "203.0.113.30")
+        XCTAssertEqual(service.observation(for: service.stations[0])?.consecutiveSnapshots, 1)
     }
 
     func testViewModelRefreshesExistingDirectorySnapshotOnFirstAppearance() async {
