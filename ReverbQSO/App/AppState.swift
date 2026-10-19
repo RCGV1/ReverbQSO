@@ -2,13 +2,18 @@
 
 import Foundation
 import SwiftUI
-#if os(iOS) && !targetEnvironment(macCatalyst)
+#if os(iOS)
 import UIKit
 #endif
 
 /// Central application state shared across the app via the environment.
 @MainActor
 final class AppState: ObservableObject {
+
+    typealias DirectoryLoginOperation = @MainActor (
+        EchoLinkDirectoryService, String, String, Bool
+    ) async -> Void
+    typealias SavedAccountActivator = @MainActor (String) -> Bool
 
     // MARK: - Published State
 
@@ -19,7 +24,7 @@ final class AppState: ObservableObject {
     @Published var currentUser: String = ""
     @Published var loginError: String?
     @Published private(set) var isDemoMode = false
-    @Published private(set) var savedAccounts: [String] = KeychainService.savedCallsigns()
+    @Published private(set) var savedAccounts: [String]
 
     // MARK: - Services
 
@@ -30,12 +35,19 @@ final class AppState: ObservableObject {
     let recentConnectionsService = RecentConnectionsService()
     let conferenceHostService = EchoLinkConferenceHostService()
     private var isApplicationActive = false
-    private var isAuthenticating = false
+    private(set) var isAuthenticating = false
     private var isSigningOut = false
     private var accountDirectories: [String: EchoLinkDirectoryService] = [:]
+    private var accountOperationGenerations: [String: UInt64] = [:]
     private var autoLoginTask: Task<Void, Never>?
     private var authenticationGeneration: UInt64 = 0
     private let sessionDefaults: UserDefaults
+    private let directoryLoginOperation: DirectoryLoginOperation
+    private let savedAccountActivator: SavedAccountActivator
+    private let savedAccountCallsigns: @MainActor () -> [String]
+    private let savedAccountPassword: @MainActor (String) -> String?
+    private let savedAccountRemoval: @MainActor (String) -> Void
+    private let directoryFactory: @MainActor () -> EchoLinkDirectoryService
     static let explicitlySignedOutKey = "account.explicitlySignedOut"
 #if targetEnvironment(macCatalyst)
     private var macMenuBarBridge: MacMenuBarBridge?
@@ -48,8 +60,32 @@ final class AppState: ObservableObject {
 
     // MARK: - Initialization
 
-    init(sessionDefaults: UserDefaults = .standard) {
+    init(
+        sessionDefaults: UserDefaults = .standard,
+        directoryLoginOperation: @escaping DirectoryLoginOperation = { directory, callsign, password, persistAsActive in
+            await directory.login(
+                callsign: callsign,
+                password: password,
+                persistAsActive: persistAsActive
+            )
+        },
+        savedAccountActivator: @escaping SavedAccountActivator = { KeychainService.activate(callsign: $0) },
+        savedAccountCallsigns: @escaping @MainActor () -> [String] = { KeychainService.savedCallsigns() },
+        savedAccountPassword: @escaping @MainActor (String) -> String? = { KeychainService.loadPassword(for: $0) },
+        savedAccountRemoval: @escaping @MainActor (String) -> Void = { KeychainService.remove(callsign: $0) },
+        directoryFactory: @escaping @MainActor () -> EchoLinkDirectoryService = { EchoLinkDirectoryService() },
+        qsoConnectOperation: @escaping @MainActor (EchoLinkConnectionService, Station) async -> Void = { service, station in
+            await service.connect(to: station)
+        }
+    ) {
         self.sessionDefaults = sessionDefaults
+        self.directoryLoginOperation = directoryLoginOperation
+        self.savedAccountActivator = savedAccountActivator
+        self.savedAccountCallsigns = savedAccountCallsigns
+        self.savedAccountPassword = savedAccountPassword
+        self.savedAccountRemoval = savedAccountRemoval
+        self.directoryFactory = directoryFactory
+        self.savedAccounts = savedAccountCallsigns()
         let proxySessionStore = EchoLinkProxySessionStore()
 #if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
         if SimulatorDemoData.isEnabled {
@@ -57,7 +93,7 @@ final class AppState: ObservableObject {
                 SimulatorDemoData.stations
             })
             connectionService = EchoLinkConnectionService()
-            qsoHub = QSOHub(primary: connectionService)
+            qsoHub = QSOHub(primary: connectionService, connectOperation: qsoConnectOperation)
             directoryService.stations = SimulatorDemoData.stations
             directoryService.isLoggedIn = true
             currentUser = SimulatorDemoData.callsign
@@ -74,6 +110,16 @@ final class AppState: ObservableObject {
                 connectionService.activeNodeParticipants = SimulatorDemoData.participants
             }
             favoritesViewModel.add(SimulatorDemoData.stations[1])
+            #if targetEnvironment(macCatalyst)
+            if SimulatorDemoData.isStoreScreenshot {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(3))
+                    let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+                    scene?.sizeRestrictions?.minimumSize = CGSize(width: 1280, height: 800)
+                    scene?.sizeRestrictions?.maximumSize = CGSize(width: 1280, height: 800)
+                }
+            }
+            #endif
             #if !targetEnvironment(macCatalyst)
             watchPhoneBridge = WatchPhoneBridge(connectionService: connectionService, appState: self, demoCredentials: true)
             if SimulatorDemoData.startsInQSO && ProcessInfo.processInfo.arguments.contains("--simulator-demo-multiple-qso") {
@@ -94,7 +140,9 @@ final class AppState: ObservableObject {
                 recentConnectionsService.record(station: SimulatorDemoData.stations[3], duration: 94)
             }
             #if targetEnvironment(macCatalyst)
-            macMenuBarBridge = MacMenuBarBridge(qsoHub: qsoHub, conferenceHost: conferenceHostService)
+            if !SimulatorDemoData.isStoreScreenshot {
+                macMenuBarBridge = MacMenuBarBridge(qsoHub: qsoHub, conferenceHost: conferenceHostService)
+            }
             macMessageNotifier = MacMessageNotifier(qsoHub: qsoHub, conferenceHost: conferenceHostService)
             #endif
             return
@@ -102,7 +150,7 @@ final class AppState: ObservableObject {
 #endif
         directoryService = EchoLinkDirectoryService(proxySessionStore: proxySessionStore)
         connectionService = EchoLinkConnectionService()
-        qsoHub = QSOHub(primary: connectionService)
+        qsoHub = QSOHub(primary: connectionService, connectOperation: qsoConnectOperation)
         qsoHub.effectiveTransportProvider = { [weak self] account in
             guard let self else { return nil }
             if self.isDemoMode { return LocalDemoAccount.transport }
@@ -256,6 +304,7 @@ final class AppState: ObservableObject {
     // MARK: - Authentication Actions
 
     func login(callsign: String, password: String) async {
+        guard !isSigningOut else { return }
         let normalized = LocalDemoAccount.normalizedUsername(callsign)
         if LocalDemoAccount.isDemoUsername(normalized) {
             guard password == LocalDemoAccount.password else {
@@ -287,29 +336,39 @@ final class AppState: ObservableObject {
         }
 #endif
         isAuthenticating = true
-        defer { isAuthenticating = false }
         autoLoginTask?.cancel()
         autoLoginTask = nil
         isAutoLoggingIn = false
         authenticationGeneration &+= 1
         let generation = authenticationGeneration
+        defer {
+            if authenticationGeneration == generation {
+                isAuthenticating = false
+            }
+        }
         loginError = nil
         directoryRecoveryError = nil
         let target = accountDirectories[normalized]
-            ?? (currentUser == normalized || !isLoggedIn ? directoryService : EchoLinkDirectoryService())
-        await target.login(callsign: normalized, password: password)
-        guard authenticationGeneration == generation, !isDemoMode else { return }
+            ?? (currentUser == normalized || !isLoggedIn ? directoryService : directoryFactory())
+        let accountGeneration = accountOperationGenerations[normalized, default: 0]
+        accountDirectories[normalized] = target
+        await directoryLoginOperation(target, normalized, password, false)
+        guard authenticationGeneration == generation, !isDemoMode,
+              accountOperationGenerations[normalized, default: 0] == accountGeneration else { return }
 
         if target.isLoggedIn {
             if currentUser != normalized
                 && (conferenceHostService.isPersonalMode || conferenceHostService.isStarting) {
                 await conferenceHostService.stop()
             }
+            guard authenticationGeneration == generation, !isDemoMode,
+                  accountOperationGenerations[normalized, default: 0] == accountGeneration else { return }
+            _ = savedAccountActivator(normalized)
             directoryService.stopForegroundRefreshing()
             accountDirectories[normalized] = target
             directoryService = target
             currentUser = normalized
-            savedAccounts = KeychainService.savedCallsigns()
+            savedAccounts = savedAccountCallsigns()
             isLoggedIn = true
             sessionDefaults.set(false, forKey: Self.explicitlySignedOutKey)
             if connectionService.session == nil {
@@ -341,7 +400,7 @@ final class AppState: ObservableObject {
         }
 #endif
         guard callsign != currentUser,
-              let password = KeychainService.loadPassword(for: callsign) else { return }
+              let password = savedAccountPassword(callsign) else { return }
         await login(callsign: callsign, password: password)
     }
 
@@ -350,6 +409,7 @@ final class AppState: ObservableObject {
         as requestedCallsign: String? = nil,
         preservingEndpoint: Bool = false
     ) async {
+        guard !isSigningOut else { return }
 #if os(iOS) && !targetEnvironment(macCatalyst)
         // Hold finite execution time through directory sign-in and the peer handshake.
         // The audio background mode only takes over once receive playback starts.
@@ -381,13 +441,18 @@ final class AppState: ObservableObject {
         as requestedCallsign: String?,
         preservingEndpoint: Bool
     ) async {
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, !isSigningOut else { return }
         let callsign = requestedCallsign ?? currentUser
+        let accountGeneration = accountOperationGenerations[callsign, default: 0]
         let currentStation = preservingEndpoint ? station : StationEndpointResolver.resolve(
             station, from: (accountDirectories[callsign] ?? directoryService).stations
         )
         guard !currentStation.isRelayOnly else {
             qsoHub.lastError = "This station cannot receive calls."
+            return
+        }
+        if currentStation.isConnectionLimitReached {
+            qsoHub.lastError = currentStation.connectionUnavailableReason
             return
         }
         if isDemoMode {
@@ -411,12 +476,13 @@ final class AppState: ObservableObject {
         if conferenceHostService.isPersonalMode || conferenceHostService.isStarting {
             await conferenceHostService.stop()
         }
-        guard savedAccounts.contains(callsign) || callsign == currentUser else {
+        guard isLoggedIn, accountOperationGenerations[callsign, default: 0] == accountGeneration,
+              savedAccounts.contains(callsign) || callsign == currentUser else {
             qsoHub.lastError = "Add \(callsign) in Settings before connecting."
             return
         }
         if accountDirectories[callsign]?.isLoggedIn != true {
-            guard let password = KeychainService.loadPassword(for: callsign) else {
+            guard let password = savedAccountPassword(callsign) else {
                 qsoHub.lastError = "Sign in to \(callsign) again in Settings."
                 return
             }
@@ -431,9 +497,12 @@ final class AppState: ObservableObject {
                 isAuthenticating = true
             }
             defer { if isPrimary { isAuthenticating = false } }
-            let directory = accountDirectories[callsign] ?? (isPrimary ? directoryService : EchoLinkDirectoryService())
-            await directory.login(callsign: callsign, password: password, persistAsActive: callsign == currentUser)
-            guard !Task.isCancelled else { return }
+            let directory = accountDirectories[callsign] ?? (isPrimary ? directoryService : directoryFactory())
+            accountDirectories[callsign] = directory
+            await directoryLoginOperation(directory, callsign, password, callsign == currentUser)
+            guard !Task.isCancelled, isLoggedIn,
+                  accountOperationGenerations[callsign, default: 0] == accountGeneration,
+                  savedAccounts.contains(callsign) || callsign == currentUser else { return }
             guard directory.isLoggedIn else {
                 qsoHub.lastError = directory.error?.localizedDescription ?? "Could not sign in as \(callsign)."
                 return
@@ -441,7 +510,9 @@ final class AppState: ObservableObject {
             accountDirectories[callsign] = directory
             if isPrimary { startDirectoryRefreshIfEligible() }
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, isLoggedIn,
+              accountOperationGenerations[callsign, default: 0] == accountGeneration,
+              savedAccounts.contains(callsign) || callsign == currentUser else { return }
         qsoHub.lastError = nil
         _ = await qsoHub.connect(to: station, as: callsign, preservingEndpoint: preservingEndpoint)
     }
@@ -524,23 +595,25 @@ final class AppState: ObservableObject {
             return
         }
 #endif
+        savedAccounts.removeAll { $0 == callsign }
         if callsign == currentUser {
             let removedCallsign = currentUser
             await logout()
-            KeychainService.remove(callsign: removedCallsign)
-            savedAccounts = KeychainService.savedCallsigns()
-            if let next = savedAccounts.first {
+            savedAccountRemoval(removedCallsign)
+            savedAccounts = savedAccountCallsigns()
+            if !isLoggedIn, let next = savedAccounts.first {
                 await switchAccount(to: next)
             }
             return
         }
-        await qsoHub.disconnect(callsign: callsign)
+        accountOperationGenerations[callsign, default: 0] &+= 1
         if let directory = accountDirectories.removeValue(forKey: callsign) {
             await directory.logout()
             await directory.closeProxySession()
         }
-        KeychainService.remove(callsign: callsign)
-        savedAccounts = KeychainService.savedCallsigns()
+        await qsoHub.disconnect(callsign: callsign)
+        savedAccountRemoval(callsign)
+        savedAccounts = savedAccountCallsigns()
     }
 
     func logout() async {
@@ -551,8 +624,9 @@ final class AppState: ObservableObject {
         autoLoginTask?.cancel()
         autoLoginTask = nil
         isAutoLoggingIn = false
-        await conferenceHostService.stop()
+        isAuthenticating = false
         if isDemoMode {
+            await conferenceHostService.stop()
             await qsoHub.disconnectAll()
             await connectionService.disconnect()
             _ = connectionService.disableLocalDemo()
@@ -564,7 +638,7 @@ final class AppState: ObservableObject {
             isDemoMode = false
             favoritesViewModel.setDemoMode(false)
             recentConnectionsService.setDemoMode(false)
-            savedAccounts = KeychainService.savedCallsigns()
+            savedAccounts = savedAccountCallsigns()
             currentUser = ""
             isLoggedIn = false
             isAutoLoggingIn = false
@@ -573,6 +647,7 @@ final class AppState: ObservableObject {
         }
 #if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
         if SimulatorDemoData.isEnabled {
+            await conferenceHostService.stop()
             await connectionService.disconnect()
             isLoggedIn = false
             directoryService.isLoggedIn = false
@@ -580,22 +655,57 @@ final class AppState: ObservableObject {
         }
 #endif
         let oldCallsign = currentUser
-        sessionDefaults.set(true, forKey: Self.explicitlySignedOutKey)
-        directoryService.stopForegroundRefreshing()
-        await directoryService.logout()
-        await qsoHub.disconnect(callsign: currentUser)
+        let oldDirectory = directoryService
+        let remainingAccounts = savedAccounts.filter { callsign in
+            callsign != oldCallsign && accountDirectories[callsign] != nil
+                && (accountDirectories[callsign]?.isLoggedIn == true
+                    || qsoHub.entries.contains(where: { $0.callsign == callsign }))
+        }
+        let focusedAccount = qsoHub.entries.first { $0.id == qsoHub.activeID }?.callsign
+        let replacement = focusedAccount.flatMap { remainingAccounts.contains($0) ? $0 : nil }
+            ?? qsoHub.entries.first { remainingAccounts.contains($0.callsign) }?.callsign
+            ?? remainingAccounts.first
+        var directoriesToLogout = [oldDirectory]
+        let invalidatedAccounts: Set<String>
+        if replacement == nil {
+            invalidatedAccounts = Set(savedAccounts + Array(accountDirectories.keys) + [oldCallsign])
+            for directory in accountDirectories.values where !directoriesToLogout.contains(where: { $0 === directory }) {
+                directoriesToLogout.append(directory)
+            }
+        } else {
+            invalidatedAccounts = [oldCallsign]
+        }
+        for callsign in invalidatedAccounts {
+            accountOperationGenerations[callsign, default: 0] &+= 1
+            accountDirectories.removeValue(forKey: callsign)
+        }
+        sessionDefaults.set(replacement == nil, forKey: Self.explicitlySignedOutKey)
+        oldDirectory.stopForegroundRefreshing()
+        if let replacement, let directory = accountDirectories[replacement] {
+            directoryService = directory
+            currentUser = replacement
+            isLoggedIn = true
+            _ = savedAccountActivator(replacement)
+        }
+        for directory in directoriesToLogout {
+            await directory.logout()
+            await directory.closeProxySession()
+        }
+        await conferenceHostService.stop()
+        await qsoHub.disconnect(callsign: oldCallsign)
         if connectionService.authenticatedCallsign == oldCallsign {
             await connectionService.disconnect()
         }
-        await directoryService.closeProxySession()
-        accountDirectories.removeValue(forKey: oldCallsign)
         if connectionService.authenticatedCallsign == oldCallsign {
             connectionService.authenticatedCallsign = nil
         }
-        savedAccounts = KeychainService.savedCallsigns()
-        isLoggedIn = false
-        currentUser = ""
+        savedAccounts = savedAccountCallsigns()
+        if replacement == nil {
+            isLoggedIn = false
+            currentUser = ""
+        }
         loginError = nil
+        startDirectoryRefreshIfEligible()
     }
 
     func setApplicationActive(_ active: Bool) {
@@ -705,7 +815,7 @@ final class AppState: ObservableObject {
               !sessionDefaults.bool(forKey: Self.explicitlySignedOutKey) else { return }
         let callsign = currentUser.isEmpty ? KeychainService.loadCallsign() : currentUser
         guard let callsign, !callsign.isEmpty,
-              let password = KeychainService.loadPassword(for: callsign), !password.isEmpty else { return }
+              let password = savedAccountPassword(callsign), !password.isEmpty else { return }
         restoreSavedAccount(callsign: callsign, password: password)
     }
 
@@ -777,6 +887,7 @@ final class AppState: ObservableObject {
 /// EchoLink endpoints are used in this mode.
 enum SimulatorDemoData {
     static let isEnabled = ProcessInfo.processInfo.arguments.contains("--simulator-demo")
+    static let isStoreScreenshot = ProcessInfo.processInfo.arguments.contains("--store-screenshots")
     static let isRemoteTalking = ProcessInfo.processInfo.arguments.contains("--simulator-demo-rx")
     static let screen = ProcessInfo.processInfo.arguments
         .first { $0.hasPrefix("--simulator-demo-screen=") }
@@ -786,7 +897,24 @@ enum SimulatorDemoData {
     static let callsign = "N0DEMO"
     static let password = "demo"
 
-    static let stations: [Station] = [
+    static let stations: [Station] = {
+        if isStoreScreenshot {
+            return [
+                Station(callsign: "*WESTCOAST*", description: "West Coast evening net [6/100]", ipAddress: "192.0.2.1", type: .conference, nodeNumber: 900001),
+                Station(callsign: "W6DEMO-R", description: "Santa Cruz, California [3/20]", ipAddress: "192.0.2.2", type: .repeater, nodeNumber: 900002),
+                Station(callsign: "K6DEMO-L", description: "Monterey Bay portable link", ipAddress: "192.0.2.3", type: .link, nodeNumber: 900003),
+                Station(callsign: "K6DEMO", description: "Alex · Santa Cruz, California", ipAddress: "192.0.2.4", type: .user, nodeNumber: 900004),
+                Station(callsign: "*PACIFIC*", description: "Pacific amateur radio conference [12/200]", ipAddress: "192.0.2.5", type: .conference, nodeNumber: 900005),
+                Station(callsign: "W7DEMO-R", description: "Portland, Oregon [4/20]", ipAddress: "192.0.2.6", type: .repeater, nodeNumber: 900006),
+                Station(callsign: "VE3DEMO-R", description: "Toronto, Ontario [2/10]", ipAddress: "192.0.2.7", type: .repeater, nodeNumber: 900007),
+                Station(callsign: "M0DEMO-L", description: "Bristol, United Kingdom", ipAddress: "192.0.2.8", type: .link, nodeNumber: 900008),
+                Station(callsign: "VK2DEMO-R", description: "Sydney, Australia [5/30]", ipAddress: "192.0.2.9", type: .repeater, nodeNumber: 900009),
+                Station(callsign: "ZL1DEMO-R", description: "Auckland, New Zealand [2/20]", ipAddress: "192.0.2.10", type: .repeater, nodeNumber: 900010),
+                Station(callsign: "W7DEMO", description: "Morgan · Portland, Oregon", ipAddress: "192.0.2.11", type: .user, nodeNumber: 900011),
+                Station(callsign: "VE3DEMO", description: "Sam · Toronto, Ontario", ipAddress: "192.0.2.12", type: .user, nodeNumber: 900012)
+            ]
+        }
+        return [
         Station(callsign: "*DEMO*", description: "Regional conference · evening net and announcements", ipAddress: "192.0.2.1", type: .conference, nodeNumber: 900001),
         Station(callsign: "N0DEMO-R", description: "Hilltop repeater with a long description to test narrow rows", ipAddress: "192.0.2.2", type: .repeater, nodeNumber: 900002),
         Station(callsign: "N0TEST-L", description: "Portable link", ipAddress: "192.0.2.3", type: .link, nodeNumber: 900003),
@@ -800,18 +928,52 @@ enum SimulatorDemoData {
             isBusy: index.isMultiple(of: 7),
             nodeNumber: 900000 + index
         )
-    }
+        }
+    }()
 
-    static let participants: [ActiveNodeParticipant] = (1...80).map { index in
+    static let participants: [ActiveNodeParticipant] = {
+        if isStoreScreenshot {
+            return [
+                ("K6DEMO", "Alex · Santa Cruz, CA"),
+                ("W7DEMO", "Morgan · Portland, OR"),
+                ("VE3DEMO", "Sam · Toronto, ON"),
+                ("M0DEMO", "Jamie · Bristol, UK"),
+                ("VK2DEMO", "Taylor · Sydney, Australia"),
+                (callsign, "California")
+            ].map { call, name in
+                ActiveNodeParticipant(callsign: call, displayName: name,
+                                      isTransmitting: call == "K6DEMO" && isRemoteTalking,
+                                      lastActivity: Date())
+            }
+        }
+        return (1...80).map { index in
         ActiveNodeParticipant(
             callsign: String(format: "N0USER%02d", index),
             displayName: index.isMultiple(of: 5) ? "N0USER\(index) · mobile operator with a longer name" : nil,
             isTransmitting: index == 1 && isRemoteTalking,
             lastActivity: Date()
         )
-    }
+        }
+    }()
 
-    static let messages: [ChatMessage] = (1...120).map { index in
+    static let messages: [ChatMessage] = {
+        if isStoreScreenshot {
+            let conversation = [
+                ("K6DEMO", "Hello from Santa Cruz! Who’s joining the net?"),
+                ("W7DEMO", "Portland checking in. You’re coming through clearly."),
+                (callsign, "Hello from California! Great to hear everyone."),
+                ("VE3DEMO", "73 from Toronto. First time joining this group."),
+                ("K6DEMO", "Welcome, Sam! We’re sharing portable station setups tonight."),
+                (callsign, "Great signals here. Looking forward to it!")
+            ]
+            let time = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: Date()) ?? Date()
+            return conversation.enumerated().map { index, message in
+                ChatMessage(sender: message.0, body: message.1,
+                            timestamp: time.addingTimeInterval(Double(index - conversation.count) * 45),
+                            isOutgoing: message.0 == callsign)
+            }
+        }
+        return (1...120).map { index in
         ChatMessage(
             sender: index.isMultiple(of: 4) ? callsign : "N0USER\(index % 80 + 1)",
             body: index.isMultiple(of: 10)
@@ -820,7 +982,8 @@ enum SimulatorDemoData {
             timestamp: Date().addingTimeInterval(Double(index - 120) * 45),
             isOutgoing: index.isMultiple(of: 4)
         )
-    }
+        }
+    }()
 }
 #endif
 

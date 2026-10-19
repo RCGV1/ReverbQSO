@@ -175,15 +175,13 @@ struct QSOView: View {
                 showAudioRoutes = false
             }
         }
-        .onChange(of: viewModel.session?.state) { _, newState in
-            if (newState == .disconnected || newState == nil), connectionService.error == nil {
-                dismiss()
-            }
-            #if targetEnvironment(macCatalyst)
-            if newState != .connected { releaseSpacePTT() }
-            #endif
+        .onChange(of: viewModel.shouldDismissAfterDisconnect) { _, shouldDismiss in
+            if shouldDismiss { dismiss() }
         }
         #if targetEnvironment(macCatalyst)
+        .onChange(of: viewModel.session?.state) { _, newState in
+            if newState != .connected { releaseSpacePTT() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { releaseSpacePTT() }
         }
@@ -566,8 +564,8 @@ struct QSOView: View {
     private var desktopHeader: some View {
         QSOCallHeader(
             callsign: viewModel.stationCallsign.isEmpty ? "Connecting…" : viewModel.stationCallsign,
-            subtitle: viewModel.session?.station.description.isEmpty == false
-                ? viewModel.session?.station.description ?? "" : "EchoLink station",
+            subtitle: viewModel.session?.station.displayDescription.isEmpty == false
+                ? viewModel.session?.station.displayDescription ?? "" : "EchoLink station",
             badge: viewModel.session?.station.type.displayName ?? "Station",
             badgeColor: viewModel.session.map { typeColor(for: $0.station.type) } ?? .secondary,
             status: connectionStateText,
@@ -1169,6 +1167,10 @@ struct QSOView: View {
                 .disabled(viewModel.isReconnecting)
                 .accessibilityHint("Refreshes the EchoLink directory and retries this station once")
             }
+            Button("Done") {
+                Task { await viewModel.disconnect() }
+            }
+            .buttonStyle(.bordered)
         }
     }
 

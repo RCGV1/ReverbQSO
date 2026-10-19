@@ -5,6 +5,69 @@ import XCTest
 
 @MainActor
 final class QSOHubTests: XCTestCase {
+    func testSecondaryCallStaysManagedWhileInitialConnectionCreatesItsSession() async {
+        let started = expectation(description: "secondary connection started")
+        var finishConnection: CheckedContinuation<Void, Never>?
+        let hub = QSOHub(primary: EchoLinkConnectionService(),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                if station.callsign == "TEST-B" {
+                    service.session = nil // Startup publishes before the new session exists.
+                    await withCheckedContinuation { continuation in
+                        finishConnection = continuation
+                        started.fulfill()
+                    }
+                }
+                service.installSimulatorDemoSession(station: station)
+            })
+        _ = await hub.connect(to: Station(callsign: "TEST-A", ipAddress: "127.0.0.1"), as: "N0AAA")
+        let connection = Task {
+            await hub.connect(to: Station(callsign: "TEST-B", ipAddress: "127.0.0.2"), as: "N0BBB")
+        }
+        await fulfillment(of: [started], timeout: 2)
+        for _ in 0..<10 { await Task.yield() }
+        let entriesDuringStartup = hub.entries.count
+        finishConnection?.resume()
+        let service = await connection.value
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(entriesDuringStartup, 2)
+        XCTAssertEqual(hub.entries.count, 2)
+        XCTAssertTrue(hub.entries.contains { $0.service === service })
+        XCTAssertEqual(service.session?.state, .connected)
+        await hub.disconnectAll()
+    }
+
+    func testFreshRejectedAttemptCannotOfferPreviousStationsReconnect() async {
+        let service = EchoLinkConnectionService()
+        service.registerReconnectCandidate(Station(callsign: "OLD-R", ipAddress: "192.0.2.1"))
+        let unavailable = Station(callsign: "NEW-R", description: "Receive only [r]", ipAddress: "192.0.2.2")
+        await service.connect(to: unavailable)
+        XCTAssertNil(service.reconnectCandidate)
+        XCTAssertNotNil(service.error)
+    }
+
+    func testFailedConnectionKeepsItsRetryPresentationUntilExplicitDisconnect() async {
+        let station = Station(callsign: "TEST-RETRY", ipAddress: "127.0.0.1")
+        let hub = QSOHub(primary: EchoLinkConnectionService(),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                service.registerReconnectCandidate(station)
+                service.error = ConnectionError.connectionFailed("The peer stopped responding.")
+                service.session = QSOSession(station: station, state: .disconnected)
+                service.session = nil // The transport's delayed cleanup has completed.
+            })
+        let service = await hub.connect(to: station, as: "N0RETRY")
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(hub.entries.count, 1)
+        XCTAssertNotNil(hub.activeID)
+        XCTAssertTrue(hub.activeService === service)
+        XCTAssertEqual(hub.entries.first?.station?.callsign, station.callsign)
+        await hub.disconnect(callsign: "N0RETRY")
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertTrue(hub.entries.isEmpty)
+    }
+
     func testBackgroundExpirationPreservesExistingAndOtherAccountAttempts() async {
         let mode = EchoLinkProxyConfiguration(mode: .relay, host: "", port: 8100, password: "")
         let hub = QSOHub(primary: EchoLinkConnectionService(), networkConfigurationProvider: { mode },
@@ -110,6 +173,245 @@ final class QSOHubTests: XCTestCase {
         XCTAssertFalse(second.canTransmit)
         XCTAssertTrue(first.hasAudioFocus)
         XCTAssertFalse(second.hasAudioFocus)
+    }
+
+    func testSecondaryReconnectRetainsRetryPresentationAfterFailedLookup() async {
+        let primary = EchoLinkConnectionService()
+        let relay = EchoLinkProxyConfiguration(
+            mode: .relay,
+            host: "",
+            port: EchoLinkProxyConfiguration.defaultPort,
+            password: ""
+        )
+        let hub = QSOHub(
+            primary: primary,
+            networkConfigurationProvider: { relay },
+            connectOperation: { service, station in
+                service.installSimulatorDemoSession(station: station)
+            }
+        )
+        let firstStation = Station(callsign: "TEST-A", ipAddress: "127.0.0.1")
+        let secondStation = Station(callsign: "TEST-B", ipAddress: "127.0.0.2")
+        _ = await hub.connect(to: firstStation, as: "N0AAA")
+        let secondary = await hub.connect(to: secondStation, as: "N0BBB")
+        hub.select(hub.entries[0].id)
+
+        var disconnected = secondary.session
+        disconnected?.state = .disconnected
+        secondary.session = disconnected
+        secondary.registerReconnectCandidate(secondStation)
+
+        let lookupStarted = expectation(description: "secondary reconnect lookup started")
+        var finishLookup: CheckedContinuation<Station?, Error>?
+        secondary.resolveReconnectStation = { _ in
+            try await withCheckedThrowingContinuation { continuation in
+                finishLookup = continuation
+                lookupStarted.fulfill()
+            }
+        }
+
+        let reconnectTask = Task { await secondary.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+        for _ in 0..<10 { await Task.yield() }
+
+        let remainedManagedWhileWaiting = hub.entries.contains { $0.service === secondary }
+        let permissionWhileWaiting = secondary.pttPermission?()
+
+        finishLookup?.resume(returning: nil)
+        await reconnectTask.value
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertTrue(remainedManagedWhileWaiting)
+        XCTAssertEqual(permissionWhileWaiting, false)
+        XCTAssertTrue(hub.entries.contains { $0.service === secondary })
+        XCTAssertEqual(secondary.pttPermission?(), false)
+        await secondary.disconnect()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertFalse(hub.entries.contains { $0.service === secondary })
+    }
+
+    func testCancellingSecondaryReconnectRemovesItBeforeSuspendedLookupReturns() async {
+        let primary = EchoLinkConnectionService()
+        let relay = EchoLinkProxyConfiguration(
+            mode: .relay,
+            host: "",
+            port: EchoLinkProxyConfiguration.defaultPort,
+            password: ""
+        )
+        let hub = QSOHub(
+            primary: primary,
+            networkConfigurationProvider: { relay },
+            connectOperation: { service, station in
+                service.installSimulatorDemoSession(station: station)
+            }
+        )
+        _ = await hub.connect(
+            to: Station(callsign: "TEST-A", ipAddress: "127.0.0.1"),
+            as: "N0AAA"
+        )
+        let secondStation = Station(callsign: "TEST-B", ipAddress: "127.0.0.2")
+        let secondary = await hub.connect(to: secondStation, as: "N0BBB")
+        hub.select(hub.entries[0].id)
+
+        var disconnected = secondary.session
+        disconnected?.state = .disconnected
+        secondary.session = disconnected
+        secondary.registerReconnectCandidate(secondStation)
+
+        let lookupStarted = expectation(description: "secondary reconnect lookup started")
+        var finishLookup: CheckedContinuation<Station?, Error>?
+        secondary.resolveReconnectStation = { _ in
+            try await withCheckedThrowingContinuation { continuation in
+                finishLookup = continuation
+                lookupStarted.fulfill()
+            }
+        }
+
+        let reconnectTask = Task { await secondary.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+        await secondary.disconnect()
+        for _ in 0..<10 where hub.entries.contains(where: { $0.service === secondary }) {
+            await Task.yield()
+        }
+        let removedBeforeLookupReturned = !hub.entries.contains { $0.service === secondary }
+
+        finishLookup?.resume(returning: secondStation)
+        await reconnectTask.value
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertTrue(removedBeforeLookupReturned)
+        XCTAssertNil(secondary.session)
+        XCTAssertFalse(hub.entries.contains { $0.service === secondary })
+        XCTAssertNil(secondary.pttPermission)
+    }
+
+    func testObsoleteReconnectCompletionDoesNotEndNewerSecondaryReconnect() async {
+        let primary = EchoLinkConnectionService()
+        let relay = EchoLinkProxyConfiguration(
+            mode: .relay,
+            host: "",
+            port: EchoLinkProxyConfiguration.defaultPort,
+            password: ""
+        )
+        let hub = QSOHub(
+            primary: primary,
+            networkConfigurationProvider: { relay },
+            connectOperation: { service, station in
+                service.installSimulatorDemoSession(station: station)
+            }
+        )
+        _ = await hub.connect(
+            to: Station(callsign: "TEST-A", ipAddress: "127.0.0.1"),
+            as: "N0AAA"
+        )
+        let secondStation = Station(callsign: "TEST-B", ipAddress: "127.0.0.2")
+        let secondary = await hub.connect(to: secondStation, as: "N0BBB")
+        hub.select(hub.entries[0].id)
+
+        var disconnected = secondary.session
+        disconnected?.state = .disconnected
+        secondary.session = disconnected
+        secondary.registerReconnectCandidate(secondStation)
+
+        let firstLookupStarted = expectation(description: "first reconnect lookup started")
+        let secondLookupStarted = expectation(description: "second reconnect lookup started")
+        var lookupCount = 0
+        var finishFirstLookup: CheckedContinuation<Station?, Error>?
+        var finishSecondLookup: CheckedContinuation<Station?, Error>?
+        secondary.resolveReconnectStation = { _ in
+            lookupCount += 1
+            return try await withCheckedThrowingContinuation { continuation in
+                if lookupCount == 1 {
+                    finishFirstLookup = continuation
+                    firstLookupStarted.fulfill()
+                } else {
+                    finishSecondLookup = continuation
+                    secondLookupStarted.fulfill()
+                }
+            }
+        }
+
+        let firstReconnect = Task { await secondary.reconnect() }
+        await fulfillment(of: [firstLookupStarted], timeout: 1)
+        await secondary.disconnect()
+
+        secondary.session = QSOSession(station: secondStation, state: .disconnected)
+        secondary.registerReconnectCandidate(secondStation)
+        let secondReconnect = Task { await secondary.reconnect() }
+        await fulfillment(of: [secondLookupStarted], timeout: 1)
+
+        finishFirstLookup?.resume(returning: secondStation)
+        await firstReconnect.value
+        for _ in 0..<10 { await Task.yield() }
+
+        let newerReconnectStillActive = secondary.isReconnecting
+        let remainedManaged = hub.entries.contains { $0.service === secondary }
+        let permissionStayedConstrained = secondary.pttPermission?()
+
+        finishSecondLookup?.resume(returning: nil)
+        await secondReconnect.value
+        for _ in 0..<10 where hub.entries.contains(where: { $0.service === secondary }) {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(newerReconnectStillActive)
+        XCTAssertTrue(remainedManaged)
+        XCTAssertEqual(permissionStayedConstrained, false)
+        XCTAssertTrue(hub.entries.contains { $0.service === secondary })
+        await hub.disconnect(callsign: "N0BBB")
+        XCTAssertFalse(hub.entries.contains { $0.service === secondary })
+    }
+
+    func testCancellingConnectingPhaseClearsReconnectAfterObsoleteLookupReturns() async {
+        let primary = EchoLinkConnectionService()
+        let relay = EchoLinkProxyConfiguration(
+            mode: .relay,
+            host: "",
+            port: EchoLinkProxyConfiguration.defaultPort,
+            password: ""
+        )
+        let hub = QSOHub(
+            primary: primary,
+            networkConfigurationProvider: { relay },
+            connectOperation: { service, station in
+                service.installSimulatorDemoSession(station: station)
+            }
+        )
+        _ = await hub.connect(
+            to: Station(callsign: "TEST-A", ipAddress: "127.0.0.1"),
+            as: "N0AAA"
+        )
+        let secondStation = Station(callsign: "TEST-B", ipAddress: "127.0.0.2")
+        let secondary = await hub.connect(to: secondStation, as: "N0BBB")
+        hub.select(hub.entries[0].id)
+
+        var disconnected = secondary.session
+        disconnected?.state = .disconnected
+        secondary.session = disconnected
+        secondary.registerReconnectCandidate(secondStation)
+
+        let lookupStarted = expectation(description: "secondary reconnect lookup started")
+        var finishLookup: CheckedContinuation<Station?, Error>?
+        secondary.resolveReconnectStation = { _ in
+            try await withCheckedThrowingContinuation { continuation in
+                finishLookup = continuation
+                lookupStarted.fulfill()
+            }
+        }
+
+        let reconnectTask = Task { await secondary.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+        secondary.session = QSOSession(station: secondStation, state: .connecting)
+        secondary.cancelPendingConnection()
+
+        finishLookup?.resume(returning: secondStation)
+        await reconnectTask.value
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertFalse(secondary.isReconnecting)
+        XCTAssertNil(secondary.session)
+        XCTAssertFalse(hub.entries.contains { $0.service === secondary })
+        XCTAssertNil(secondary.pttPermission)
     }
 
     func testSecondDirectCallIsRejectedInsteadOfSilentlyUsingRelay() async {

@@ -10,7 +10,7 @@ settings:
     SWIFT_VERSION: 6.0
     TARGETED_DEVICE_FAMILY: "1,2"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "43"
+    CURRENT_PROJECT_VERSION: "45"
     DEVELOPMENT_TEAM: FRFXFRT624
     INFOPLIST_FILE: ReverbQSO/Resources/Info.plist
     SWIFT_OBJC_BRIDGING_HEADER: ReverbQSO/App/ReverbQSO-Bridging-Header.h
@@ -44,6 +44,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FRFXFRT624
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": ReverbQSO/Resources/ReverbQSOMac.entitlements
@@ -120,6 +121,7 @@ targets:
         PRODUCT_NAME: ReverbQSOWatch
         PRODUCT_MODULE_NAME: ReverbQSOWatch
         PRODUCT_BUNDLE_IDENTIFIER: com.benjaminfaershtein.OpenEchoLink.watchkitapp
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_FILE: Companions/Watch/WatchInfo.plist
         SWIFT_OBJC_BRIDGING_HEADER: ReverbQSO/App/ReverbQSO-Bridging-Header.h
         TARGETED_DEVICE_FAMILY: "4"

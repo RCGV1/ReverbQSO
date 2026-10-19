@@ -4,6 +4,26 @@ import XCTest
 @testable import ReverbQSO
 
 final class StationParserTests: XCTestCase {
+    func testExplicitOnlineStatusOverridesBusyWordsInDescription() throws {
+        for description in ["Busy Bee Net [0/20] [ON 12:34]", "Hilltop not busy overnight [ON: 12:34]"] {
+            let raw = Data("@@@\n1\nK1OPEN-R\n\(description)\n123\n192.0.2.1\n+++".utf8)
+            let station = try XCTUnwrap(StationParser.parseDirectory(raw: raw).first)
+            XCTAssertFalse(station.isBusy, description)
+            XCTAssertNil(station.connectionUnavailableReason, description)
+        }
+    }
+
+    func testDirectoryBusyStatusWithTimeIsRecognized() throws {
+        let raw = Data("@@@\n2\nK1FULL-R\nHilltop [20/20] [BUSY 12:34]\n123\n192.0.2.1\nK1OPEN-L\nMetro [39/20] [ON 12:34]\n456\n192.0.2.2\n+++".utf8)
+        let stations = StationParser.parseDirectory(raw: raw)
+        let full = try XCTUnwrap(stations.first)
+        XCTAssertTrue(full.isBusy)
+        XCTAssertTrue(full.isConnectionLimitReached)
+        let open = try XCTUnwrap(stations.last)
+        XCTAssertFalse(open.isBusy)
+        XCTAssertNil(open.connectionUnavailableReason)
+    }
+
     func testDirectoryRelayMarkerBeforeStatusIdentifiesNonCallableStation() throws {
         let raw = Data("@@@\n2\nK1ABC\nMobile [r] [ON 12:34]\n123\n192.0.2.1\nK2ABC-R\nHilltop [ON 12:34]\n456\n192.0.2.2\n+++".utf8)
         let stations = StationParser.parseDirectory(raw: raw)
@@ -226,6 +246,15 @@ final class StationParserTests: XCTestCase {
         XCTAssertEqual(stations[1].type, .repeater)
     }
 
+    func testCountedDirectoryWithIntMaxCountParsesAvailableStation() {
+        let text = "@@@\n\(Int.max)\nW6ABC\nSan Francisco\n123456\n192.0.2.10\n+++"
+
+        let stations = StationParser.parseDirectory(raw: Data(text.utf8))
+
+        XCTAssertEqual(stations.count, 1)
+        XCTAssertEqual(stations.first?.callsign, "W6ABC")
+    }
+
     func testParseCountedDirectoryClassifiesUnsuffixedCallsignAsUser() {
         let text = "@@@\n1\nW6ABC\nSan Francisco\n123456\n192.0.2.10\n+++"
 
@@ -246,6 +275,11 @@ final class StationParserTests: XCTestCase {
         let stations = StationParser.parseDirectory(raw: Data(text.utf8))
 
         XCTAssertTrue(stations.isEmpty)
+    }
+
+    func testEmptyCountedDirectoryRequiresTerminatorImmediatelyAfterCount() {
+        XCTAssertFalse(StationParser.isValidEmptyCountedDirectory(raw: Data("@@@\n0\nUnexpected station data\n+++".utf8)))
+        XCTAssertFalse(StationParser.isValidEmptyCountedDirectory(raw: Data("@@@\n0\n+++ in prose".utf8)))
     }
 
     func testValidEmptyCountedDirectoryRecognizesLFAndCRLFResponses() {

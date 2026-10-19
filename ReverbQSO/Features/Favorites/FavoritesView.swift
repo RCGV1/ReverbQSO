@@ -87,8 +87,8 @@ struct FavoritesView: View {
                 reconnectError = "This station is no longer in the current directory."
                 return
             }
-            guard !current.isBusy else {
-                reconnectError = "This station is busy. Try again later."
+            if let reason = current.connectionUnavailableReason {
+                reconnectError = reason
                 return
             }
             await appState.connect(to: current)

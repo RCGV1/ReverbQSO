@@ -88,8 +88,8 @@ struct RecentView: View {
                 Text(recent.station.callsign)
                     .font(.system(.body, design: .monospaced, weight: .bold))
 
-                if !recent.station.description.isEmpty {
-                    Text(recent.station.description)
+                if !recent.station.displayDescription.isEmpty {
+                    Text(recent.station.displayDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -129,8 +129,8 @@ struct RecentView: View {
                 reconnectError = "This station is no longer in the current directory."
                 return
             }
-            guard !current.isBusy else {
-                reconnectError = "This station is busy. Try again later."
+            if let reason = current.connectionUnavailableReason {
+                reconnectError = reason
                 return
             }
             await appState.connect(to: current)

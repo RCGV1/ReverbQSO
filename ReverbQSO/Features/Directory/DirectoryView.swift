@@ -78,7 +78,6 @@ struct DirectoryView: View {
                 let currentStation = liveStation ?? station
                 StationDetailSheet(
                     station: currentStation,
-                    directoryService: appState.directoryService,
                     isOnline: liveStation != nil,
                     isFavorite: favoritesVM.isFavorite(currentStation),
                     currentCallsign: appState.currentUser,

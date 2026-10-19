@@ -4,6 +4,50 @@ import XCTest
 @testable import ReverbQSO
 
 final class EchoLinkParticipantParserTests: XCTestCase {
+    func testSvxLinkRosterMarksOnlyTheArrowedOperatorAsTalking() {
+        let updates = EchoLinkParticipantParser.parseInfoMessage("""
+        SvxLink 26.05.1 - W6SLG-R (2)
+
+        > K1ABC         Alex
+
+        W6SLG-R         UCSC repeater
+        K2XYZ         Talking operator
+        """)
+        XCTAssertEqual(updates, [
+            EchoLinkParticipantUpdate(callsign: "K1ABC", isTransmitting: true, kind: .upsert),
+            EchoLinkParticipantUpdate(callsign: "W6SLG-R", isTransmitting: false, kind: .upsert),
+            EchoLinkParticipantUpdate(callsign: "K2XYZ", isTransmitting: false, kind: .upsert)
+        ])
+    }
+
+    func testSvxLinkIdleRosterExplicitlyClearsTheFormerTalker() {
+        let updates = EchoLinkParticipantParser.parseInfoMessage("""
+        SvxLink 26.05.1 - W6SLG-R (1)
+
+        W6SLG-R         UCSC repeater
+        K1ABC         Alex
+        """)
+        XCTAssertEqual(updates.map(\.isTransmitting), [false, false])
+    }
+
+    func testSvxLinkRadioSideSpeechMarksTheRepeater() {
+        let updates = EchoLinkParticipantParser.parseInfoMessage("""
+        SvxLink 26.05.1 - W6SLG-R (1)
+
+        > W6SLG-R         UCSC repeater
+
+        K1ABC         Alex
+        """)
+        XCTAssertEqual(updates, [
+            EchoLinkParticipantUpdate(callsign: "W6SLG-R", isTransmitting: true, kind: .upsert),
+            EchoLinkParticipantUpdate(callsign: "K1ABC", isTransmitting: false, kind: .upsert)
+        ])
+    }
+
+    func testArrowInOrdinaryStationInfoDoesNotInventATalker() {
+        let updates = EchoLinkParticipantParser.parseInfoMessage("> K1ABC         Example operator")
+        XCTAssertEqual(updates, [EchoLinkParticipantUpdate(callsign: "K1ABC", isTransmitting: nil, kind: .upsert)])
+    }
 
     func testFirstCallsignNormalizesToUppercase() {
         let callsign = EchoLinkParticipantParser.firstCallsign(in: "de k1xyz-l via conference")

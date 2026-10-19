@@ -5,6 +5,44 @@ import XCTest
 
 @MainActor
 final class LocalDemoConnectionTests: XCTestCase {
+    func testFullStationStopsBeforeCreatingDemoSession() async {
+        var playbackCount = 0
+        let service = makeService(localDemoPlayback: { _ in playbackCount += 1 })
+        service.enableLocalDemo(callsign: "DEMO")
+        var station = LocalDemoAccount.stations[0]
+        station.description = "Demo conference [20/20] [ON 12:34]"
+        station.isBusy = true
+        await service.connect(to: station)
+        XCTAssertNil(service.session)
+        XCTAssertEqual(service.error?.localizedDescription, "Connection failed: Connection limit reached (20 connected; advertised limit 20).")
+        XCTAssertEqual(playbackCount, 0)
+        await service.disconnect()
+    }
+
+    func testBusyStationStopsBeforeCreatingDemoSession() async {
+        var playbackCount = 0
+        let service = makeService(localDemoPlayback: { _ in playbackCount += 1 })
+        service.enableLocalDemo(callsign: "DEMO")
+        var station = LocalDemoAccount.stations[0]
+        station.isBusy = true
+        await service.connect(to: station)
+        XCTAssertNil(service.session)
+        XCTAssertEqual(service.error?.localizedDescription, "Connection failed: This station is not accepting new connections.")
+        XCTAssertEqual(playbackCount, 0)
+        await service.disconnect()
+    }
+
+    func testAdvertisedLimitAloneDoesNotBlockAnAvailableStation() async {
+        let service = makeService(localDemoPlayback: { _ in })
+        service.enableLocalDemo(callsign: "DEMO")
+        var station = LocalDemoAccount.stations[0]
+        station.description = "Demo conference [39/20] [ON 12:34]"
+        await service.connect(to: station)
+        XCTAssertNotNil(service.session)
+        XCTAssertNil(service.error)
+        await service.disconnect()
+    }
+
     func testRelayOnlyStationRejectedBeforeSessionOrPlayback() async {
         var playbackCount = 0
         let service = makeService(localDemoPlayback: { _ in playbackCount += 1 })
@@ -140,6 +178,33 @@ final class LocalDemoConnectionTests: XCTestCase {
         XCTAssertEqual(service.session?.state, .connected)
         XCTAssertEqual(service.localCallsign, "DEMO2")
         await service.disconnect()
+    }
+
+    func testDemoDisconnectClearsReconnectWhoseDirectoryLookupWasCancelled() async throws {
+        let service = EchoLinkConnectionService()
+        let station = try XCTUnwrap(LocalDemoAccount.stations.first)
+        let lookupStarted = expectation(description: "reconnect lookup started")
+        var finishLookup: CheckedContinuation<Station?, Never>?
+        service.resolveReconnectStation = { _ in
+            await withCheckedContinuation { continuation in
+                finishLookup = continuation
+                lookupStarted.fulfill()
+            }
+        }
+        service.registerReconnectCandidate(station)
+        let reconnectTask = Task { await service.reconnect() }
+        await fulfillment(of: [lookupStarted], timeout: 1)
+        XCTAssertTrue(service.isReconnecting)
+
+        XCTAssertTrue(service.enableLocalDemo(callsign: "DEMO"))
+        await service.disconnect()
+        finishLookup?.resume(returning: station)
+        await reconnectTask.value
+
+        XCTAssertFalse(service.isReconnecting,
+                       "Disconnecting the demo account must finish the cancelled reconnect")
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.reconnectCandidate)
     }
 
 #if targetEnvironment(simulator)

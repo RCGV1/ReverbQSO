@@ -64,8 +64,8 @@ struct StationRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                } else if !station.description.isEmpty {
-                    Text(station.description)
+                } else if !station.displayDescription.isEmpty {
+                    Text(station.displayDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -90,10 +90,18 @@ struct StationRow: View {
                     if station.isBusy {
                         Text("·")
                             .foregroundStyle(.tertiary)
-                        Text("Busy")
+                        Text(station.isConnectionLimitReached ? "Full" : "Busy")
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.red.opacity(0.85))
                     }
+                }
+                if let count = station.reportedConnections {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2")
+                        Text(count.displayText)
+                    }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -129,7 +137,9 @@ struct StationRow: View {
     private var accessibilityLabel: String {
         var parts = [station.callsign, station.type.displayName]
         if let country = station.callSignCountryName { parts.append(country) }
-        if !station.description.isEmpty { parts.append(station.description) }
+        if !station.displayDescription.isEmpty { parts.append(station.displayDescription) }
+        if let count = station.reportedConnections { parts.append(count.displayText) }
+        if let reason = station.connectionUnavailableReason { parts.append(reason) }
         if station.isBusy { parts.append("busy") }
         if isFavorite { parts.append("favorited") }
         return parts.joined(separator: ", ")

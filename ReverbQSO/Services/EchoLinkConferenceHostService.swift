@@ -38,6 +38,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isAutomaticallyRecording = false
     private var recordingCoordinator: QSORecordingCoordinator?
+    private var publishedRecordingWarning: String?
     private let recordingDefaults: UserDefaults
     private let recordingFolder: URL?
     private var recordingPreferencesSubscription: AnyCancellable?
@@ -72,7 +73,13 @@ final class EchoLinkConferenceHostService: ObservableObject {
         let automatic = recordingCoordinator?.isAutomaticallyRecording ?? false
         if isRecording != clip { isRecording = clip }
         if isAutomaticallyRecording != automatic { isAutomaticallyRecording = automatic }
-        if let message = recordingCoordinator?.errorMessage { errorMessage = message }
+        let message = recordingCoordinator?.errorMessage
+        if let message {
+            errorMessage = message
+        } else if let publishedRecordingWarning, errorMessage == publishedRecordingWarning {
+            errorMessage = nil
+        }
+        publishedRecordingWarning = message
     }
 
     private func stopRecording() {
@@ -828,6 +835,7 @@ final class EchoLinkConferenceHostService: ObservableObject {
         } else {
             onUnmonitoredReceivedPCM?(decoded.samples)
         }
+        guard !gsm.isEmpty else { return }
         let sampleCount = gsm.count / GSMCodec.encodedFrameSize * GSMCodec.samplesPerFrame
         for listener in active where listenerIDs.contains(listener.id) {
             let packet = buildVoicePacket(

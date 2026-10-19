@@ -98,6 +98,25 @@ enum EchoLinkParticipantParser {
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
+        // SvxLink sends a complete roster with the current speaker prefixed by
+        // "> ". Names are free text, so generic status keywords must not be
+        // interpreted inside these rows. An unmarked roster means idle.
+        if let header = lines.first,
+           header.hasPrefix("SvxLink "), header.contains(" - ") {
+            return lines.dropFirst().compactMap { line in
+                let isTransmitting = line.hasPrefix("> ")
+                let row = isTransmitting ? String(line.dropFirst(2)) : line
+                guard let token = row.split(whereSeparator: \.isWhitespace).first else { return nil }
+                let callsign = String(token).uppercased()
+                guard firstCallsign(in: callsign) == callsign else { return nil }
+                return EchoLinkParticipantUpdate(
+                    callsign: callsign,
+                    isTransmitting: isTransmitting,
+                    kind: .upsert
+                )
+            }
+        }
+
         for line in lines {
             let callsigns = extractCallsigns(from: line)
             guard !callsigns.isEmpty else { continue }

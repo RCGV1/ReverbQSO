@@ -14,6 +14,68 @@ struct Station: Identifiable, Codable, Hashable {
     /// EchoLink node number (from the directory listing).
     var nodeNumber: Int
 
+    /// Operator-written description without directory status or connection counts.
+    var displayDescription: String {
+        let text = descriptionWithoutStatus
+        guard let match = capacityMatch(in: text) else { return text }
+        return (text as NSString).replacingCharacters(in: match.range, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    struct ConnectionCount: Equatable {
+        let connected: Int
+        let limit: Int
+        var isAtReportedLimit: Bool { connected >= limit }
+        var displayText: String { "\(connected) connected" }
+    }
+
+    /// Optional station-published count. Absence means unknown, never zero.
+    var reportedConnections: ConnectionCount? {
+        let text = descriptionWithoutStatus
+        guard let match = capacityMatch(in: text),
+              let connected = Int((text as NSString).substring(with: match.range(at: 1))),
+              let limit = Int((text as NSString).substring(with: match.range(at: 2))) else { return nil }
+        return ConnectionCount(connected: connected, limit: limit)
+    }
+
+    /// The configured limit in a description is not necessarily enforced by the
+    /// node. Require its busy status before treating that limit as a rejection.
+    var isConnectionLimitReached: Bool {
+        isBusy && reportedConnections?.isAtReportedLimit == true
+    }
+
+    var connectionUnavailableReason: String? {
+        if isRelayOnly { return "This station cannot receive calls." }
+        if isConnectionLimitReached, let count = reportedConnections {
+            return "Connection limit reached (\(count.displayText); advertised limit \(count.limit))."
+        }
+        if isBusy { return "This station is not accepting new connections." }
+        return nil
+    }
+
+    private func capacityMatch(in text: String) -> NSTextCheckingResult? {
+        guard let match = Self.connectionCapacitySuffix.firstMatch(
+            in: text, range: NSRange(text.startIndex..., in: text)
+        ), let limit = Int((text as NSString).substring(with: match.range(at: 2))), limit > 0 else { return nil }
+        return match
+    }
+
+    private var descriptionWithoutStatus: String {
+        let range = NSRange(description.startIndex..., in: description)
+        return Self.directoryStatusSuffix.stringByReplacingMatches(
+            in: description, range: range, withTemplate: ""
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static let connectionCapacitySuffix = try! NSRegularExpression(
+        pattern: #"\s*\[(\d{1,9})\s*/\s*(\d{1,9})\]\s*$"#
+    )
+
+    private static let directoryStatusSuffix = try! NSRegularExpression(
+        pattern: #"\s*\[(?:ON|BUSY)(?:\s+|\s*:\s*)(?:[01]\d|2[0-3]):[0-5]\d\]\s*$"#,
+        options: .caseInsensitive
+    )
+
     /// The directory's [r] marker denotes a station that can make calls but cannot receive them.
     var isRelayOnly: Bool {
         description.range(of: "[r]", options: .caseInsensitive) != nil

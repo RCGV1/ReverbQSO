@@ -177,6 +177,29 @@ final class QSORecordingTests: XCTestCase {
         XCTAssertFalse(demo.isAutomaticallyRecording)
     }
 
+    @MainActor func testAutomaticRecordingRetriesAfterStartFailureWithoutStartingNewSession() throws {
+        let folder = temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: folder.path, contents: Data()))
+        let suite = "QSORecordingTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: RecordingPreferences.alwaysRecordKey())
+        let coordinator = QSORecordingCoordinator(folder: folder, defaults: defaults)
+
+        coordinator.startSession(callsign: "K6RETRY")
+        XCTAssertFalse(coordinator.isAutomaticallyRecording)
+
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        coordinator.refreshAutomaticRecording()
+
+        XCTAssertTrue(coordinator.isAutomaticallyRecording,
+                      "Always Record should retry after its storage becomes available during the same session")
+        XCTAssertNil(coordinator.errorMessage)
+        coordinator.stopSession()
+    }
+
     @MainActor func testManualClipRecordsOnlySamplesBetweenClipBoundaries() throws {
         let folder = temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -262,7 +285,7 @@ final class QSORecordingTests: XCTestCase {
         XCTAssertEqual(QSORecordingService(folder: folder).recordings.count, 2)
     }
 
-    @MainActor func testFailedAutomaticStartDoesNotRetryUntilPreferenceChanges() throws {
+    @MainActor func testAutomaticRetryDoesNotClearLaterClipStartError() throws {
         let folder = temporaryFolder()
         try Data().write(to: folder)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -276,16 +299,15 @@ final class QSORecordingTests: XCTestCase {
         coordinator.startSession(callsign: "K6TEST")
         XCTAssertFalse(coordinator.isAutomaticallyRecording)
         XCTAssertNotNil(coordinator.errorMessage)
+        coordinator.toggleClip()
+        let clipError = try XCTUnwrap(coordinator.errorMessage)
+        XCTAssertTrue(clipError.contains("clip"))
 
         try FileManager.default.removeItem(at: folder)
-        coordinator.refreshAutomaticRecording()
-        XCTAssertFalse(coordinator.isAutomaticallyRecording)
-
-        defaults.set(false, forKey: key)
-        coordinator.refreshAutomaticRecording()
-        defaults.set(true, forKey: key)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         coordinator.refreshAutomaticRecording()
         XCTAssertTrue(coordinator.isAutomaticallyRecording)
+        XCTAssertEqual(coordinator.errorMessage, clipError)
         coordinator.stopSession()
     }
 

@@ -23,7 +23,9 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
     private var pttTimeoutTask: Task<Void, Never>?
     private weak var pttService: EchoLinkConnectionService?
     private var pttSessionID: UUID?
+    private var pttHoldID: UUID?
     private var watchAudioReady = false
+    private var directoryCancellable: AnyCancellable?
     private lazy var audioForwarder = WatchAudioForwarder { data, reply, error in
         WCSession.default.sendMessageData(data, replyHandler: reply, errorHandler: error)
     }
@@ -32,7 +34,8 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         appState?.qsoHub.activeService ?? primaryConnectionService
     }
 
-    init(connectionService: EchoLinkConnectionService, appState: AppState, demoCredentials: Bool = false) {
+    init(connectionService: EchoLinkConnectionService, appState: AppState, demoCredentials: Bool = false,
+         activateSession: Bool = true) {
         self.primaryConnectionService = connectionService
         self.appState = appState
         self.activeAccount = { [weak appState] in
@@ -47,11 +50,16 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
             self.refreshWatchAudioAvailability()
             self.publishStatus()
         }
-        guard WCSession.isSupported() else { return }
+        guard activateSession, WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
 
         observeActiveService()
+        appState.$directoryService
+            .sink { [weak self] directory in
+                Task { @MainActor [weak self] in self?.observeDirectoryService(directory) }
+            }
+            .store(in: &cancellables)
         appState.qsoHub.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -79,12 +87,17 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
     }
 
     private func compactStation(_ station: Station) -> [String: Any] {
-        [
-            "callsign": station.callsign,
-            "nodeNumber": station.nodeNumber,
-            "type": station.type.rawValue,
-            "description": String(station.description.prefix(120))
-        ]
+        WatchStationSnapshot.resolving(
+            station,
+            from: appState?.directoryService.stations ?? []
+        ).dictionary
+    }
+
+    private func observeDirectoryService(_ directory: EchoLinkDirectoryService) {
+        directoryCancellable = directory.$stations
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.publishStatus() }
+            }
     }
 
     private func observeActiveService() {
@@ -122,6 +135,7 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         pttTimeoutTask = nil
         pttService = nil
         pttSessionID = nil
+        pttHoldID = nil
     }
 
     private func status() -> [String: Any] {
@@ -218,6 +232,8 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         let active = message["active"] as? Bool
         let requestedCallsign = message["callsign"] as? String
         let requestedNodeNumber = message["nodeNumber"] as? Int
+        let expectedSessionID = (message["sessionID"] as? String).flatMap(UUID.init(uuidString:))
+        let holdID = (message["holdID"] as? String).flatMap(UUID.init(uuidString:))
         let reply = Reply(handler: replyHandler)
         Task { @MainActor [weak self] in
             guard let self else {
@@ -232,13 +248,16 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                 self.publishStatus()
                 reply.call(self.status().merging(["ok": true]) { _, new in new })
             case "ptt":
-                guard let active else {
+                guard let active, let expectedSessionID, let holdID else {
                     reply.call(["ok": false, "error": "Transmitting is unavailable."])
                     return
                 }
                 if active {
                     let service = self.activeService
-                    guard service.session?.state == .connected, service.canTransmit else {
+                    guard service.session?.id == expectedSessionID,
+                          service.session?.state == .connected, service.canTransmit,
+                          service.session?.isPTTActive != true
+                            || (self.pttService === service && self.pttHoldID == holdID) else {
                         reply.call(["ok": false, "error": "Transmitting is unavailable."])
                         return
                     }
@@ -246,17 +265,23 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                     self.pttService = service
                     let sessionID = service.session?.id
                     self.pttSessionID = sessionID
+                    self.pttHoldID = holdID
                     service.sendPTT(active: true)
                     self.pttTimeoutTask = Task { @MainActor [weak self, weak service] in
                         try? await Task.sleep(for: .seconds(30))
                         guard !Task.isCancelled, let self, let service,
                               self.pttService === service,
                               self.pttSessionID == sessionID,
+                              self.pttHoldID == holdID,
                               service.session?.id == sessionID else { return }
                         service.sendPTT(active: false)
                         self.clearPTTLatch()
                     }
                 } else {
+                    guard self.pttSessionID == expectedSessionID, self.pttHoldID == holdID else {
+                        reply.call(self.status().merging(["ok": false]) { _, new in new })
+                        return
+                    }
                     if let service = self.pttService, service.session?.id == self.pttSessionID {
                         service.sendPTT(active: false)
                     }
@@ -266,7 +291,8 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                 reply.call(self.status().merging(["ok": true]) { _, new in new })
             case "disconnect":
                 let service = self.activeService
-                guard service.session?.state == .connected else {
+                guard let expectedSessionID, service.session?.id == expectedSessionID,
+                      service.session?.state == .connected else {
                     reply.call(["ok": false, "error": "No active QSO."])
                     return
                 }

@@ -33,6 +33,7 @@ final class DirectoryViewModel: ObservableObject {
     enum SortOrder: String, CaseIterable, Identifiable {
         case callsign = "Callsign"
         case nodeNumber = "Node number"
+        case mostConnections = "Most connections"
         case region = "Region"
 
         var id: Self { self }
@@ -92,6 +93,7 @@ final class DirectoryViewModel: ObservableObject {
 
     private struct IndexedStation {
         let station: Station
+        let reportedConnectionCount: Int?
         let countryCode: String?
         let countryName: String?
         let region: StationRegion?
@@ -255,6 +257,12 @@ final class DirectoryViewModel: ObservableObject {
 
         let sorted = filtered.sorted { lhs, rhs in
             switch sortOrder {
+            case .mostConnections:
+                // Unpublished counts sort after known zeroes. Parse once when
+                // indexing, rather than during every comparison in a large list.
+                let leftCount = lhs.reportedConnectionCount ?? -1
+                let rightCount = rhs.reportedConnectionCount ?? -1
+                if leftCount != rightCount { return leftCount > rightCount }
             case .region:
                 let leftRank = lhs.region?.sortIndex ?? Int.max
                 let rightRank = rhs.region?.sortIndex ?? Int.max
@@ -320,6 +328,7 @@ final class DirectoryViewModel: ObservableObject {
 
             return IndexedStation(
                 station: station,
+                reportedConnectionCount: station.reportedConnections?.connected,
                 countryCode: countryCode,
                 countryName: countryName,
                 region: region,

@@ -270,6 +270,7 @@
 		B0724361B45D1FF67D1DFA63 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CCE1B83C11A08A41F7474DF4 /* WatchConnectivity.framework */; };
 		B0AA5120ED2DBA39C473D53A /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = 540BBC2FF76B995FFDDD95D2 /* lpc.c */; };
 		B0AA6CE5F763E1C262B5C492 /* gsm_explode.c in Sources */ = {isa = PBXBuildFile; fileRef = 74A3C8B5FC58640E614541B3 /* gsm_explode.c */; };
+		B103714B2780616A31353C33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C7E2C597F6A277F6FECB0417 /* Assets.xcassets */; };
 		B106E95DDAEFF0F67387DDD0 /* ReceiveSpeechSmootherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D918DC2CF541D993EFBAB0C /* ReceiveSpeechSmootherTests.swift */; };
 		B1434547EB6F768A422E5CB8 /* ReceivePacketLossConcealer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52937B64884793C42C49F35 /* ReceivePacketLossConcealer.swift */; };
 		B25567AA490EC9BBCD3DD5D2 /* stereo.c in Sources */ = {isa = PBXBuildFile; fileRef = B06333F5368B070986E69E53 /* stereo.c */; };
@@ -711,6 +712,7 @@
 		C5B801BC8CE57413932CAA3D /* hexc_table.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hexc_table.c; sourceTree = "<group>"; };
 		C71DD22FFDFBA509336DBD81 /* modes_wb.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = modes_wb.c; sourceTree = "<group>"; };
 		C760FA93A5C115BDFCA039E6 /* QSOAudioDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOAudioDiagnosticsTests.swift; sourceTree = "<group>"; };
+		C7E2C597F6A277F6FECB0417 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecordingTests.swift; sourceTree = "<group>"; };
 		C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		C8B202E231EC5BD0BBA49C12 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
@@ -1226,6 +1228,7 @@
 		C22057BB24EC2A0CD454BEA3 /* Watch */ = {
 			isa = PBXGroup;
 			children = (
+				C7E2C597F6A277F6FECB0417 /* Assets.xcassets */,
 				59D42CC22B76E9E48D889E39 /* PrivacyInfo.xcprivacy */,
 				2CF47B30ABAE20BF606F9324 /* WatchApp.swift */,
 				6E44415E3AFF18DB4A066ED0 /* WatchAppModel.swift */,
@@ -1511,6 +1514,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B103714B2780616A31353C33 /* Assets.xcassets in Resources */,
 				2698D150EC9DC2375B4148F7 /* EchoTestWelcome.gsm in Resources */,
 				4569BF9D4E7B8FAEB452F88B /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -2112,7 +2116,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = FRFXFRT624;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2234,7 +2238,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 43;
+				CURRENT_PROJECT_VERSION = 45;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = FRFXFRT624;
 				ENABLE_NS_ASSERTIONS = NO;

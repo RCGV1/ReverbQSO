@@ -7,6 +7,7 @@ struct ChatMessage: Identifiable {
     let id: UUID
     let sender: String
     let body: String
+    let relayedVia: [String]
     let timestamp: Date
     var isOutgoing: Bool
     let isInformational: Bool
@@ -20,8 +21,29 @@ struct ChatMessage: Identifiable {
         isInformational: Bool = false
     ) {
         self.id = id
-        self.sender = sender
-        self.body = body
+        var author = sender
+        var text = body
+        var relays: [String] = []
+        if !isOutgoing && !isInformational {
+            // SvxLink prepends its own callsign when forwarding an existing chat packet.
+            for _ in 0..<4 {
+                let relay = author.uppercased()
+                guard relay.hasSuffix("-R") || relay.hasSuffix("-L")
+                        || (relay.hasPrefix("*") && relay.hasSuffix("*")),
+                      let delimiter = text.firstIndex(of: ">") else { break }
+                let candidate = text[..<delimiter].trimmingCharacters(in: .whitespaces).uppercased()
+                let remainder = text[text.index(after: delimiter)...]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard EchoLinkParticipantParser.firstCallsign(in: candidate) == candidate,
+                      !remainder.isEmpty else { break }
+                relays.append(author)
+                author = candidate
+                text = remainder
+            }
+        }
+        self.sender = author
+        self.body = text
+        self.relayedVia = relays
         self.timestamp = timestamp
         self.isOutgoing = isOutgoing
         self.isInformational = isInformational

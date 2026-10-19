@@ -583,9 +583,11 @@ final class EchoLinkConnectionService: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isAutomaticallyRecording = false
     private var recordingCoordinator: QSORecordingCoordinator?
+    private var publishedRecordingWarning: String?
     private var recordingSessionID: UUID?
     private let recordingDefaults: UserDefaults
     private let recordingFolder: URL?
+    var onRecordingFailure: ((String) -> Void)?
     var callAccessPolicyProvider: (() -> CallAccessPolicy)?
 
     func toggleRecording() {
@@ -622,11 +624,20 @@ final class EchoLinkConnectionService: ObservableObject {
         let automatic = recordingCoordinator?.isAutomaticallyRecording ?? false
         if isRecording != clip { isRecording = clip }
         if isAutomaticallyRecording != automatic { isAutomaticallyRecording = automatic }
-        if let message = recordingCoordinator?.errorMessage { audioStatusMessage = message }
+        let message = recordingCoordinator?.errorMessage
+        if let message {
+            audioStatusMessage = message
+        } else if let publishedRecordingWarning, audioStatusMessage == publishedRecordingWarning {
+            audioStatusMessage = nil
+        }
+        publishedRecordingWarning = message
     }
 
     private func stopSessionRecording() {
         recordingCoordinator?.stopSession()
+        if let message = recordingCoordinator?.errorMessage {
+            onRecordingFailure?(message)
+        }
         publishRecordingState()
         recordingCoordinator = nil
         recordingSessionID = nil
@@ -1085,6 +1096,10 @@ final class EchoLinkConnectionService: ObservableObject {
             error = ConnectionError.alreadyConnected
             return
         }
+        if session == nil && !isReconnecting {
+            reconnectCandidate = nil
+            error = nil
+        }
         let operationID = UUID()
         let operation = Task { @MainActor in
             guard !Task.isCancelled else { return }
@@ -1125,6 +1140,10 @@ final class EchoLinkConnectionService: ObservableObject {
             error = ConnectionError.connectionFailed("This station cannot receive calls.")
             return
         }
+        if let reason = resolvedStation.connectionUnavailableReason {
+            error = ConnectionError.connectionFailed(reason)
+            return
+        }
         let accessPolicy = callAccessPolicyProvider?() ?? CallAccessPolicyStore.load(demo: isLocalDemoMode)
         if let reason = accessPolicy.rejection(for: resolvedStation, direction: .outgoing, countryCode: resolvedStation.callSignCountryCode) {
             error = ConnectionError.connectionFailed(reason)
@@ -1156,6 +1175,7 @@ final class EchoLinkConnectionService: ObservableObject {
         peerControlPort = peerAudioPort < UInt16.max ? peerAudioPort + 1 : Self.controlPort
         logger.info("Connecting station=\(station.callsign, privacy: .public) host=\(station.ipAddress, privacy: .public) as=\(self.localCallsign, privacy: .public)")
         let newSession = QSOSession(station: station)
+        VoiceDiagnosticLog.reset()
         resetAudioDiagnostics()
         let sessionID = newSession.id
         session = newSession
@@ -1447,6 +1467,7 @@ final class EchoLinkConnectionService: ObservableObject {
         outboundConnectionTask = nil
         reconnectGeneration &+= 1
         reconnectCandidate = nil
+        isReconnecting = false
         tearDown(expectedSessionID: pending.id)
         session = nil
     }
@@ -1461,6 +1482,7 @@ final class EchoLinkConnectionService: ObservableObject {
             let ended = session
             reconnectGeneration &+= 1
             reconnectCandidate = nil
+            isReconnecting = false
             tearDown()
             session = nil
             if let ended, ended.state == .connected {
@@ -1479,6 +1501,7 @@ final class EchoLinkConnectionService: ObservableObject {
 #endif
         reconnectGeneration &+= 1
         reconnectCandidate = nil
+        isReconnecting = false
         guard var currentSession = session else {
             tearDown()
             session = nil
@@ -1539,9 +1562,6 @@ final class EchoLinkConnectionService: ObservableObject {
                 error = ConnectionError.alreadyConnected
                 return
             }
-            // Unexpected termination has already torn down transport state.
-            // Retire its brief presentation-only session before the fresh lookup.
-            session = nil
         }
         guard let candidate = reconnectCandidate else {
             error = ConnectionError.notConnected
@@ -1549,9 +1569,14 @@ final class EchoLinkConnectionService: ObservableObject {
         }
 
         isReconnecting = true
-        error = nil
         let generation = reconnectGeneration
-        defer { isReconnecting = false }
+        defer {
+            if generation == reconnectGeneration { isReconnecting = false }
+        }
+        // Unexpected termination has already torn down transport state. Keep
+        // the hub entry alive while the current endpoint is being resolved.
+        if session?.state == .disconnected { session = nil }
+        error = nil
         do {
             let resolvedStation = try await resolveReconnectStation?(candidate)
             guard generation == reconnectGeneration,
@@ -1596,9 +1621,6 @@ final class EchoLinkConnectionService: ObservableObject {
             return
         }
 #endif
-        if active {
-            VoiceDiagnosticLog.reset()
-        }
         VoiceDiagnosticLog.record(
             "PTT requested active=\(active) connected=\(session?.state == .connected) remoteTransmitting=\(isRemoteTransmitting)"
         )
@@ -1945,7 +1967,9 @@ final class EchoLinkConnectionService: ObservableObject {
             station: station,
             startTime: Date().addingTimeInterval(-384),
             state: .connected,
-            sysopInfo: "\(station.callsign) demonstration node. This is a longer station description used to check wrapping on narrow displays.\nWeekly net at 19:00 local time. Visitors welcome."
+            sysopInfo: SimulatorDemoData.isStoreScreenshot
+                ? "Welcome to \(station.callsign).\nEvening net at 19:00 Pacific. All licensed amateurs welcome.\nPlease leave a short pause between transmissions. 73!"
+                : "\(station.callsign) demonstration node. This is a longer station description used to check wrapping on narrow displays.\nWeekly net at 19:00 local time. Visitors welcome."
         )
         incomingChatMessages = station.type == .conference
             ? SimulatorDemoData.messages
@@ -1955,6 +1979,9 @@ final class EchoLinkConnectionService: ObservableObject {
             : Array(SimulatorDemoData.participants.prefix(6))
         remotePadAllowed = station.type == .link || station.type == .repeater
         isRemoteTransmitting = SimulatorDemoData.isRemoteTalking
+        if SimulatorDemoData.isStoreScreenshot && isRemoteTransmitting {
+            outputLevel = 0.48
+        }
         audioStatusMessage = nil
         error = nil
     }
@@ -2611,6 +2638,9 @@ final class EchoLinkConnectionService: ObservableObject {
         if !isRemoteTransmitting {
             isRemoteTransmitting = true
         }
+        let sessionID = session?.id
+        let activeTransmitter = participantsByCallsign.values.first(where: { $0.isTransmitting })?.callsign
+        let voiceCallsign = activeTransmitter ?? primaryNodeCallsign()
         remoteVoiceActivityTask?.cancel()
         remoteVoiceActivityTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2619,12 +2649,16 @@ final class EchoLinkConnectionService: ObservableObject {
             } catch {
                 return
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, self.session?.id == sessionID else { return }
             self.isRemoteTransmitting = false
             self.remoteVoiceActivityTask = nil
+            if let voiceCallsign {
+                self.updateParticipantTransmittingState(
+                    callsign: voiceCallsign, isTransmitting: false, autoDecay: false)
+            }
         }
 
-        if let activeTransmitter = participantsByCallsign.values.first(where: { $0.isTransmitting })?.callsign {
+        if let activeTransmitter {
             updateParticipantTransmittingState(callsign: activeTransmitter, isTransmitting: true, autoDecay: true)
             return
         }
@@ -2662,9 +2696,15 @@ final class EchoLinkConnectionService: ObservableObject {
 
     private func scheduleTxDecay(for callsign: String) {
         txDecayTasks[callsign]?.cancel()
-        txDecayTasks[callsign] = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            self?.expireTransmittingFlag(for: callsign)
+        let sessionID = session?.id
+        txDecayTasks[callsign] = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled, self.session?.id == sessionID else { return }
+            self.expireTransmittingFlag(for: callsign)
         }
     }
 
@@ -2672,9 +2712,7 @@ final class EchoLinkConnectionService: ObservableObject {
         txDecayTasks[callsign] = nil
         guard var participant = participantsByCallsign[callsign], participant.isTransmitting else { return }
 
-        let elapsed = Date().timeIntervalSince(participant.lastActivity)
-        guard elapsed >= 1.8 else { return }
-
+        // Only transmit activity renews the timer; roster and chat updates do not.
         participant.isTransmitting = false
         participantsByCallsign[callsign] = participant
         publishActiveParticipants()
@@ -2718,6 +2756,9 @@ final class EchoLinkConnectionService: ObservableObject {
 
         let initialConnectionAge = Date().timeIntervalSince(initialSession.startTime)
         let endedDuringSetup = initialSession.state == .connecting || initialConnectionAge < 5
+        VoiceDiagnosticLog.record(
+            "remote BYE duringSetup=\(endedDuringSetup) connected=\(initialSession.state == .connected) peerDatagrams=\(handshakePeerDatagramCount)"
+        )
         if endedDuringSetup, recentRemoteChatBody() == nil {
             // NDATA and RTCP arrive on separate sockets; let an in-flight reason
             // reach the audio loop before finalizing the BYE.
@@ -2738,6 +2779,7 @@ final class EchoLinkConnectionService: ObservableObject {
         } else {
             message += "."
         }
+        VoiceDiagnosticLog.record("remote BYE reasonPresent=\(byeReason?.isEmpty == false) chatPresent=\(recentRemoteChatBody() != nil)")
         await finishSession(
             sessionID: sessionID,
             failureReason: message,

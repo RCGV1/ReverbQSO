@@ -13,7 +13,7 @@ final class QSOHub: ObservableObject {
         private let fallbackMode: EchoLinkNetworkMode
         private let modeProvider: @MainActor () -> EchoLinkNetworkMode?
 
-        var station: Station? { service.session?.station }
+        var station: Station? { service.session?.station ?? service.reconnectCandidate }
         var mode: EchoLinkNetworkMode { modeProvider() ?? fallbackMode }
 
         init(
@@ -34,11 +34,13 @@ final class QSOHub: ObservableObject {
     @Published private(set) var entries: [Entry] = []
     @Published private(set) var activeID: UUID?
     @Published var lastError: String?
+    @Published var recordingError: String?
 
     private let primary: EchoLinkConnectionService
     private let connectOperation: @MainActor (EchoLinkConnectionService, Station) async -> Void
     private let networkConfigurationProvider: @MainActor () -> EchoLinkProxyConfiguration
     private var subscriptions: [UUID: AnyCancellable] = [:]
+    private var initialConnectionIDs: Set<UUID> = []
     private var primarySubscription: AnyCancellable?
     var effectiveTransportProvider: ((String) -> EchoLinkEffectiveTransport?)?
     var configure: ((EchoLinkConnectionService, String) -> Void)?
@@ -55,10 +57,12 @@ final class QSOHub: ObservableObject {
         self.primary = primary
         self.networkConfigurationProvider = networkConfigurationProvider
         self.connectOperation = connectOperation
+        observeRecordingFailures(in: primary)
         primarySubscription = primary.$session.sink { [weak self, weak primary] session in
             guard session != nil else { return }
             Task { @MainActor [weak self, weak primary] in
                 guard let self, let primary,
+                      primary.session != nil,
                       !self.entries.contains(where: { $0.service === primary }) else { return }
                 self.adoptExistingPrimary(as: primary.localCallsign)
             }
@@ -92,12 +96,14 @@ final class QSOHub: ObservableObject {
             )
         )
         primary.pttPermission = { [weak self] in self?.activeID == id }
-        subscriptions[id] = primary.$session.dropFirst().sink { [weak self] session in
-            Task { @MainActor [weak self] in
-                if session == nil { self?.remove(id) }
-                else { self?.objectWillChange.send() }
+        subscriptions[id] = primary.$session.combineLatest(primary.$isReconnecting, primary.$reconnectCandidate).dropFirst()
+            .sink { [weak self, weak primary] _, _, _ in
+                Task { @MainActor [weak self, weak primary] in
+                    guard let self, let primary else { return }
+                    if primary.session == nil && !primary.isReconnecting && primary.reconnectCandidate == nil { self.remove(id) }
+                    else { self.objectWillChange.send() }
+                }
             }
-        }
         if activeID == nil {
             select(id)
         } else {
@@ -112,7 +118,16 @@ final class QSOHub: ObservableObject {
             lastError = "Sign in again to select an Automatic connection method."
             return EchoLinkConnectionService(networkConfigurationProvider: { configuredTransport })
         }
-        if entries.contains(where: { $0.mode == .direct }) && configuredTransport.mode == .direct {
+        // A new call replaces this account's ended presentation, not an active contact.
+        for entry in entries where entry.callsign.caseInsensitiveCompare(callsign) == .orderedSame
+            && !initialConnectionIDs.contains(entry.id)
+            && !entry.service.isReconnecting
+            && entry.service.session == nil {
+            remove(entry.id)
+        }
+        if entries.contains(where: { $0.mode == .direct && (initialConnectionIDs.contains($0.id) || $0.service.isReconnecting
+            || ($0.service.session != nil && $0.service.session?.state != .disconnected)) })
+            && configuredTransport.mode == .direct {
             lastError = "Direct mode supports one active QSO because EchoLink requires UDP ports 5198 and 5199. Select Relay or sign in through a proxy before starting another QSO."
             return EchoLinkConnectionService(networkConfigurationProvider: { configuredTransport })
         }
@@ -133,6 +148,7 @@ final class QSOHub: ObservableObject {
 
         service.authenticatedCallsign = callsign
         configure?(service, callsign)
+        observeRecordingFailures(in: service)
         let id = UUID()
         let entry = Entry(id: id, callsign: callsign, mode: mode, service: service,
             modeProvider: { [weak self] in
@@ -143,22 +159,26 @@ final class QSOHub: ObservableObject {
             return !self.entries.contains { $0.id != id && $0.service.session?.isPTTActive == true }
         }
         entries.append(entry)
-        subscriptions[id] = service.$session.dropFirst().sink { [weak self] session in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if session == nil {
-                    self.remove(id)
-                } else {
-                    self.objectWillChange.send()
+        initialConnectionIDs.insert(id)
+        subscriptions[id] = service.$session.combineLatest(service.$isReconnecting, service.$reconnectCandidate).dropFirst()
+            .sink { [weak self, weak service] _, _, _ in
+                Task { @MainActor [weak self, weak service] in
+                    guard let self, let service else { return }
+                    if !self.initialConnectionIDs.contains(id) && service.session == nil
+                        && !service.isReconnecting && service.reconnectCandidate == nil {
+                        self.remove(id)
+                    } else {
+                        self.objectWillChange.send()
+                    }
                 }
             }
-        }
         select(id)
         let savedResolver = service.resolveStation
         if preservingEndpoint { service.resolveStation = nil }
         await connectOperation(service, station)
+        initialConnectionIDs.remove(id)
         if preservingEndpoint { service.resolveStation = savedResolver }
-        if service.session == nil {
+        if service.session == nil && service.reconnectCandidate == nil {
             remove(id)
         }
         if let error = service.error {
@@ -195,6 +215,7 @@ final class QSOHub: ObservableObject {
             entry.service.setBackgroundMuted(false)
         }
         entries.removeAll()
+        initialConnectionIDs.removeAll()
         subscriptions.removeAll()
         activeID = nil
     }
@@ -202,6 +223,16 @@ final class QSOHub: ObservableObject {
     func disconnect(callsign: String) async {
         for entry in entries where entry.callsign == callsign {
             await entry.service.disconnect()
+            if entry.service.session == nil && !entry.service.isReconnecting
+                && entry.service.reconnectCandidate == nil {
+                remove(entry.id)
+            }
+        }
+    }
+
+    private func observeRecordingFailures(in service: EchoLinkConnectionService) {
+        service.onRecordingFailure = { [weak self] message in
+            self?.recordingError = message
         }
     }
 
@@ -210,6 +241,7 @@ final class QSOHub: ObservableObject {
         removed.service.pttPermission = nil
         removed.service.setBackgroundMuted(false)
         entries.removeAll { $0.id == id }
+        initialConnectionIDs.remove(id)
         subscriptions.removeValue(forKey: id)
         if activeID == id {
             activeID = entries.last?.id

@@ -43,8 +43,8 @@ struct PermissionOnboardingView: View {
                 .padding(.vertical, 24)
                 .frame(minHeight: geometry.size.height, alignment: usesInlineContinue(for: geometry.size.width) ? .center : .top)
             }
-            .onChange(of: geometry.size.width, initial: true) { _, width in
-                showsPinnedContinue = !usesInlineContinue(for: width)
+            .onChange(of: usesInlineContinue(for: geometry.size.width), initial: true) { _, usesInline in
+                showsPinnedContinue = !usesInline
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -156,7 +156,7 @@ struct MicrophonePermissionControl: View {
                 )
             }
 
-            Text("Used only while you hold push to talk.")
+            Text("The microphone may stay active while connected. Your voice is sent only when transmitting.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -180,7 +180,7 @@ struct MicrophonePermissionControl: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .disabled(isRequesting)
-                .accessibilityHint("Allows audio only when you transmit.")
+                .accessibilityHint("Allows microphone preparation and push to talk while connected.")
             } else if status == .denied {
                 Text("Transmitting requires microphone access.")
                     .font(.footnote)

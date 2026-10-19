@@ -5,6 +5,28 @@ import XCTest
 
 @MainActor
 final class DirectorySearchTests: XCTestCase {
+    func testMostConnectionsSortsReportedCountsFirstAndUpdatesOnRefresh() throws {
+        let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
+        var stations = [
+            Station(callsign: "K1UNKNOWN-R", description: "Hilltop", ipAddress: "192.0.2.1", type: .repeater),
+            Station(callsign: "K1ZERO-R", description: "Hilltop [0/20]", ipAddress: "192.0.2.2", type: .repeater),
+            Station(callsign: "K1B-R", description: "Hilltop [16/100]", ipAddress: "192.0.2.3", type: .repeater),
+            Station(callsign: "K1A-R", description: "Hilltop [16/20] [ON 12:34]", ipAddress: "192.0.2.4", type: .repeater),
+            Station(callsign: "K1LINK-L", description: "Metro [3/20]", ipAddress: "192.0.2.5", type: .link)
+        ]
+        viewModel.ingest(stations)
+        let ids = Dictionary(uniqueKeysWithValues: viewModel.stations.map { ($0.callsign, $0.id) })
+        viewModel.sortOrder = try XCTUnwrap(DirectoryViewModel.SortOrder(rawValue: "Most connections"))
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["K1A-R", "K1B-R", "K1LINK-L", "K1ZERO-R", "K1UNKNOWN-R"])
+        viewModel.typeFilter = .repeater
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["K1A-R", "K1B-R", "K1ZERO-R", "K1UNKNOWN-R"])
+        stations[1].description = "Hilltop [19/20]"
+        viewModel.ingest(stations)
+        XCTAssertEqual(viewModel.stations.map(\.callsign), ["K1ZERO-R", "K1A-R", "K1B-R", "K1UNKNOWN-R"])
+        for station in viewModel.stations { XCTAssertEqual(station.id, ids[station.callsign]) }
+        XCTAssertTrue(viewModel.regionSections.isEmpty)
+    }
+
     func testRegionSortGroupsCountriesAndKeepsUnknownLocationsLast() throws {
         let viewModel = DirectoryViewModel(directoryService: EchoLinkDirectoryService())
         viewModel.ingest(["K6ABC-R", "PY2ABC-R", "VK2ABC-R", "DL1ABC-R", "*ECHOTEST*",

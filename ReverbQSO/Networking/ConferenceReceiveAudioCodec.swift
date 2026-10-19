@@ -44,10 +44,10 @@ final class ConferenceReceiveAudioCodec {
             guard let encoded = GSMCodec.stripHeader(candidateGSM.encode(decoded.received)) else { return nil }
             forwardingPayload = encoded
         case .pcm(let decoded):
-            guard !decoded.isEmpty, decoded.count <= 640, decoded.count.isMultiple(of: 160) else { return nil }
+            guard !decoded.isEmpty, decoded.count <= 640, decoded.count.isMultiple(of: 80) else { return nil }
             samples = decoded
-            guard let encoded = GSMCodec.stripHeader(candidateGSM.encode(decoded)) else { return nil }
-            forwardingPayload = encoded
+            // GSM buffers the remaining 80 samples while native PCM is playable now.
+            forwardingPayload = GSMCodec.stripHeader(candidateGSM.encode(decoded)) ?? Data()
         case .unsupportedPayloadType:
             return nil
         }

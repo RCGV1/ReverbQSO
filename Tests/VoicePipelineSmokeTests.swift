@@ -223,6 +223,8 @@ final class QSOViewModelTests: XCTestCase {
         await fulfillment(of: [lookupStarted], timeout: 1)
         XCTAssertTrue(service.isReconnecting)
         XCTAssertTrue(viewModel.canCancelConnection)
+        XCTAssertFalse(viewModel.shouldDismissAfterDisconnect,
+            "Retain QSO controls while reconnect refreshes the station endpoint")
 
         viewModel.cancelConnection()
         await fulfillment(of: [reconnectCancelled], timeout: 1)
@@ -232,6 +234,8 @@ final class QSOViewModelTests: XCTestCase {
         XCTAssertFalse(service.isReconnecting)
         XCTAssertNil(service.session)
         XCTAssertNil(service.reconnectCandidate)
+        XCTAssertTrue(viewModel.shouldDismissAfterDisconnect,
+            "Cancel must dismiss even when the presentation session was already nil")
     }
 
     func testReconnectAllowsOnlyOneFreshLookupAtATime() async {

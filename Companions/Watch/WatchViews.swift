@@ -270,11 +270,11 @@ private struct WatchStationRow: View {
                 } label: {
                     rowLabel
                 }
-                .disabled(model.preferredDestination(for: station) == nil)
+                .disabled(model.preferredDestination(for: station) == nil || currentStation.connectionUnavailableReason != nil)
             }
         }
         .contextMenu {
-            if !currentStation.isRelayOnly {
+            if currentStation.connectionUnavailableReason == nil {
                 if model.canUsePhone {
                     Button("Connect on iPhone", systemImage: "iphone") {
                         Task { await model.connect(to: station, destination: .iPhone, savedStation: savedStation) }
@@ -297,6 +297,9 @@ private struct WatchStationRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(station.callsign).font(.headline.monospaced()).lineLimit(1)
                 Text(destinationLabel).font(.caption2).foregroundStyle(.secondary)
+                if let count = currentStation.reportedConnections {
+                    Text(count.displayText).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
             if !currentStation.isRelayOnly,
@@ -310,6 +313,8 @@ private struct WatchStationRow: View {
 
     private var destinationLabel: String {
         if currentStation.isRelayOnly { return "Outgoing calls only" }
+        if currentStation.isConnectionLimitReached { return "Connection limit reached" }
+        if currentStation.isBusy { return "Not accepting connections" }
         return switch model.preferredDestination(for: station) {
         case .iPhone: "Connect on iPhone"
         case .onWatch: "Connect on Watch"

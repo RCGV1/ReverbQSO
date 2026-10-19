@@ -6,7 +6,6 @@ import SwiftUI
 struct StationDetailSheet: View {
 
     let station: Station
-    @ObservedObject var directoryService: EchoLinkDirectoryService
     let isOnline: Bool
     let isFavorite: Bool
     let currentCallsign: String
@@ -74,30 +73,19 @@ struct StationDetailSheet: View {
                                 )
                             }
 
-                            if !station.description.isEmpty {
-                                infoRow(icon: "text.quote", label: "Description", value: station.description)
+                            if !station.displayDescription.isEmpty {
+                                infoRow(icon: "text.quote", label: "Description", value: station.displayDescription)
                             }
 
-                            directoryDetails
+                            if let count = station.reportedConnections {
+                                infoRow(icon: "person.2", label: "Connections", value: count.displayText)
+                                infoRow(icon: "person.2.badge.gearshape", label: "Advertised connection limit", value: "\(count.limit)")
+                            }
 
                             if station.type == .link || station.type == .repeater {
                                 stationReport
                             }
 
-                            if station.isBusy {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "waveform")
-                                        .foregroundStyle(.red)
-                                        .frame(width: 24)
-                                    Text("Busy — not accepting new connections")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.red)
-                                    Spacer()
-                                }
-                                .padding(12)
-                                .background(Color.red.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
                         }
                         .padding(.horizontal, 24)
                         if !station.isRelayOnly, savedCallsigns.count > 1 {
@@ -129,6 +117,9 @@ struct StationDetailSheet: View {
 
                     }
                 }
+                // Keep scrolled content inside its viewport, below the title bar
+                // and above the pinned connection controls.
+                .clipped()
 
                 // Connect button at bottom
                 if !station.isRelayOnly {
@@ -148,10 +139,19 @@ struct StationDetailSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(station.isBusy || !isOnline)
+                        .disabled(!isOnline || station.connectionUnavailableReason != nil)
                         .padding(.horizontal, 24)
-                        .padding(.vertical, 16)
+                        .padding(.top, 16)
+                        if let reason = !isOnline ? "Station is no longer online." : station.connectionUnavailableReason {
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
+                                .padding(.top, 8)
+                        }
                     }
+                    .padding(.bottom, 16)
                 }
             }
             .navigationTitle(station.type == .user ? "Operator" : "Station")
@@ -173,40 +173,6 @@ struct StationDetailSheet: View {
     }
 
     // MARK: - Subviews
-
-    private var directoryDetails: some View {
-        let observation = directoryService.observation(for: station)
-        let listed = observation != nil || isOnline
-        let lastObserved = observation?.lastSeenAt
-            ?? (isOnline ? directoryService.lastSuccessfulSnapshotAt : nil)
-
-        return HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "list.bullet")
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Directory")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(listed ? "Listed" : "Not currently listed")
-                    .font(.subheadline)
-                if listed {
-                    Text(lastObserved.map { "Last observed \(relativeDate($0))" } ?? "Update time unavailable")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let observation, observation.consecutiveSnapshots > 1 {
-                    Text("Seen in \(observation.consecutiveSnapshots) updates")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-        }
-        .padding(12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
 
     private var stationReport: some View {
         VStack(alignment: .leading, spacing: 8) {

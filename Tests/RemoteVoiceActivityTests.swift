@@ -5,6 +5,110 @@ import XCTest
 
 @MainActor
 final class RemoteVoiceActivityTests: XCTestCase {
+    func testSvxLinkRemoteOperatorRemainsTheTalkerWhenAudioArrives() async {
+        let service = EchoLinkConnectionService()
+        service.session = QSOSession(
+            station: Station(callsign: "W6SLG-R", ipAddress: "127.0.0.1", type: .repeater),
+            state: .connected
+        )
+        await service.handleAudioData(EchoLinkControlPacketCodec.buildNDATAInfoPacket(message: """
+        SvxLink 26.05.1 - W6SLG-R (1)
+
+        > K1ABC         Alex
+
+        W6SLG-R         UCSC repeater
+        """))
+        service.noteIncomingAudioActivity()
+
+        XCTAssertEqual(service.activeNodeParticipants.filter(\.isTransmitting).map(\.callsign), ["K1ABC"])
+        await service.disconnect()
+    }
+
+    func testSvxLinkRosterSwitchesOperatorAndThenClearsOnIdle() async {
+        let service = EchoLinkConnectionService()
+        service.session = QSOSession(
+            station: Station(callsign: "W6SLG-R", ipAddress: "127.0.0.1", type: .repeater),
+            state: .connected
+        )
+        for callsign in ["K1ABC", "K2XYZ"] {
+            await service.handleAudioData(EchoLinkControlPacketCodec.buildNDATAInfoPacket(message: """
+            SvxLink 26.05.1 - W6SLG-R (2)
+
+            > \(callsign)         Operator
+
+            W6SLG-R         UCSC repeater
+            """))
+            service.noteIncomingAudioActivity()
+            XCTAssertEqual(service.activeNodeParticipants.filter(\.isTransmitting).map(\.callsign), [callsign])
+        }
+        await service.handleAudioData(EchoLinkControlPacketCodec.buildNDATAInfoPacket(message: """
+        SvxLink 26.05.1 - W6SLG-R (2)
+
+        W6SLG-R         UCSC repeater
+        K1ABC         Alex
+        K2XYZ         Taylor
+        """))
+        XCTAssertFalse(service.activeNodeParticipants.contains { $0.isTransmitting })
+        await service.disconnect()
+    }
+
+    func testParticipantTalkingClearsWhenReceiveActivityExpires() async throws {
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40))
+        service.session = QSOSession(
+            station: Station(callsign: "N0CALL-R", ipAddress: "127.0.0.1"),
+            state: .connected
+        )
+        service.noteIncomingAudioActivity()
+        XCTAssertTrue(service.activeNodeParticipants.contains { $0.isTransmitting })
+
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertFalse(service.isRemoteTransmitting)
+        XCTAssertFalse(service.activeNodeParticipants.contains { $0.isTransmitting })
+        XCTAssertEqual(service.activeNodeParticipants.map(\.callsign), ["N0CALL-R"])
+        await service.disconnect()
+    }
+
+    func testRosterRefreshDoesNotKeepStatusOnlyTalkerStuck() async throws {
+        let service = EchoLinkConnectionService()
+        service.session = QSOSession(
+            station: Station(callsign: "N0CALL-R", ipAddress: "127.0.0.1"),
+            state: .connected
+        )
+        await service.handleAudioData(EchoLinkControlPacketCodec.buildNDATAInfoPacket(
+            message: "K1ABC is transmitting"))
+        XCTAssertTrue(service.activeNodeParticipants.contains { $0.callsign == "K1ABC" && $0.isTransmitting })
+
+        try await Task.sleep(for: .milliseconds(1500))
+        await service.handleAudioData(EchoLinkControlPacketCodec.buildNDATAInfoPacket(
+            message: "K1ABC online"))
+        try await Task.sleep(for: .milliseconds(750))
+
+        XCTAssertFalse(service.activeNodeParticipants.contains { $0.isTransmitting })
+        XCTAssertTrue(service.activeNodeParticipants.contains { $0.callsign == "K1ABC" })
+        await service.disconnect()
+    }
+
+    func testContinuedVoiceKeepsTalkingUntilTheLatestBurstExpires() async throws {
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(200))
+        service.session = QSOSession(
+            station: Station(callsign: "N0CALL-R", ipAddress: "127.0.0.1"),
+            state: .connected
+        )
+        service.noteIncomingAudioActivity()
+        try await Task.sleep(for: .milliseconds(120))
+        service.noteIncomingAudioActivity()
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertTrue(service.isRemoteTransmitting)
+        XCTAssertTrue(service.activeNodeParticipants.contains { $0.isTransmitting })
+        try await Task.sleep(for: .milliseconds(160))
+
+        XCTAssertFalse(service.isRemoteTransmitting)
+        XCTAssertFalse(service.activeNodeParticipants.contains { $0.isTransmitting })
+        await service.disconnect()
+    }
+
     func testAcceptedRemoteVoiceBlocksPTTUntilActivityExpires() async {
         let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40))
         service.session = QSOSession(

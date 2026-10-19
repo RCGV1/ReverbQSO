@@ -27,14 +27,21 @@ actor EchoLinkProxySession {
         }
     }
 
+    typealias IPv4Resolver = @Sendable (String) throws -> String
+
     let configuration: EchoLinkProxyConfiguration
     let callsign: String
 
     private let client: EchoLinkProxyClient
+    private let directoryResolver: IPv4Resolver
+    private let directoryResolutionTimeout: Duration
     private var receiveTask: Task<Void, Never>?
     private var udpBuffer: LiveTransportMessageBuffer<EchoLinkProxyMessage>?
     private var statusWaiter: (UUID, CheckedContinuation<Void, Error>)?
+    private var resolutionWaiter: (UUID, CheckedContinuation<String, Error>)?
+    private var resolutionTimeoutTask: Task<Void, Never>?
     private var responseWaiter: (UUID, ResponseBoundary, Data, CheckedContinuation<Data, Error>)?
+    private var responseFraming = CountedDirectoryFramer()
     private var isDirectoryTransactionActive = false
     private var serializedTurnActive = false
     private var directoryTurnWaiters: [(UUID, CheckedContinuation<Void, Error>)] = []
@@ -43,15 +50,20 @@ actor EchoLinkProxySession {
     private var udpConsumerID: UUID?
     private var quarantinedDirectoryRecovery: (@Sendable () -> Void)?
 
-    private init(client: EchoLinkProxyClient, configuration: EchoLinkProxyConfiguration, callsign: String) {
+    private init(client: EchoLinkProxyClient, configuration: EchoLinkProxyConfiguration, callsign: String,
+                 directoryResolver: @escaping IPv4Resolver, directoryResolutionTimeout: Duration) {
         self.client = client
         self.configuration = configuration
         self.callsign = callsign
+        self.directoryResolver = directoryResolver
+        self.directoryResolutionTimeout = directoryResolutionTimeout
     }
 
     static func connect(
         configurations: [EchoLinkProxyConfiguration],
-        callsign: String
+        callsign: String,
+        directoryResolutionTimeout: Duration = .seconds(5),
+        directoryResolver: IPv4Resolver? = nil
     ) async throws -> EchoLinkProxySession {
         let connected = try await EchoLinkProxyClient.connectFirstAvailable(
             configurations: configurations,
@@ -60,7 +72,9 @@ actor EchoLinkProxySession {
         let session = EchoLinkProxySession(
             client: connected.client,
             configuration: connected.configuration,
-            callsign: callsign.uppercased()
+            callsign: callsign.uppercased(),
+            directoryResolver: directoryResolver ?? Self.resolveIPv4,
+            directoryResolutionTimeout: directoryResolutionTimeout
         )
         await session.startReceiving()
         return session
@@ -183,7 +197,10 @@ actor EchoLinkProxySession {
     private func performDirectoryRequest(
         _ payload: Data, host: String, boundary: ResponseBoundary, timeout: Duration
     ) async throws -> Data {
-        let numericHost = try Self.resolveIPv4(host)
+        let numericHost = try await resolveDirectoryHost(host, timeout: min(timeout, directoryResolutionTimeout))
+        try Task.checkCancellation()
+        if let terminalError { throw terminalError }
+        guard !directoryQuarantined else { throw SessionError.directoryDeferred }
         do {
             try await awaitDirectoryOpen(host: numericHost, timeout: timeout)
         } catch {
@@ -280,6 +297,12 @@ actor EchoLinkProxySession {
             guard let (id, boundary, existing, continuation) = responseWaiter else { return }
             var buffer = existing
             buffer.append(message.payload)
+            responseFraming.append(message.payload)
+            guard buffer.count <= 4_000_000 else {
+                responseWaiter = nil
+                continuation.resume(throwing: DirectoryClientError.unexpectedResponse("Directory response exceeded the size limit"))
+                return
+            }
             if responseComplete(buffer, boundary: boundary) {
                 responseWaiter = nil
                 continuation.resume(returning: buffer)
@@ -289,7 +312,7 @@ actor EchoLinkProxySession {
         case .tcpClose:
             guard let (_, _, buffer, continuation) = responseWaiter else { return }
             responseWaiter = nil
-            if buffer.isEmpty {
+            if buffer.isEmpty || responseFraming.status == .incomplete {
                 continuation.resume(throwing: SessionError.directoryClosed)
             } else {
                 continuation.resume(returning: buffer)
@@ -310,6 +333,36 @@ actor EchoLinkProxySession {
         case .tcpOpen:
             break
         }
+    }
+
+    private func resolveDirectoryHost(_ host: String, timeout: Duration) async throws -> String {
+        let id = UUID()
+        let resolver = directoryResolver
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                resolutionWaiter = (id, continuation)
+                // Blocking system DNS must not hold the actor that delivers QSO audio.
+                Task.detached { [weak self] in
+                    let result = Result { try resolver(host) }
+                    await self?.finishResolution(id: id, result: result)
+                }
+                resolutionTimeoutTask = Task { [weak self] in
+                    do { try await Task.sleep(for: timeout) } catch { return }
+                    await self?.finishResolution(id: id, result: .failure(SessionError.timedOut))
+                }
+            }
+        } onCancel: {
+            Task { await self.finishResolution(id: id, result: .failure(CancellationError())) }
+        }
+    }
+
+    private func finishResolution(id: UUID, result: Result<String, Error>) {
+        guard let (current, continuation) = resolutionWaiter, current == id else { return }
+        resolutionWaiter = nil
+        resolutionTimeoutTask?.cancel()
+        resolutionTimeoutTask = nil
+        continuation.resume(with: result)
     }
 
     private func awaitDirectoryOpen(host: String, timeout: Duration) async throws {
@@ -334,6 +387,7 @@ actor EchoLinkProxySession {
     ) async throws -> Data {
         let id = UUID()
         return try await withCheckedThrowingContinuation { continuation in
+            responseFraming = CountedDirectoryFramer()
             responseWaiter = (id, boundary, Data(), continuation)
             Task {
                 do { try await client.sendTCP(payload) }
@@ -354,6 +408,9 @@ actor EchoLinkProxySession {
             return data.contains(0x0A) || data.contains(0x0D)
                 || DirectoryLoginResponseValidator.isSuccessResponse(candidate)
         case .marker(let marker):
+            if marker == Data("+++".utf8), responseFraming.status != .notCounted {
+                return responseFraming.status == .complete
+            }
             return data.range(of: marker) != nil
         }
     }
@@ -373,6 +430,7 @@ actor EchoLinkProxySession {
     private func failAll(_ error: Error) {
         guard terminalError == nil else { return }
         terminalError = error
+        if let (id, _) = resolutionWaiter { finishResolution(id: id, result: .failure(error)) }
         udpConsumerID = nil
         quarantinedDirectoryRecovery = nil
         let waiting = directoryTurnWaiters

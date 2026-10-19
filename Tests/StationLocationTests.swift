@@ -4,6 +4,58 @@ import XCTest
 @testable import ReverbQSO
 
 final class StationLocationTests: XCTestCase {
+    func testStatusOnlyDescriptionDoesNotBecomeAnAdvertisedLocation() {
+        for status in ["[ON: 00:08]", "[ON 12:34]", "[BUSY 23:59]"] {
+            let station = Station(callsign: "K1ABC-R", description: status, ipAddress: "192.0.2.1")
+            XCTAssertNil(station.locationDisplay, status)
+        }
+    }
+
+    func testDisplayDescriptionHidesDirectoryStatusButPreservesOperatorTextAndRelayEligibility() {
+        for suffix in ["[ON: 00:08]", "[ON 12:34]", "[busy:23:59]"] {
+            let raw = "Hilltop [r] [0/20]   \(suffix)  "
+            let station = Station(callsign: "K1ABC-R", description: raw, ipAddress: "192.0.2.1")
+            XCTAssertEqual(station.displayDescription, "Hilltop [r]")
+            XCTAssertEqual(station.description, raw)
+            XCTAssertTrue(station.isRelayOnly)
+        }
+        for text in ["Night net at 00:08", "[Svx] Hilltop", "Radio [ON AIR]", "", "Hilltop [ON 99:99]"] {
+            XCTAssertEqual(Station(callsign: "K1ABC-R", description: text, ipAddress: "192.0.2.1").displayDescription, text)
+        }
+    }
+
+    func testDisplayDescriptionSeparatesPublishedConnectionCapacity() {
+        XCTAssertEqual(Station(callsign: "K1ABC-R", description: "El Cajon, CA [0/20]", ipAddress: "192.0.2.1").displayDescription, "El Cajon, CA")
+        XCTAssertEqual(Station(callsign: "K1ABC-R", description: "[20/20] [ON: 00:08]", ipAddress: "192.0.2.1").displayDescription, "")
+        for text in ["Net [0/0]", "Net [x/20]", "Net [0/20] schedule", "Net [144/440 MHz]"] {
+            XCTAssertEqual(Station(callsign: "K1ABC-R", description: text, ipAddress: "192.0.2.1").displayDescription, text)
+        }
+    }
+
+    func testPublishedCapacityControlsConnectionAvailabilityWithoutInventingCounts() {
+        var station = Station(callsign: "K1ABC-R", description: "Hilltop [0/20] [ON 12:34]", ipAddress: "192.0.2.1")
+        XCTAssertEqual(station.reportedConnections?.connected, 0)
+        XCTAssertEqual(station.reportedConnections?.limit, 20)
+        XCTAssertNil(station.connectionUnavailableReason)
+        station.description = "Hilltop [20 / 20]"
+        XCTAssertNil(station.connectionUnavailableReason)
+        station.isBusy = true
+        XCTAssertEqual(station.connectionUnavailableReason, "Connection limit reached (20 connected; advertised limit 20).")
+        station.isBusy = false
+        station.description = "Hilltop [21/20]"
+        XCTAssertTrue(station.reportedConnections?.isAtReportedLimit == true)
+        XCTAssertNil(station.connectionUnavailableReason)
+        for text in ["Hilltop", "Hilltop [0/0]", "Hilltop [x/20]", "Hilltop [0/20] schedule", "Hilltop [999999999999999999999/20]"] {
+            station.description = text
+            XCTAssertNil(station.reportedConnections, text)
+            XCTAssertNil(station.connectionUnavailableReason, text)
+        }
+        station.isBusy = true
+        XCTAssertEqual(station.connectionUnavailableReason, "This station is not accepting new connections.")
+        station.description = "Hilltop [r] [0/20]"
+        XCTAssertEqual(station.connectionUnavailableReason, "This station cannot receive calls.")
+    }
+
     func testCountryFlagsRequireRecognizedTwoLetterCodes() {
         XCTAssertEqual(CountryFlag.emoji(for: "US"), "🇺🇸")
         XCTAssertEqual(CountryFlag.emoji(for: "gb"), "🇬🇧")

@@ -20,6 +20,7 @@ final class QSORecordingCoordinator: ObservableObject {
     private let preferenceKey: String
     private var callsign: String?
     private var lastAutomaticPreference = false
+    private var automaticStartError: String?
 
     init(folder: URL? = nil, demo: Bool = false, defaults: UserDefaults = .standard) {
         automaticRecorder = QSORecordingService(folder: folder, demo: demo, rotatesAtLimit: true)
@@ -32,6 +33,7 @@ final class QSORecordingCoordinator: ObservableObject {
         guard self.callsign == nil else { return }
         self.callsign = callsign
         errorMessage = nil
+        automaticStartError = nil
         lastAutomaticPreference = false
         refreshAutomaticRecording()
     }
@@ -39,15 +41,21 @@ final class QSORecordingCoordinator: ObservableObject {
     func refreshAutomaticRecording() {
         guard let callsign else { return }
         let shouldRecord = defaults.bool(forKey: preferenceKey)
-        defer { lastAutomaticPreference = shouldRecord }
 
         if !shouldRecord {
             if automaticRecorder.isRecording { automaticRecorder.stop() }
+            lastAutomaticPreference = false
         } else if !lastAutomaticPreference {
             do {
                 try automaticRecorder.start(callsign: callsign, kind: .qso)
+                lastAutomaticPreference = true
+                if let automaticStartError, errorMessage == automaticStartError { errorMessage = nil }
+                automaticStartError = nil
             } catch {
-                errorMessage = "Could not start automatic recording: \(error.localizedDescription)"
+                let message = "Could not start automatic recording: \(error.localizedDescription)"
+                automaticStartError = message
+                errorMessage = message
+                lastAutomaticPreference = false
             }
         }
         updateState()

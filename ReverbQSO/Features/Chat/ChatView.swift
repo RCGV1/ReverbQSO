@@ -203,6 +203,7 @@ struct ChatBubble: View {
     let message: ChatMessage
     var showsSender = true
     var showsTimestamp = true
+    @State private var showsDetails = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
@@ -236,5 +237,52 @@ struct ChatBubble: View {
 
             if !message.isOutgoing { Spacer(minLength: 48) }
         }
+        .contextMenu {
+            Button("Copy", systemImage: "doc.on.doc") {
+                UIPasteboard.general.string = message.body
+            }
+            Button("Message Details", systemImage: "info.circle") {
+                showsDetails = true
+            }
+        }
+        .sheet(isPresented: $showsDetails) {
+            ChatMessageDetailsView(message: message)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+private struct ChatMessageDetailsView: View {
+    let message: ChatMessage
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("From", value: message.sender)
+                    if !message.relayedVia.isEmpty {
+                        LabeledContent("Received through", value: message.relayedVia.joined(separator: ", "))
+                    }
+                    LabeledContent(message.isOutgoing ? "Sent" : "Received",
+                                   value: message.timestamp.formatted(date: .abbreviated, time: .shortened))
+                }
+                Section("Message") {
+                    Text(message.body)
+                        .textSelection(.enabled)
+                }
+            }
+            .navigationTitle("Message Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        #if targetEnvironment(macCatalyst)
+        .frame(minWidth: 360, minHeight: 340)
+        #endif
     }
 }

@@ -56,7 +56,7 @@ extension Station {
     /// Human-friendly cleanup of the operator-supplied directory location.
     /// Country provenance is exposed separately and is never prefixed here.
     var locationDisplay: String? {
-        let raw = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = displayDescription
         guard !raw.isEmpty else { return nil }
 
         let normalized = Self.normalizeLocationRaw(raw)

@@ -113,6 +113,13 @@ final class QSOViewModel: ObservableObject {
         session?.state == .connecting || connectionService.isReconnecting
     }
 
+    var shouldDismissAfterDisconnect: Bool {
+        let state = connectionService.session?.state
+        return (state == nil || state == .disconnected)
+            && !connectionService.isReconnecting
+            && connectionService.error == nil
+    }
+
     func dismissError() {
         connectionService.clearError()
     }

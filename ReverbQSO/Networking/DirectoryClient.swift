@@ -488,26 +488,28 @@ actor DirectoryClient {
             throw DirectoryClientError.connectionFailed("Directory server returned no data")
         }
         let text = String(data: raw, encoding: .utf8) ?? String(data: raw, encoding: .isoLatin1) ?? ""
-        let uppercase = text.uppercased()
-
-        if uppercase.contains("INCORRECT PASSWORD") || uppercase.contains("DENIED") {
-            logger.error("Directory fetch auth denied responseSnippet='\(String(text.prefix(200)), privacy: .public)'")
-            throw DirectoryClientError.loginDenied
-        }
-        if uppercase.contains("IN-USE") {
-            logger.error("Directory fetch login in-use responseSnippet='\(String(text.prefix(200)), privacy: .public)'")
-            throw DirectoryClientError.loginInUse
+        var framing = CountedDirectoryFramer()
+        framing.append(raw)
+        guard framing.status != .incomplete else {
+            throw DirectoryClientError.unexpectedResponse("Incomplete counted directory response")
         }
 
         let stations = StationParser.parseDirectory(raw: raw)
         logger.debug("Directory fetch rawBytes=\(raw.count) parsedStations=\(stations.count)")
-
-        if stations.isEmpty && !StationParser.isValidEmptyCountedDirectory(raw: raw) {
-            logger.error("Directory fetch parsed empty list; responseSnippet='\(String(text.prefix(300)), privacy: .public)'")
-            throw DirectoryClientError.unexpectedResponse("Directory response could not be parsed")
+        if !stations.isEmpty || StationParser.isValidEmptyCountedDirectory(raw: raw) {
+            return stations
         }
 
-        return stations
+        // Authentication errors are standalone responses; station prose is data.
+        if framing.status == .notCounted {
+            let uppercase = text.uppercased()
+            if uppercase.contains("INCORRECT PASSWORD") || uppercase.contains("DENIED") {
+                throw DirectoryClientError.loginDenied
+            }
+            if uppercase.contains("IN-USE") { throw DirectoryClientError.loginInUse }
+        }
+        logger.error("Directory fetch parsed empty list; responseSnippet='\(String(text.prefix(300)), privacy: .public)'")
+        throw DirectoryClientError.unexpectedResponse("Directory response could not be parsed")
     }
 
     /// Re-send the online registration to stay listed in the directory.
@@ -982,10 +984,11 @@ actor DirectoryClient {
         throw DirectoryClientError.timeout
     }
 
-    /// Accumulate chunks until the byte sequence `marker` is present, then return everything.
+    /// Counted lists finish only after every advertised record and the final marker.
     private func readUntilMarker(_ marker: String, from conn: NWConnection) async throws -> Data {
         var buf = Data()
         let markerBytes = Data(marker.utf8)
+        var framing = CountedDirectoryFramer()
         let deadline = Date().addingTimeInterval(60)   // max 60 s for the full list
 
         while Date() < deadline {
@@ -995,6 +998,7 @@ actor DirectoryClient {
             do {
                 let chunk = try await receiveChunk(from: conn, timeout: remaining)
                 buf.append(chunk)
+                framing.append(chunk)
             } catch {
                 if buf.isEmpty {
                     throw error
@@ -1002,12 +1006,16 @@ actor DirectoryClient {
                 break   // connection closed — return what we have
             }
 
-            if buf.range(of: markerBytes) != nil { return buf }
-            if buf.count > 4_000_000             { return buf }   // safety valve
+            guard buf.count <= 4_000_000 else {
+                throw DirectoryClientError.unexpectedResponse("Directory response exceeded the size limit")
+            }
+            if framing.status == .complete { return buf }
+            if framing.status == .notCounted, buf.range(of: markerBytes) != nil { return buf }
         }
 
-        if buf.isEmpty {
-            throw DirectoryClientError.timeout
+        if buf.isEmpty { throw DirectoryClientError.timeout }
+        guard framing.status != .incomplete else {
+            throw DirectoryClientError.unexpectedResponse("Incomplete counted directory response")
         }
         return buf
     }

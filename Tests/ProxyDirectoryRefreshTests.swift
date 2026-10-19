@@ -492,6 +492,217 @@ final class ProxyDirectoryRefreshTests: XCTestCase {
         XCTAssertEqual(proxy.authenticatedConnectionCount, 1)
     }
 
+    func testProxyCountedDirectoryWaitsPastDescriptionMarkersAndSplitTerminator() async throws {
+        let chunks = ["@@@\r\n2\r\nK6FIRST-R\r\nCafé +++ road\r\n",
+                      "123\r\n192.0.2.1\r\nK6LAST-L\r\n+++\r\n456\r\n192.0.2.2\r\n+", "+", "+"]
+            .map { $0.data(using: .isoLatin1)! }
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, directoryChunks: chunks)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let configuration = EchoLinkProxyConfiguration(mode: .customProxy, host: "127.0.0.1",
+                                                       port: proxy.port, password: "proxy-password")
+        let session = try await EchoLinkProxySession.connect(configurations: [configuration], callsign: "N0TEST")
+        let response = try await session.directoryRequest(Data("s".utf8), host: "127.0.0.1",
+            boundary: .marker(Data("+++".utf8)), timeout: .seconds(2))
+        XCTAssertEqual(response, chunks.reduce(Data(), +))
+        XCTAssertEqual(StationParser.parseDirectory(raw: response).map(\.callsign), ["K6FIRST-R", "K6LAST-L"])
+        await session.close()
+    }
+
+    func testProxyCountedDirectoryCloseRejectsIncompleteAdvertisedCount() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, directoryChunks: [
+            Data("@@@\n2\nK6PART-R\nOnly one station\n123\n192.0.2.1\n+++".utf8)
+        ], closeDirectoryAfterResponse: true)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let configuration = EchoLinkProxyConfiguration(mode: .customProxy, host: "127.0.0.1",
+                                                       port: proxy.port, password: "proxy-password")
+        let session = try await EchoLinkProxySession.connect(configurations: [configuration], callsign: "N0TEST")
+        do {
+            _ = try await session.directoryRequest(Data("s".utf8), host: "127.0.0.1",
+                boundary: .marker(Data("+++".utf8)), timeout: .seconds(2))
+            XCTFail("A proxy directory close cannot commit an incomplete counted response")
+        } catch { }
+        await session.close()
+    }
+
+    func testProxyCountedDirectoryRejectsOversizedIncompleteResponse() async throws {
+        let prefix = Data("@@@\n2\nK6PART-R\nOne station\n123\n192.0.2.1\nK6NEXT-R\n".utf8)
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh,
+            directoryChunks: [prefix] + Array(repeating: Data(repeating: 65, count: 5_000), count: 801),
+            closeDirectoryAfterResponse: true, directoryChunkInterval: 0.001)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let configuration = EchoLinkProxyConfiguration(mode: .customProxy, host: "127.0.0.1",
+                                                       port: proxy.port, password: "proxy-password")
+        let session = try await EchoLinkProxySession.connect(configurations: [configuration], callsign: "N0TEST")
+        do {
+            _ = try await session.directoryRequest(Data("s".utf8), host: "127.0.0.1",
+                boundary: .marker(Data("+++".utf8)), timeout: .seconds(5))
+            XCTFail("The proxy response limit must reject an incomplete directory")
+        } catch DirectoryClientError.unexpectedResponse { }
+        await session.close()
+    }
+
+    func testProxyDirectoryDescriptionsCannotLogOutAnAuthenticatedAccount() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh, directoryChunks: [
+            Data("@@@\n3\nK6FIRST-R\nDENIED access road\n123\n192.0.2.1\nK6NEXT-R\nINCORRECT PASSWORD help\n456\n192.0.2.2\nK6LAST-L\nIN-USE antenna\n789\n192.0.2.3\n+++".utf8)
+        ])
+        try await proxy.start()
+        defer { proxy.stop() }
+        let (service, _) = makeService(proxy: proxy)
+        await service.login(callsign: "N0TEST", password: "directory-password")
+        XCTAssertTrue(service.isLoggedIn, service.error?.localizedDescription ?? "")
+        XCTAssertEqual(service.stations.map(\.callsign), ["K6FIRST-R", "K6NEXT-R", "K6LAST-L"])
+        XCTAssertNil(service.error)
+        await service.logout()
+        await service.closeProxySession()
+    }
+
+    func testDirectoryResolutionDoesNotBlockIncomingProxyVoice() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let resolver = SuspendedProxyDirectoryResolver()
+        defer { resolver.release() }
+        let session = try await makeResolvingSession(proxy: proxy, resolver: resolver)
+        let stream = await session.udpMessages()
+        let received = expectation(description: "proxy UDP voice delivered during directory resolution")
+        let payload = try XCTUnwrap(GSMCodec.stripHeader(GSMCodec().encode([Int16](repeating: 0, count: 640))))
+        let receive = Task {
+            var iterator = stream.makeAsyncIterator()
+            let message = try await iterator.next()
+            XCTAssertEqual(message?.payload, payload)
+            received.fulfill()
+        }
+        defer { receive.cancel() }
+        let request = Task {
+            try await session.serializedDirectoryRequest(Data("s".utf8), host: "directory.invalid",
+                boundary: .marker(Data("+++".utf8)), timeout: .seconds(2))
+        }
+        await fulfillment(of: [resolver.entered], timeout: 1)
+        proxy.sendVoiceToClients(payload)
+        await fulfillment(of: [received], timeout: 0.5)
+        resolver.release()
+        _ = try await request.value
+        try await receive.value
+        await session.close()
+    }
+
+    func testDirectoryResolutionTimeoutKeepsVoiceTunnelAndDoesNotOpenLate() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let resolver = SuspendedProxyDirectoryResolver()
+        defer { resolver.release() }
+        let session = try await makeResolvingSession(proxy: proxy, resolver: resolver,
+                                                      resolutionTimeout: .milliseconds(50))
+        let completed = expectation(description: "directory resolution times out while resolver remains suspended")
+        let request = Task { () -> Error? in
+            defer { completed.fulfill() }
+            do {
+                _ = try await session.serializedDirectoryRequest(Data("s".utf8), host: "directory.invalid",
+                    boundary: .marker(Data("+++".utf8)), timeout: .seconds(2))
+                return nil
+            } catch { return error }
+        }
+        await fulfillment(of: [resolver.entered], timeout: 1)
+        await fulfillment(of: [completed], timeout: 0.5)
+        resolver.release()
+        let error = await request.value
+        guard let error, case EchoLinkProxySession.SessionError.timedOut = error else {
+            await session.close()
+            return XCTFail("Expected resolution timeout, got \(String(describing: error))")
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(proxy.directoryOpenCount, 0, "A late lookup result must not send TCP_OPEN")
+        let usable = await session.isUsable()
+        XCTAssertTrue(usable, "A lookup timeout must preserve the authenticated UDP tunnel")
+        await assertVoiceArrives(session: session, proxy: proxy)
+        await session.close()
+    }
+
+    func testCancellingDirectoryResolutionKeepsVoiceTunnelAndDoesNotOpenLate() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let resolver = SuspendedProxyDirectoryResolver()
+        defer { resolver.release() }
+        let session = try await makeResolvingSession(proxy: proxy, resolver: resolver)
+        let completed = expectation(description: "directory resolution cancels while resolver remains suspended")
+        let request = Task { () -> Error? in
+            defer { completed.fulfill() }
+            do {
+                _ = try await session.serializedDirectoryRequest(Data("s".utf8), host: "directory.invalid",
+                    boundary: .marker(Data("+++".utf8)), timeout: .seconds(2))
+                return nil
+            } catch { return error }
+        }
+        await fulfillment(of: [resolver.entered], timeout: 1)
+        request.cancel()
+        await fulfillment(of: [completed], timeout: 0.5)
+        resolver.release()
+        let cancellation = await request.value
+        XCTAssertTrue(cancellation is CancellationError)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(proxy.directoryOpenCount, 0)
+        let usable = await session.isUsable()
+        XCTAssertTrue(usable, "Cancelling DNS must preserve the shared UDP tunnel")
+        await assertVoiceArrives(session: session, proxy: proxy)
+        await session.close()
+    }
+
+    func testClosingProxyDuringDirectoryResolutionCannotOpenLate() async throws {
+        let proxy = try RefreshTestProxy(behavior: .delayFirstRefresh)
+        try await proxy.start()
+        defer { proxy.stop() }
+        let resolver = SuspendedProxyDirectoryResolver()
+        defer { resolver.release() }
+        let session = try await makeResolvingSession(proxy: proxy, resolver: resolver)
+        let request = Task { () -> Error? in
+            do {
+                _ = try await session.serializedDirectoryRequest(Data("s".utf8), host: "directory.invalid",
+                    boundary: .marker(Data("+++".utf8)), timeout: .seconds(2))
+                return nil
+            } catch { return error }
+        }
+        await fulfillment(of: [resolver.entered], timeout: 1)
+        let closed = expectation(description: "proxy close completes during a suspended directory lookup")
+        let close = Task { await session.close(); closed.fulfill() }
+        await fulfillment(of: [closed], timeout: 0.5)
+        resolver.release()
+        await close.value
+        let error = await request.value
+        XCTAssertNotNil(error)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(proxy.directoryOpenCount, 0)
+    }
+
+    private func makeResolvingSession(proxy: RefreshTestProxy, resolver: SuspendedProxyDirectoryResolver,
+                                      resolutionTimeout: Duration = .seconds(2)) async throws -> EchoLinkProxySession {
+        let configuration = EchoLinkProxyConfiguration(mode: .customProxy, host: "127.0.0.1",
+                                                       port: proxy.port, password: "proxy-password")
+        return try await EchoLinkProxySession.connect(configurations: [configuration], callsign: "N0TEST",
+            directoryResolutionTimeout: resolutionTimeout, directoryResolver: { try resolver.resolve($0) })
+    }
+
+    private func assertVoiceArrives(session: EchoLinkProxySession, proxy: RefreshTestProxy) async {
+        let stream = await session.udpMessages()
+        let received = expectation(description: "authenticated proxy UDP still works")
+        let receive = Task {
+            var iterator = stream.makeAsyncIterator()
+            do {
+                let packet = try await iterator.next()
+                XCTAssertEqual(packet?.type, .udpData)
+                received.fulfill()
+            } catch { XCTFail("UDP tunnel failed: \(error)") }
+        }
+        defer { receive.cancel() }
+        let payload = GSMCodec.stripHeader(GSMCodec().encode([Int16](repeating: 0, count: 640)))!
+        proxy.sendVoiceToClients(payload)
+        await fulfillment(of: [received], timeout: 0.5)
+    }
+
     private func makeService(proxy: RefreshTestProxy) -> (EchoLinkDirectoryService, DirectoryClient) {
         let configuration = EchoLinkProxyConfiguration(
             mode: .customProxy,
@@ -523,6 +734,9 @@ final class RefreshTestProxy: @unchecked Sendable {
     }
 
     private let behavior: Behavior
+    private let directoryChunks: [Data]?
+    private let closeDirectoryAfterResponse: Bool
+    private let directoryChunkInterval: TimeInterval
     private let replyToControl: Bool
     private let acceptPeerControl: Bool
     let controlReceived = XCTestExpectation(description: "outgoing peer control reached local proxy")
@@ -543,9 +757,15 @@ final class RefreshTestProxy: @unchecked Sendable {
     var refreshRequestCount: Int { queue.sync { max(0, stationRequests - 1) } }
     var registrationRequestCount: Int { queue.sync { registrations } }
     var authenticatedConnectionCount: Int { queue.sync { authentications } }
+    var directoryOpenCount: Int { queue.sync { directoryOpens } }
 
-    init(behavior: Behavior, replyToControl: Bool = false, acceptPeerControl: Bool = false) throws {
+    init(behavior: Behavior, replyToControl: Bool = false, acceptPeerControl: Bool = false,
+         directoryChunks: [Data]? = nil, closeDirectoryAfterResponse: Bool = false,
+         directoryChunkInterval: TimeInterval = 0.04) throws {
         self.behavior = behavior
+        self.directoryChunks = directoryChunks
+        self.closeDirectoryAfterResponse = closeDirectoryAfterResponse
+        self.directoryChunkInterval = directoryChunkInterval
         self.replyToControl = replyToControl
         self.acceptPeerControl = acceptPeerControl
         listener = try NWListener(using: .tcp, on: .any)
@@ -573,6 +793,13 @@ final class RefreshTestProxy: @unchecked Sendable {
 
     func waitForDelayedRefresh() async {
         _ = await XCTWaiter.fulfillment(of: [delayedRefresh], timeout: 2)
+    }
+
+    func sendVoiceToClients(_ payload: Data) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            for connection in self.connections { self.send(.udpData, payload: payload, on: connection) }
+        }
     }
 
     func releaseRegistration() {
@@ -691,8 +918,23 @@ final class RefreshTestProxy: @unchecked Sendable {
     }
 
     private func sendStationList(on connection: NWConnection) {
+        if let directoryChunks {
+            sendDirectoryChunk(directoryChunks, index: 0, on: connection)
+            return
+        }
         let payload = Data("@@@\n1\nK6FRESH-R\nRefresh Test\n12345\n192.0.2.25\n+++\n".utf8)
         send(.tcpData, payload: payload, on: connection)
+    }
+
+    private func sendDirectoryChunk(_ chunks: [Data], index: Int, on connection: NWConnection) {
+        guard index < chunks.count else {
+            if closeDirectoryAfterResponse { send(.tcpClose, payload: Data(), on: connection) }
+            return
+        }
+        send(.tcpData, payload: chunks[index], on: connection)
+        queue.asyncAfter(deadline: .now() + directoryChunkInterval) { [weak self] in
+            self?.sendDirectoryChunk(chunks, index: index + 1, on: connection)
+        }
     }
 
     private func send(
@@ -707,4 +949,17 @@ final class RefreshTestProxy: @unchecked Sendable {
         )
         connection.send(content: frame, completion: .idempotent)
     }
+}
+
+private final class SuspendedProxyDirectoryResolver: @unchecked Sendable {
+    let entered = XCTestExpectation(description: "injected directory resolver started")
+    private let gate = DispatchSemaphore(value: 0)
+
+    func resolve(_ host: String) throws -> String {
+        entered.fulfill()
+        gate.wait()
+        return "127.0.0.1"
+    }
+
+    func release() { gate.signal() }
 }

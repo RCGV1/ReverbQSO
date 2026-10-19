@@ -47,6 +47,10 @@ final class WatchReceiveAudioPlayer {
     private var isInterrupted = false
     private var automaticPlaybackAllowed = true
     private var isRebuildingGraph = false
+    #if DEBUG
+    private(set) var completedPlaybackBufferCount = 0
+    var debugRenderedPlaybackSampleTime: Int64? { renderedPlaybackSampleTime }
+    #endif
 
     init() {
         installNotificationObservers()
@@ -160,6 +164,9 @@ final class WatchReceiveAudioPlayer {
                 self.playerNode.scheduleBuffer(scheduledBuffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                     Task { @MainActor [weak self] in
                         guard let self, self.playbackGeneration == token else { return }
+                        #if DEBUG
+                        self.completedPlaybackBufferCount += 1
+                        #endif
                         self.queuedSampleCount = max(0, self.queuedSampleCount - count)
                         self.playbackHistory.prune(renderedSampleTime: end)
                     }
@@ -193,8 +200,13 @@ final class WatchReceiveAudioPlayer {
     }
 
     private var renderedPlaybackSampleTime: Int64? {
+        // AVAudioNode.lastRenderTime raises an Objective-C exception without
+        // an attached engine; that exception cannot be caught by Swift do/catch.
+        guard engine.attachedNodes.contains(playerNode) else { return nil }
         guard let renderTime = playerNode.lastRenderTime,
-              let playerTime = playerNode.playerTime(forNodeTime: renderTime) else { return nil }
+              renderTime.isSampleTimeValid || renderTime.isHostTimeValid,
+              let playerTime = playerNode.playerTime(forNodeTime: renderTime),
+              playerTime.isSampleTimeValid else { return nil }
         return playerTime.sampleTime
     }
     private var remainingPlaybackSamples: Int {
@@ -220,7 +232,10 @@ final class WatchReceiveAudioPlayer {
             }
             return true
         } catch {
-            logger.error("Watch receive playback could not start error='\(error.localizedDescription, privacy: .public)'")
+            let failure = error as NSError
+            let session = AVAudioSession.sharedInstance()
+            let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+            logger.error("Watch receive startup failed domain=\(failure.domain, privacy: .public) code=\(failure.code) configured=\(self.isConfigured) attached=\(self.engine.attachedNodes.contains(self.playerNode)) running=\(self.engine.isRunning) rate=\(session.sampleRate) outputs=\(outputs, privacy: .public)")
             discardBufferedReceive()
             engine.stop()
             RecordingAudioSession.shared.endLiveAudio(owner: self)

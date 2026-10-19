@@ -29,6 +29,7 @@ struct ReverbQSOApp: App {
 
 private struct RootView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var qsoHub: QSOHub
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("permissions.onboarding.completed") private var permissionsOnboardingCompleted = false
     @State private var dismissedDemoPermissions = false
@@ -58,6 +59,18 @@ private struct RootView: View {
         .modifier(IncomingCallPrompt(host: appState.conferenceHostService) {
             showPersonalCall = true
         })
+        .alert("Recording failed", isPresented: Binding(
+            get: { qsoHub.recordingError != nil },
+            set: { isPresented in
+                if !isPresented { qsoHub.recordingError = nil }
+            }
+        )) {
+            Button("OK", role: .cancel) {
+                qsoHub.recordingError = nil
+            }
+        } message: {
+            Text(qsoHub.recordingError ?? "The recording could not be saved.")
+        }
         .onOpenURL { url in
             guard ["reverbqso", "openecholink"].contains(url.scheme) else { return }
             #if targetEnvironment(macCatalyst)
@@ -423,6 +436,7 @@ private struct QSONavigationTab<Content: View>: View {
                 .navigationDestination(for: QSORoute.self) { route in
                     if case .qso(let id) = route, let entry = qsoHub.entry(for: id) {
                         QSOView(connectionService: entry.service)
+                            .id(entry.id)
                             .onAppear { qsoHub.select(id) }
                     } else {
                         ContentUnavailableView("QSO Ended", systemImage: "phone.down")
@@ -534,6 +548,7 @@ private struct MacSidebarView: View {
                 case .qso(let id):
                     if let entry = qsoHub.entry(for: id) {
                         QSOView(connectionService: entry.service)
+                            .id(entry.id)
                     } else {
                         ContentUnavailableView("QSO Ended", systemImage: "phone.down")
                     }

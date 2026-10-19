@@ -120,6 +120,63 @@ final class ConferenceReceiveAudioCodecTests: XCTestCase {
         XCTAssertEqual(actual.gsmPayload, expected.gsmPayload)
     }
 
+    func testBothG711LawsPlayShortPacketsAndAccumulateCompleteGSMFrames() throws {
+        for (payloadType, byte, sample) in [(UInt8(0), UInt8(0xFF), Int16(0)), (8, 0xD5, 8)] {
+            for sampleCount in [80, 240, 400, 560] {
+                let codec = ConferenceReceiveAudioCodec()
+                let first = try XCTUnwrap(codec.decode(g711Packet(
+                    payloadType: payloadType, byte: byte, count: sampleCount, sequence: 1
+                )))
+                XCTAssertEqual(first.samples, [Int16](repeating: sample, count: sampleCount))
+                XCTAssertEqual(first.gsmPayload.count, (sampleCount / 160) * 33)
+                let second = try XCTUnwrap(codec.decode(g711Packet(
+                    payloadType: payloadType, byte: byte, count: 80, sequence: 2
+                )))
+                XCTAssertEqual(second.samples, [Int16](repeating: sample, count: 80))
+                XCTAssertEqual(second.gsmPayload.count, 33)
+                XCTAssertEqual(GSMCodec().decodePacket(first.gsmPayload + second.gsmPayload).count, sampleCount + 80)
+            }
+        }
+    }
+
+    func testPartialG711TranscoderHistoryStaysWithItsPeerAndResetsForNewStreams() throws {
+        let firstPeer = ConferenceReceiveAudioCodec()
+        let secondPeer = ConferenceReceiveAudioCodec()
+        let first = try g711Packet(payloadType: 0, byte: 0xFF, count: 80, sequence: 1)
+        let other = try g711Packet(payloadType: 8, byte: 0xD5, count: 80, sequence: 1)
+        XCTAssertTrue(try XCTUnwrap(firstPeer.decode(first)).gsmPayload.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(secondPeer.decode(other)).gsmPayload.isEmpty)
+        XCTAssertEqual(try XCTUnwrap(firstPeer.decode(g711Packet(
+            payloadType: 0, byte: 0xFF, count: 80, sequence: 2
+        ))).gsmPayload, GSMCodec.stripHeader(GSMCodec().encode([Int16](repeating: 0, count: 160))))
+        XCTAssertEqual(try XCTUnwrap(secondPeer.decode(g711Packet(
+            payloadType: 8, byte: 0xD5, count: 80, sequence: 2
+        ))).gsmPayload, GSMCodec.stripHeader(GSMCodec().encode([Int16](repeating: 8, count: 160))))
+
+        for changesCodec in [true, false] {
+            let codec = ConferenceReceiveAudioCodec()
+            _ = try XCTUnwrap(codec.decode(first))
+            let switched = try g711Packet(payloadType: changesCodec ? 8 : 0,
+                                         byte: changesCodec ? 0xD5 : 0xFF, count: 80,
+                                         sequence: 2, ssrc: changesCodec ? 1 : 2)
+            XCTAssertTrue(try XCTUnwrap(codec.decode(switched)).gsmPayload.isEmpty,
+                          "A new codec or SSRC must discard the prior partial frame")
+            let completed = try XCTUnwrap(codec.decode(g711Packet(
+                payloadType: changesCodec ? 8 : 0, byte: changesCodec ? 0xD5 : 0xFF, count: 80,
+                sequence: 3, ssrc: changesCodec ? 1 : 2
+            )))
+            XCTAssertEqual(completed.gsmPayload.count, 33)
+        }
+    }
+
+    private func g711Packet(payloadType: UInt8, byte: UInt8, count: Int,
+                            sequence: UInt16, ssrc: UInt8 = 1) throws -> ParsedIncomingAudioDatagram {
+        var packet = Data([0x80, payloadType, UInt8(sequence >> 8), UInt8(sequence & 0xFF),
+                           0, 0, 0, 0, 0, 0, 0, ssrc])
+        packet.append(Data(repeating: byte, count: count))
+        return try XCTUnwrap(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet))
+    }
+
     private func metadata(_ sequence: UInt16) -> EchoLinkVoicePacketMetadata {
         EchoLinkVoicePacketMetadata(payloadType: 0, sequenceNumber: sequence, timestamp: UInt32(sequence) * 640, ssrc: 1)
     }

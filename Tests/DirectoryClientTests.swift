@@ -172,6 +172,93 @@ final class DirectoryClientTests: XCTestCase {
         XCTAssertFalse(server.requests.last?.contains("SECRET") ?? true)
     }
 
+    func testStationDescriptionsContainingAuthWordsRemainDirectoryData() async throws {
+        for description in ["DENIED access road", "INCORRECT PASSWORD help desk", "IN-USE repeater"] {
+            for text in ["@@@\n1\nK6SAFE-R\n\(description)\n123\n192.0.2.1\n+++",
+                         "K6SAFE-R\t192.0.2.1\t\(description)\n+++"] {
+                let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [Data(text.utf8)])
+                server.listener.start(queue: server.queue)
+                defer { server.listener.cancel() }
+                await fulfillment(of: [server.ready], timeout: 2)
+                let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+                try await client.login(callsign: "N0TEST", password: "SECRET")
+                let stations = try await client.fetchStations()
+                XCTAssertEqual(stations.map(\.callsign), ["K6SAFE-R"])
+                XCTAssertEqual(stations.first?.description, description)
+            }
+        }
+    }
+
+    func testDirectCountedDirectoryWaitsPastDescriptionMarkersAndSplitTerminator() async throws {
+        let chunks = ["@@@\r\n2\r\nK6FIRST-R\r\nCaf", "é +++ road\r\n123\r\n192.0.2.1\r\n",
+                      "K6LAST-L\r\n+++\r\n456\r\n192.0.2.2\r\n+", "+", "+"]
+            .map { $0.data(using: .isoLatin1)! }
+        let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: chunks)
+        server.listener.start(queue: server.queue)
+        defer { server.listener.cancel() }
+        await fulfillment(of: [server.ready], timeout: 2)
+        let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+        try await client.login(callsign: "N0TEST", password: "SECRET")
+
+        let stations = try await client.fetchStations()
+
+        XCTAssertEqual(stations.map(\.callsign), ["K6FIRST-R", "K6LAST-L"])
+        XCTAssertEqual(stations.first?.description, "Café +++ road")
+        XCTAssertEqual(stations.last?.description, "+++")
+    }
+
+    func testDirectCountedDirectoryRejectsTruncatedAdvertisedCount() async throws {
+        let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [
+            Data("@@@\n2\nK6PART-R\nOne station only\n123\n192.0.2.1\n+++".utf8)
+        ])
+        server.listener.start(queue: server.queue)
+        defer { server.listener.cancel() }
+        await fulfillment(of: [server.ready], timeout: 2)
+        let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+        try await client.login(callsign: "N0TEST", password: "SECRET")
+        do {
+            _ = try await client.fetchStations()
+            XCTFail("An incomplete counted response must never publish a partial directory")
+        } catch DirectoryClientError.unexpectedResponse { }
+    }
+
+    func testDirectCountedDirectoryRejectsOversizedIncompleteResponse() async throws {
+        let prefix = Data("@@@\n2\nK6PART-R\nL K6LEAK 192.0.2.1 5198\n123\n192.0.2.1\nK6NEXT-R\n".utf8)
+        let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [
+            prefix + Data(repeating: 65, count: 4_000_000)
+        ])
+        server.listener.start(queue: server.queue)
+        defer { server.listener.cancel() }
+        await fulfillment(of: [server.ready], timeout: 2)
+        let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+        try await client.login(callsign: "N0TEST", password: "SECRET")
+        do {
+            _ = try await client.fetchStations()
+            XCTFail("The response limit must fail without publishing the completed prefix")
+        } catch DirectoryClientError.unexpectedResponse { }
+    }
+
+    func testDirectDirectoryStillClassifiesStandaloneAuthenticationErrors() async throws {
+        for text in ["DENIED\r\n", "INCORRECT PASSWORD\r\n", "CALLSIGN IN-USE\r\n"] {
+            let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [Data(text.utf8)])
+            server.listener.start(queue: server.queue)
+            defer { server.listener.cancel() }
+            await fulfillment(of: [server.ready], timeout: 2)
+            let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+            try await client.login(callsign: "N0TEST", password: "SECRET")
+            do {
+                _ = try await client.fetchStations()
+                XCTFail("Standalone authentication errors must remain errors")
+            } catch {
+                if text.contains("IN-USE") {
+                    guard case DirectoryClientError.loginInUse = error else { return XCTFail("\(error)") }
+                } else {
+                    guard case DirectoryClientError.loginDenied = error else { return XCTFail("\(error)") }
+                }
+            }
+        }
+    }
+
     // MARK: - Registration Payloads
 
     func testEnhancedRegistrationPayloadOmitsPasswordAndClientAddressForDirectMode() {
@@ -366,11 +453,13 @@ private final class LocalEnhancedDirectory: @unchecked Sendable {
     let queue = DispatchQueue(label: "DirectoryClientTests.enhanced-server")
     let ready = XCTestExpectation(description: "local enhanced directory ready")
     private let password: String
+    private let directoryChunks: [Data]?
     private var recordedRequests: [String] = []
     var requests: [String] { queue.sync { recordedRequests } }
 
-    init(password: String) throws {
+    init(password: String, directoryChunks: [Data]? = nil) throws {
         self.password = password.uppercased()
+        self.directoryChunks = directoryChunks
         listener = try NWListener(using: .tcp, on: .any)
         listener.stateUpdateHandler = { [weak self] state in
             if case .ready = state { self?.ready.fulfill() }
@@ -387,16 +476,35 @@ private final class LocalEnhancedDirectory: @unchecked Sendable {
             .map { String($0.dropFirst("local-time: ".count)) } ?? ""
     }
 
+    private func sendDirectory(_ chunks: [Data], index: Int, on connection: NWConnection) {
+        guard index < chunks.count else { connection.cancel(); return }
+        let final = index == chunks.count - 1
+        connection.send(content: chunks[index], contentContext: final ? .finalMessage : .defaultMessage,
+                        isComplete: true, completion: .contentProcessed { [weak self] _ in
+            guard let self else { return }
+            if final { connection.cancel() }
+            else {
+                self.queue.asyncAfter(deadline: .now() + 0.04) {
+                    self.sendDirectory(chunks, index: index + 1, on: connection)
+                }
+            }
+        })
+    }
+
     private func receive(_ connection: NWConnection, buffered: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { [weak self] data, _, _, error in
             guard let self, let data, error == nil else { connection.cancel(); return }
             let bytes = buffered + data
             let request = String(decoding: bytes, as: UTF8.self)
-            guard request.hasSuffix("\n\n") || request.hasPrefix("z") else {
+            guard request.hasSuffix("\n\n") || request.hasPrefix("z") || request == "s" else {
                 self.receive(connection, buffered: bytes)
                 return
             }
             self.recordedRequests.append(request)
+            if request == "s", let chunks = self.directoryChunks {
+                self.sendDirectory(chunks, index: 0, on: connection)
+                return
+            }
             let response: String
             if request.hasPrefix("-LOGIN") {
                 if let hash = request.split(separator: "\n").first(where: { $0.hasPrefix("hashed-password: ") }) {

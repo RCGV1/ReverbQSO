@@ -6,6 +6,59 @@ import XCTest
 
 @MainActor
 final class EchoLinkRelayConnectionTests: XCTestCase {
+    func testDirectSvxLinkRejectionPreservesChatReasonWhenByeArrivesFirst() async throws {
+        try await checkDirectSvxLinkRejection(byeFirst: true)
+    }
+
+    func testDirectSvxLinkRejectionPreservesChatReasonWhenChatArrivesFirst() async throws {
+        try await checkDirectSvxLinkRejection(byeFirst: false)
+    }
+
+    private func checkDirectSvxLinkRejection(byeFirst: Bool) async throws {
+        let peerControl = try BoundUDPSocket(localPort: 0)
+        let peerAudio = try BoundUDPSocket(localPort: 0)
+        defer { peerControl.close(); peerAudio.close() }
+        let service = EchoLinkConnectionService(
+            networkConfigurationProvider: { .init(mode: .direct, host: "", port: 8100, password: "") })
+        service.authenticatedCallsign = "N0TST"
+        service.callAccessPolicyProvider = { CallAccessPolicy() }
+        service.setBackgroundMuted(true)
+        let rejected = expectation(description: "Remote rejection processed")
+        let server = Task {
+            let handshake = try await peerControl.receive()
+            try await peerControl.send(
+                EchoLinkControlPacketCodec.buildSDESPacket(callsign: "K1MOCK-R", advertiseSpeex: false),
+                to: handshake.sourceHost, port: handshake.sourcePort)
+            // SvxLink accepts the protocol handshake before reporting an
+            // admission rejection. Chat and BYE travel on separate sockets.
+            let bye = EchoLinkControlPacketCodec.buildBYEPacket()
+            let chat = EchoLinkControlPacketCodec.buildNDATAChatPacket(
+                sender: "K1MOCK-R", message: "The connection was rejected")
+            if byeFirst {
+                try await peerControl.send(bye, to: handshake.sourceHost, port: handshake.sourcePort)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try await peerAudio.send(chat, to: handshake.sourceHost, port: 5198)
+            if !byeFirst {
+                try await Task.sleep(for: .milliseconds(20))
+                try await peerControl.send(bye, to: handshake.sourceHost, port: handshake.sourcePort)
+            }
+            rejected.fulfill()
+        }
+        defer { server.cancel() }
+        await service.connect(to: Station(callsign: "K1MOCK-R", ipAddress: "127.0.0.1",
+            port: Int(peerControl.actualLocalPort) - 1, type: .repeater))
+        await fulfillment(of: [rejected], timeout: 3)
+        for _ in 0..<100 where service.error == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(service.error?.localizedDescription.contains("The connection was rejected") == true,
+                      service.error?.localizedDescription ?? "Missing remote rejection error")
+        XCTAssertNotEqual(service.session?.state, .connected)
+        try await server.value
+        await service.disconnect()
+    }
+
     func testCurrentDirectoryRelayMarkerRejectsSavedStationBeforeTransportSetup() async {
         var transportLookups = 0
         let service = EchoLinkConnectionService(networkConfigurationProvider: {

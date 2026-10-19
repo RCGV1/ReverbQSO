@@ -549,6 +549,60 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
         XCTAssertTrue(host.sessions.isEmpty)
     }
 
+    func testShortG711PlaysImmediatelyAndForwardsOnlyAfterACompleteGSMFrame() async throws {
+        let stations = [Station(callsign: "N0AAA", ipAddress: "127.0.0.1"),
+                        Station(callsign: "K1BBB", ipAddress: "127.0.0.1")]
+        let directory = EchoLinkDirectoryService(fetchStationsForRefresh: { stations })
+        directory.isLoggedIn = true
+        let host = EchoLinkConferenceHostService(configurationProvider: Self.directConfiguration)
+        let audioPort = try availablePort(), controlPort = try availablePort()
+        await host.start(callsign: "W6HOST", directory: directory, outbound: EchoLinkConnectionService(),
+                         policy: .init(maximumPeers: 2), ports: .init(audio: audioPort, control: controlPort),
+                         monitorAudio: false)
+        defer { Task { await host.stop() } }
+        XCTAssertTrue(host.isRunning, host.errorMessage ?? "")
+        let talkerAudio = try BoundUDPSocket(localPort: 0), talkerControl = try BoundUDPSocket(localPort: 0)
+        let listenerAudio = try BoundUDPSocket(localPort: 0), listenerControl = try BoundUDPSocket(localPort: 0)
+        defer { talkerAudio.close(); talkerControl.close(); listenerAudio.close(); listenerControl.close() }
+        try await joinPeer(callsign: "N0AAA", audio: talkerAudio, control: talkerControl,
+                           hostControlPort: controlPort, advertiseSpeex: false)
+        try await joinPeer(callsign: "K1BBB", audio: listenerAudio, control: listenerControl,
+                           hostControlPort: controlPort, advertiseSpeex: false)
+        var receivedPCM: [[Int16]] = []
+        host.onUnmonitoredReceivedPCM = { receivedPCM.append($0) }
+        let voiceRead = Task { () throws -> BoundUDPSocket.Datagram in
+            try await withThrowingTaskGroup(of: BoundUDPSocket.Datagram.self) { group in
+                group.addTask {
+                    while true {
+                        let datagram = try await listenerAudio.receive(maximumBytes: 4_096)
+                        if datagram.data.count >= 12, datagram.data[0] == 0xC0 { return datagram }
+                    }
+                }
+                group.addTask { try await Task.sleep(for: .seconds(2)); throw TestTimeout.expired }
+                defer { group.cancelAll() }
+                return try await group.next()!
+            }
+        }
+        defer { voiceRead.cancel() }
+        func packet(_ sequence: UInt8) -> Data {
+            Data([0x80, 0, 0, sequence, 0, 0, 0, 0, 0, 0, 0, 1]) + Data(repeating: 0xFF, count: 80)
+        }
+        try await talkerAudio.send(packet(1), to: "127.0.0.1", port: audioPort)
+        for _ in 0..<100 where receivedPCM.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(receivedPCM, [[Int16](repeating: 0, count: 80)],
+                       "Play the received 10 ms immediately while the GSM frame is incomplete")
+        try await talkerAudio.send(packet(2), to: "127.0.0.1", port: audioPort)
+        let forwarded = try await voiceRead.value
+        let parsed = try XCTUnwrap(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(forwarded.data))
+        guard case .gsm(let payload) = parsed.packet else { return XCTFail("Expected GSM forwarding") }
+        XCTAssertEqual(payload.count, 33, "Never send a header-only voice datagram for the first 80 samples")
+        XCTAssertEqual(GSMCodec().decodePacket(payload).count, 160)
+        XCTAssertEqual(parsed.metadata?.sequenceNumber, 0, "An empty encoder result must not advance output sequence")
+        XCTAssertEqual(parsed.metadata?.timestamp, 0)
+        XCTAssertEqual(receivedPCM.count, 2)
+        await host.stop()
+    }
+
     private func availablePort() throws -> UInt16 {
         let socket = try BoundUDPSocket(localPort: 0)
         let port = socket.actualLocalPort

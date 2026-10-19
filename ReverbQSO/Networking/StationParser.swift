@@ -45,30 +45,9 @@ enum StationParser {
     }
 
     static func isValidEmptyCountedDirectory(raw: Data) -> Bool {
-        guard let text = String(data: raw, encoding: .utf8)
-                      ?? String(data: raw, encoding: .isoLatin1)
-        else { return false }
-
-        let normalizedText = normalizeDirectoryText(text)
-        guard normalizedText.contains("@@@"), normalizedText.contains("+++") else {
-            return false
-        }
-        guard let startRange = normalizedText.range(of: "@@@\n") else { return false }
-
-        let body = String(normalizedText[startRange.upperBound...])
-        var lines = body.components(separatedBy: "\n").map {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        while let first = lines.first, first.isEmpty {
-            lines.removeFirst()
-        }
-
-        guard let countLine = lines.first, let count = Int(countLine) else {
-            return false
-        }
-
-        return count == 0
+        var framing = CountedDirectoryFramer()
+        framing.append(raw)
+        return framing.status == .complete && framing.stationCount == 0
     }
 
     /// Parse a single legacy station line.
@@ -163,7 +142,7 @@ enum StationParser {
         }
 
         var stations: [Station] = []
-        stations.reserveCapacity(count)
+        stations.reserveCapacity(min(count, lines.count / 4))
 
         var idx = 0
         while idx + 3 < lines.count, stations.count < count {
@@ -218,10 +197,89 @@ enum StationParser {
     private static func inferBusy(from callsign: String, description: String) -> Bool {
         let c = callsign.uppercased()
         let d = description.uppercased()
+        // Directory status is authoritative; operator prose can contain "busy".
+        if let match = directoryStatusSuffix?.firstMatch(
+            in: description,
+            range: NSRange(description.startIndex..., in: description)
+        ) {
+            return (description as NSString).substring(with: match.range(at: 1)).uppercased() == "BUSY"
+        }
         return c.hasPrefix("X-")
             || c.hasSuffix("-X")
             || d.contains(" BUSY")
             || d.hasPrefix("BUSY")
             || d.contains("[BUSY]")
+    }
+
+    private static let directoryStatusSuffix = try? NSRegularExpression(
+        pattern: #"\[(ON|BUSY)(?:\s+|\s*:\s*)(?:[01]\d|2[0-3]):[0-5]\d\]\s*$"#,
+        options: .caseInsensitive
+    )
+}
+
+/// Counts wire fields without treating operator descriptions as protocol markers.
+struct CountedDirectoryFramer {
+    enum Status { case notCounted, incomplete, complete }
+
+    private enum NextLine {
+        case header, count, fields(stations: Int, field: Int), terminator, invalid, legacy
+    }
+
+    private(set) var status = Status.notCounted
+    private(set) var stationCount: Int?
+    private var nextLine = NextLine.header
+    private var line = Data()
+    private var previousWasCR = false
+
+    mutating func append(_ data: Data) {
+        for byte in data {
+            if byte == 0x0A && previousWasCR {
+                previousWasCR = false
+                continue
+            }
+            if byte == 0x0A || byte == 0x0D {
+                consumeLine()
+                line.removeAll(keepingCapacity: true)
+                previousWasCR = byte == 0x0D
+            } else {
+                previousWasCR = false
+                switch nextLine {
+                case .header, .count, .terminator: line.append(byte)
+                case .fields, .invalid, .legacy: break
+                }
+            }
+        }
+        // EchoLink also permits the final marker without a trailing newline.
+        if case .terminator = nextLine, trimmedLine == "+++" { status = .complete }
+    }
+
+    private var trimmedLine: String {
+        String(decoding: line, as: UTF8.self).trimmingCharacters(in: .whitespaces)
+    }
+
+    private mutating func consumeLine() {
+        switch nextLine {
+        case .header:
+            if trimmedLine == "@@@" {
+                status = .incomplete
+                nextLine = .count
+            } else if !trimmedLine.isEmpty {
+                nextLine = .legacy
+            }
+        case .count:
+            guard !trimmedLine.isEmpty else { return }
+            guard let count = Int(trimmedLine), count >= 0 else { nextLine = .invalid; return }
+            stationCount = count
+            nextLine = count == 0 ? .terminator : .fields(stations: count, field: 0)
+        case .fields(let stations, let field):
+            if field < 3 { nextLine = .fields(stations: stations, field: field + 1) }
+            else { nextLine = stations == 1 ? .terminator : .fields(stations: stations - 1, field: 0) }
+        case .terminator:
+            if trimmedLine == "+++" { status = .complete }
+            else { status = .incomplete }
+            nextLine = .invalid
+        case .invalid, .legacy:
+            break
+        }
     }
 }
