@@ -38,6 +38,7 @@ final class QSOHub: ObservableObject {
 
     private let primary: EchoLinkConnectionService
     private let connectOperation: @MainActor (EchoLinkConnectionService, Station) async -> Void
+    private let disconnectOperation: @MainActor (EchoLinkConnectionService) async -> Void
     private let networkConfigurationProvider: @MainActor () -> EchoLinkProxyConfiguration
     private var subscriptions: [UUID: AnyCancellable] = [:]
     private var initialConnectionIDs: Set<UUID> = []
@@ -52,6 +53,9 @@ final class QSOHub: ObservableObject {
         networkConfigurationProvider: @escaping @MainActor () -> EchoLinkProxyConfiguration = {
             EchoLinkProxyConfiguration.load()
         },
+        disconnectOperation: @escaping @MainActor (EchoLinkConnectionService) async -> Void = { service in
+            await service.disconnect()
+        },
         connectOperation: @escaping @MainActor (EchoLinkConnectionService, Station) async -> Void = { service, station in
             await service.connect(to: station)
         }
@@ -59,6 +63,7 @@ final class QSOHub: ObservableObject {
         self.primary = primary
         self.networkConfigurationProvider = networkConfigurationProvider
         self.connectOperation = connectOperation
+        self.disconnectOperation = disconnectOperation
         observeRecordingFailures(in: primary)
         primarySubscription = primary.$session.sink { [weak self, weak primary] session in
             guard let self, let primary, let session,
@@ -198,7 +203,7 @@ final class QSOHub: ObservableObject {
 
     func disconnectAll() async {
         for entry in entries {
-            await entry.service.disconnect()
+            await disconnectOperation(entry.service)
             entry.service.pttPermission = nil
             entry.service.setBackgroundMuted(false)
         }
@@ -212,7 +217,7 @@ final class QSOHub: ObservableObject {
 
     func disconnect(callsign: String) async {
         for entry in entries where entry.callsign == callsign {
-            await entry.service.disconnect()
+            await disconnectOperation(entry.service)
             if entry.service.session == nil && !entry.service.isReconnecting
                 && entry.service.reconnectCandidate == nil {
                 remove(entry.id)
