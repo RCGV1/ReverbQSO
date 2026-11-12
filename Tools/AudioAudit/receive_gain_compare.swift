@@ -22,7 +22,10 @@ struct ReceiveGainComparison {
         guard !tag.isEmpty, tag.utf8.allSatisfy({
             $0 == 45 || (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0)
         }) else { throw Failure.arguments }
-        let input = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+        let inputURL = URL(fileURLWithPath: arguments[1])
+        let size = try inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size > 0, size <= 32 * 1_024 * 1_024 else { throw Failure.inputFormat }
+        let input = try Data(contentsOf: inputURL)
         guard !input.isEmpty, input.count <= 32 * 1_024 * 1_024, input.count.isMultiple(of: 2),
               !input.starts(with: Data("RIFF".utf8)) else { throw Failure.inputFormat }
         let speech = stride(from: 0, to: input.count, by: 2).map {
@@ -43,7 +46,7 @@ struct ReceiveGainComparison {
         try wave(toneOutput).write(to: names[1], options: .atomic)
         let metrics: [String: Any] = [
             "tag": tag, "sample_rate": 8_000, "packet_samples": 640,
-            "speech_source": "Open Speech Repository", "input_bytes": input.count,
+            "input_file": inputURL.path, "input_bytes": input.count,
             "speech": speechMetrics, "diagnostic_tone": toneMetrics
         ]
         let json = try JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys])
