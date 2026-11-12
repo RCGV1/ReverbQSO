@@ -87,6 +87,7 @@
 		36DE69DE126CCD0AAC21B0C4 /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 974F1A659815E325DADC68A2 /* LicensesView.swift */; };
 		37A348F9E3A0B98870A72F8D /* SvxLinkControlProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB9B23D4DBAC0A508F74AAF /* SvxLinkControlProtocol.swift */; };
 		38FC08E4AF82B6C2F9DF25FC /* exc_10_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = EA26F8072A23DC483FC2EFF2 /* exc_10_32_table.c */; };
+		3957AD47614976D1231EC3A1 /* ReceiveNativeConcealmentSmoother.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA039B86F85E9232D2CC521 /* ReceiveNativeConcealmentSmoother.swift */; };
 		39C15709E060E9672A17E0CE /* EchoLinkProxySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCE5B934899E909C6178B00 /* EchoLinkProxySession.swift */; };
 		39FFA601BC066B520C16ACC7 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BA3E849C58E3D22005A41F /* FavoritesView.swift */; };
 		3C28AB947A198413B1B546CF /* EchoLinkDTMFToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DDD9699C439E9FF767B022C /* EchoLinkDTMFToneGenerator.swift */; };
@@ -281,6 +282,7 @@
 		B2C5253C06B8D7BEFB800BFF /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C89F5B5A2A68C938A6BF5E9A /* ChatMessage.swift */; };
 		B331EDD994D2792DB6C0EC31 /* LocalDemoAudioBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F58F29DD9D6514550B77B75 /* LocalDemoAudioBuffer.swift */; };
 		B4329F557E48B03236CC1F7A /* PCMLinearResamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7A3F3EF59B5150450CA40B /* PCMLinearResamplerTests.swift */; };
+		B463C5DF807C2FB3F46FE7CA /* ReceiveNativeConcealmentSmoother.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA039B86F85E9232D2CC521 /* ReceiveNativeConcealmentSmoother.swift */; };
 		B53CB55AA1867768F60264DE /* EchoLinkRegistrationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAAD9517A7E5BBFCFEC23A /* EchoLinkRegistrationClient.swift */; };
 		B54E8E96A9C3DAF0A9A2DFD5 /* PersonalStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2E5154D0CAC74CE254C46B /* PersonalStationView.swift */; };
 		B5FAFBA6E2ACDC727720E475 /* FavoritesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448A6DBA626F851FDB93E89C /* FavoritesViewModel.swift */; };
@@ -339,6 +341,7 @@
 		DA965CCC26750FBFA4FE8D9D /* libspeex-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = 02C75C610A6A12E74CBAFA1E /* libspeex-COPYING.txt */; };
 		DACB43B7969CEF7A30DE4A2A /* ReceiveAudioPlaybackStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F158D53CAA0253321C53521 /* ReceiveAudioPlaybackStateTests.swift */; };
 		DB47D17FB205FFE9F6026275 /* gsm_print.c in Sources */ = {isa = PBXBuildFile; fileRef = 4CBA4DF9BC6DFC895B7C358C /* gsm_print.c */; };
+		DB7857B7D2E470B6084645A2 /* ReceiveNativeConcealmentSmootherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D46589BAB76AFEC3654DBA0 /* ReceiveNativeConcealmentSmootherTests.swift */; };
 		DB825C1D3F9E847FF6B11C6B /* exc_20_32_table.c in Sources */ = {isa = PBXBuildFile; fileRef = 2058095D6A00537B0BCB311E /* exc_20_32_table.c */; };
 		DBE49AB50EBD26FBD16620CD /* CallRestrictionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DD9CC149C9EF38AF97567B3 /* CallRestrictionsView.swift */; };
 		DC3A6FDBF08BF30CB5FA45C4 /* stereo.c in Sources */ = {isa = PBXBuildFile; fileRef = B06333F5368B070986E69E53 /* stereo.c */; };
@@ -488,6 +491,7 @@
 		0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		0C7BB94D5DD2FD18660428C1 /* QSOHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOHub.swift; sourceTree = "<group>"; };
 		0CEFCF75CD4167060468E9B1 /* QSOSharedPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSOSharedPanels.swift; sourceTree = "<group>"; };
+		0D46589BAB76AFEC3654DBA0 /* ReceiveNativeConcealmentSmootherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiveNativeConcealmentSmootherTests.swift; sourceTree = "<group>"; };
 		0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeexCodecTests.swift; sourceTree = "<group>"; };
 		0E2F522AE900586F1B4A69EB /* EchoLinkRelayProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkRelayProtocol.swift; sourceTree = "<group>"; };
 		0EF259205F25C1F6433FA1F1 /* lpc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lpc.h; sourceTree = "<group>"; };
@@ -629,6 +633,7 @@
 		8A24689FC4A199045B2299F7 /* LiveTransportMessageBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTransportMessageBufferTests.swift; sourceTree = "<group>"; };
 		8C72D8DEA106DEFAD2868625 /* decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = decode.c; sourceTree = "<group>"; };
 		8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectCQSocketPair.swift; sourceTree = "<group>"; };
+		8EA039B86F85E9232D2CC521 /* ReceiveNativeConcealmentSmoother.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiveNativeConcealmentSmoother.swift; sourceTree = "<group>"; };
 		8F06CE461936AB642879E5B8 /* LocalDemoConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDemoConnectionTests.swift; sourceTree = "<group>"; };
 		8F58266ADAC833BA9E40B206 /* ConferenceFloorRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceFloorRouter.swift; sourceTree = "<group>"; };
 		8FC50F141ED5191797613ED8 /* cb_search_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search_arm4.h; sourceTree = "<group>"; };
@@ -870,6 +875,7 @@
 				FCAE2D00D5F915C22B7D4577 /* ReceiveAdaptivePlayoutBuffer.swift */,
 				FA0516615AA80A8D4B7BA005 /* ReceiveAudioPlaybackState.swift */,
 				BCAD11A3DA2225F98F1AEF2E /* ReceiveClockCompensator.swift */,
+				8EA039B86F85E9232D2CC521 /* ReceiveNativeConcealmentSmoother.swift */,
 				E52937B64884793C42C49F35 /* ReceivePacketLossConcealer.swift */,
 				A2CE4E6D31FAFDC6A4A99536 /* ReceiveSpeechSmoother.swift */,
 				2526EE6D20D9E4772DA52CEB /* RecentConnectionsService.swift */,
@@ -943,6 +949,7 @@
 				1F158D53CAA0253321C53521 /* ReceiveAudioPlaybackStateTests.swift */,
 				684ECE2215499A712CD55DED /* ReceiveAudioSoakTests.swift */,
 				F041DB766B2079565B4B7748 /* ReceiveClockCompensatorTests.swift */,
+				0D46589BAB76AFEC3654DBA0 /* ReceiveNativeConcealmentSmootherTests.swift */,
 				D8AEF457974E361D5EFA03F7 /* ReceivePacketLossConcealerTests.swift */,
 				1D918DC2CF541D993EFBAB0C /* ReceiveSpeechSmootherTests.swift */,
 				4166481B17EC882D85F2518E /* RecordingAudioSessionTests.swift */,
@@ -1621,6 +1628,7 @@
 				F30A411812F29416125B6CA3 /* ReceiveAdaptivePlayoutBuffer.swift in Sources */,
 				86889DD089B2ED2AE4E0C964 /* ReceiveAudioPlaybackState.swift in Sources */,
 				F1496908E0682938D19E5C82 /* ReceiveClockCompensator.swift in Sources */,
+				B463C5DF807C2FB3F46FE7CA /* ReceiveNativeConcealmentSmoother.swift in Sources */,
 				B1434547EB6F768A422E5CB8 /* ReceivePacketLossConcealer.swift in Sources */,
 				A1D6BB976595E83976781E4F /* ReceiveSpeechSmoother.swift in Sources */,
 				BE0CB0CDBCD83397CAC0BAC7 /* RecordingAudioSession.swift in Sources */,
@@ -1767,6 +1775,7 @@
 				DACB43B7969CEF7A30DE4A2A /* ReceiveAudioPlaybackStateTests.swift in Sources */,
 				5554C9F0B87B7A0E121456F4 /* ReceiveAudioSoakTests.swift in Sources */,
 				E2AF93441C88EA0D71F6AD77 /* ReceiveClockCompensatorTests.swift in Sources */,
+				DB7857B7D2E470B6084645A2 /* ReceiveNativeConcealmentSmootherTests.swift in Sources */,
 				786A4982842FEF5BE7357BDD /* ReceivePacketLossConcealerTests.swift in Sources */,
 				B106E95DDAEFF0F67387DDD0 /* ReceiveSpeechSmootherTests.swift in Sources */,
 				154FA1EE4C149AB0A3C62332 /* RecordingAudioSessionTests.swift in Sources */,
@@ -1889,6 +1898,7 @@
 				206C88B49762733FA0B036BB /* ReceiveAdaptivePlayoutBuffer.swift in Sources */,
 				CAA83C55E8E254F2CF46FE7C /* ReceiveAudioPlaybackState.swift in Sources */,
 				34F8C4C3BFF09C08E2087F57 /* ReceiveClockCompensator.swift in Sources */,
+				3957AD47614976D1231EC3A1 /* ReceiveNativeConcealmentSmoother.swift in Sources */,
 				D6A4DB196CBE2A281272EE02 /* ReceivePacketLossConcealer.swift in Sources */,
 				6080F9A83D5DBADA7EDCCBA4 /* ReceiveSpeechSmoother.swift in Sources */,
 				C239F7A64A0060C733F54887 /* RecentConnection.swift in Sources */,

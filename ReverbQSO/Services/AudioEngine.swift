@@ -857,6 +857,7 @@ final class AudioEngine: ObservableObject {
     private var playbackHistory = ReceivePlaybackHistory()
     private let receiveClock = ReceiveClockCompensator()
     private let receiveSpeech = ReceiveSpeechSmoother()
+    private let receiveNativeSpeech = ReceiveNativeConcealmentSmoother()
     private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
     private var receivePlayoutTask: Task<Void, Never>?
     private var receivePlayoutGeneration: UInt64 = 0
@@ -1479,14 +1480,16 @@ final class AudioEngine: ObservableObject {
         let pendingSamples = receivePlayout.pendingSampleCount
         if let nativeConcealment {
             receiveSpeech.reset()
-            let retained = playbackQueue.retainedConcealment(nativeConcealment,
+            let budget = playbackQueue.concealmentSampleBudget(
                 receivedSamples: samples.count, remainingSamples: rendererLead,
                 pendingSamples: pendingSamples)
 #if DEBUG
-            auditConcealmentSkippedSamples += nativeConcealment.count - retained.count
+            auditConcealmentSkippedSamples += nativeConcealment.count - min(nativeConcealment.count, budget)
 #endif
-            playbackSamples = Array(retained) + samples
+            playbackSamples = receiveNativeSpeech.process(samples, concealed: nativeConcealment,
+                metadata: metadata, now: now, maximumConcealmentSamples: budget)
         } else {
+            receiveNativeSpeech.reset()
             playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now,
                 maximumConcealmentSamples: playbackQueue.concealmentSampleBudget(
                     receivedSamples: samples.count, remainingSamples: rendererLead,
@@ -1536,6 +1539,7 @@ final class AudioEngine: ObservableObject {
         receivePlayoutTask = nil
         receivePlayout.reset()
         receiveSpeech.reset()
+        receiveNativeSpeech.reset()
         receiveClock.reset()
     }
 

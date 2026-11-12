@@ -36,6 +36,7 @@ final class WatchReceiveAudioPlayer {
     private var playbackHistory = ReceivePlaybackHistory()
     private let receiveClock = ReceiveClockCompensator()
     private let receiveSpeech = ReceiveSpeechSmoother()
+    private let receiveNativeSpeech = ReceiveNativeConcealmentSmoother()
     private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
     private var playoutTask: Task<Void, Never>?
     private var playbackEndSampleTime: Int64 = 0
@@ -115,12 +116,14 @@ final class WatchReceiveAudioPlayer {
         let pendingSamples = receivePlayout.pendingSampleCount
         if let nativeConcealment {
             receiveSpeech.reset()
-            let retained = queue.retainedConcealment(nativeConcealment,
+            let budget = queue.concealmentSampleBudget(
                 receivedSamples: samples.count, remainingSamples: rendererLead,
                 pendingSamples: pendingSamples)
-            playbackSamples = Array(retained) + samples
+            playbackSamples = receiveNativeSpeech.process(samples, concealed: nativeConcealment,
+                metadata: parsed.metadata, now: now, maximumConcealmentSamples: budget)
         }
         else {
+            receiveNativeSpeech.reset()
             playbackSamples = receiveSpeech.process(samples, metadata: parsed.metadata, now: now,
                 maximumConcealmentSamples: queue.concealmentSampleBudget(
                     receivedSamples: samples.count, remainingSamples: rendererLead,
@@ -262,6 +265,7 @@ final class WatchReceiveAudioPlayer {
         playoutTask = nil
         receivePlayout.reset()
         receiveSpeech.reset()
+        receiveNativeSpeech.reset()
         receiveClock.reset()
         if isConfigured { playerNode.stop() }
     }
