@@ -747,7 +747,7 @@ final class AudioEngine: ObservableObject {
     private var rejectedCaptureStreamEpoch: UInt64?
     private var captureDSPResults: [UInt64: (CaptureDSPProcessor.Result, Int, Bool)] = [:]
     private var prepareCaptureTask: Task<Void, Never>?
-    private var inputPreparationGeneration: UInt64 = 0
+    private var inputPreparation = CapturePreparationOwnership()
     private var playbackDesired = false
     private var isAudioInterrupted = false
     private var automaticPlaybackAllowed = true
@@ -999,12 +999,13 @@ final class AudioEngine: ObservableObject {
 #else
         guard !isCaptureReady else { return true }
         guard requestPermission || MicrophoneAccess.status == .granted else { return false }
-        guard !isPreparingCapture else { return false }
-        let preparationGeneration = inputPreparationGeneration
-        isPreparingCapture = true
+        guard let preparationGeneration = inputPreparation.begin() else { return false }
+        isPreparingCapture = inputPreparation.isPreparing
         capturePreparationFailed = false
         defer {
-            if inputPreparationGeneration == preparationGeneration { isPreparingCapture = false }
+            if inputPreparation.finish(generation: preparationGeneration) {
+                isPreparingCapture = inputPreparation.isPreparing
+            }
         }
 
         if !requestPermission,
@@ -1019,31 +1020,31 @@ final class AudioEngine: ObservableObject {
 
         if tapInstalled && engine.isRunning {
             for _ in 0..<20 {
-                guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+                guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
                 if isCaptureReady { return true }
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
         for attempt in 0..<3 {
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             if tapInstalled { stopCaptureTap(preservingIntent: false) }
             let installed = await startCapture(requestPermission: requestPermission)
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             captureRequested = false
             if installed {
                 for _ in 0..<20 {
-                    guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+                    guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
                     if isCaptureReady { return true }
                     try? await Task.sleep(for: .milliseconds(50))
                 }
             }
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             VoiceDiagnosticLog.record("capture preparation attempt=\(attempt + 1) inputCallback=\(isCaptureReady)")
             stopCaptureTap(preservingIntent: false)
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             try? await Task.sleep(for: .milliseconds(500))
         }
-        guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+        guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
         capturePreparationFailed = true
         return false
 #endif
@@ -1393,10 +1394,10 @@ final class AudioEngine: ObservableObject {
         audioDeviceRecoveryTask = nil
         isDeviceRecovering = false
         rxWindowActive = false
-        inputPreparationGeneration &+= 1
+        inputPreparation.reset()
         prepareCaptureTask?.cancel()
         prepareCaptureTask = nil
-        isPreparingCapture = false
+        isPreparingCapture = inputPreparation.isPreparing
         isCaptureReady = false
         capturePreparationFailed = false
         invalidateCaptureStart(preservingIntent: false)
@@ -2690,13 +2691,11 @@ final class AudioEngine: ObservableObject {
     private func scheduleInputPreparation() {
         guard hardwareEnabled else { return }
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-        guard prepareCaptureTask == nil else { return }
-        inputPreparationGeneration &+= 1
-        let generation = inputPreparationGeneration
+        guard let generation = inputPreparation.schedule(hasPendingTask: prepareCaptureTask != nil) else { return }
         prepareCaptureTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
             _ = await self.prepareCaptureInput(requestPermission: false)
-            if self.inputPreparationGeneration == generation { self.prepareCaptureTask = nil }
+            if self.inputPreparation.isCurrent(generation) { self.prepareCaptureTask = nil }
         }
 #endif
     }
