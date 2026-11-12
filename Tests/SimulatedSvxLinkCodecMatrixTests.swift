@@ -64,7 +64,7 @@ final class SimulatedSvxLinkCodecMatrixTests: XCTestCase {
                 }
                 let decoder = SimulatedSvxLinkMatrixDecodeOracle()
                 let expected = try packets.flatMap { try decoder.decode($0) }
-                for packet in packets { try await peer.send(packet) }
+                try await peer.sendInOrder(packets)
                 try await peer.eventually("looped-back native audio") { peer.accepted.count == packets.count }
                 await assertCounters(peer, packets: packets, duplicates: 0, missing: 0)
                 XCTAssertEqual(peer.accepted.map(\.sequenceNumber), try packets.map {
@@ -143,7 +143,7 @@ final class SimulatedSvxLinkCodecMatrixTests: XCTestCase {
                 }
                 let oracle = SimulatedSvxLinkMatrixDecodeOracle()
                 let expected = try packets.flatMap { try oracle.decode($0) }
-                for packet in packets { try await peer.send(packet) }
+                try await peer.sendInOrder(packets)
                 try await peer.eventually("mixed codec/rate recording") { peer.accepted.count == packets.count }
                 XCTAssertEqual(peer.accepted.map(\.payloadType), profiles.map(\.payloadType))
                 XCTAssertEqual(peer.accepted.map(\.sequenceNumber), profiles.indices.map { UInt16.max &- 3 &+ UInt16($0) })

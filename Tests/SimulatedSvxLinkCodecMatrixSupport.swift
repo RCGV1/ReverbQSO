@@ -249,6 +249,18 @@ final class SimulatedSvxLinkMatrixPeer {
         try await relay.send(response, to: "127.0.0.1", port: endpoint)
     }
 
+    func sendInOrder(_ packets: [Data]) async throws {
+        let baseline = accepted.count
+        // Clean-stream integrity is not a transport-overload test: the live
+        // transport deliberately retains at most four queued voice packets.
+        for (index, packet) in packets.enumerated() {
+            try await send(packet)
+            try await eventually("ordered RX packet \(index)") {
+                self.accepted.count == baseline + index + 1
+            }
+        }
+    }
+
     func outbound(port: UInt16, matching: (Data) -> Bool) async throws -> Data {
         let deadline = ContinuousClock.now + .seconds(3)
         let header = try EchoLinkRelayProtocol.encodeRequest(
@@ -272,7 +284,12 @@ final class SimulatedSvxLinkMatrixPeer {
         } while ContinuousClock.now < deadline
         relay.close()
         connection?.cancel()
-        throw Failure.timedOut(label)
+        let diagnostics = await service.audioDiagnosticsSnapshot()
+        throw Failure.timedOut(
+            "\(label); incoming=\(incoming.count) accepted=\(accepted.map(\.sequenceNumber))"
+                + " rx=\(diagnostics.rxPackets) invalid=\(diagnostics.invalidRXPackets)"
+                + " transportDrops=\(diagnostics.transportRXDrops) missing=\(diagnostics.missingRXPackets)"
+                + " duplicateOrLate=\(diagnostics.duplicateOrLateRXPackets) queued=\(diagnostics.rxQueuedPackets)")
     }
 
     func finish(remoteBye: Bool) async throws {
@@ -298,7 +315,30 @@ final class SimulatedSvxLinkMatrixPeer {
         let diagnostics = await service.audioDiagnosticsSnapshot()
         XCTAssertEqual(diagnostics.txQueuedPackets, 0)
         XCTAssertEqual(diagnostics.rxQueuedPackets, 0)
+        try await expectRelayTeardown()
         endpointPort = nil
+    }
+
+    private func expectRelayTeardown() async throws {
+        let endpoint = try XCTUnwrap(endpointPort)
+        var pending = try Set([5198, 5199].map { port in
+            try EchoLinkRelayProtocol.dropFlow(destinationHost: "127.0.0.1",
+                                               destinationPort: UInt16(port), callsign: "N0TST")
+        })
+        pending.insert(try EchoLinkRelayProtocol.unregister(callsign: "N0TST"))
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !pending.isEmpty {
+            let datagram = try await receive(until: deadline)
+            XCTAssertEqual(datagram.sourcePort, endpoint, "Teardown must belong to the ended relay client")
+            if pending.remove(datagram.data) != nil { continue }
+            // Initial SDES/NDATA may remain unread in receive-only scenarios.
+            // Close requests are all consumed before another registration starts.
+            let validEnvelope = try [5198, 5199].contains { port in
+                Data(datagram.data.prefix(7)) == (try EchoLinkRelayProtocol.encodeRequest(
+                    type: .data, destinationHost: "127.0.0.1", destinationPort: UInt16(port)))
+            }
+            XCTAssertTrue(validEnvelope, "Unexpected relay teardown datagram: \(datagram.data.map { String(format: "%02x", $0) }.joined())")
+        }
     }
 
     func assertRecording(_ expected: [Int16], label: String) throws {
