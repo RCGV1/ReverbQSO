@@ -5,7 +5,9 @@ import Foundation
 /// Reorders a small number of out-of-order RTP-style voice packets without
 /// adding latency to packets that arrive in sequence.
 struct EchoLinkAudioReorderBuffer {
-    private static let gapWaitInterval: TimeInterval = 0.040
+    private static let minimumGapWaitInterval: TimeInterval = 0.040
+    private static let maximumGapWaitInterval: TimeInterval = 0.120
+    private static let rendererSafetyInterval: TimeInterval = 0.020
     private static let restartInactivityInterval: TimeInterval = 2
     private static let maximumPendingPackets = 4
     private static let maximumTrackedStreams = 32
@@ -13,12 +15,19 @@ struct EchoLinkAudioReorderBuffer {
     private struct PendingPacket {
         let data: Data
         let receivedAt: TimeInterval
+        let deadline: TimeInterval
     }
 
     private struct StreamState {
         var lastDeliveredSequence: UInt16
         var lastActivityAt: TimeInterval
         var pending: [UInt16: PendingPacket] = [:]
+
+        var gapDeadline: TimeInterval? {
+            pending.values.min {
+                $0.receivedAt == $1.receivedAt ? $0.deadline < $1.deadline : $0.receivedAt < $1.receivedAt
+            }?.deadline
+        }
     }
 
     private var streamsBySSRC: [UInt32: StreamState] = [:]
@@ -27,9 +36,7 @@ struct EchoLinkAudioReorderBuffer {
     private(set) var deliveredSequencedPacketCount = 0
 
     var nextDeadline: TimeInterval? {
-        streamsBySSRC.values.compactMap { stream in
-            stream.pending.values.map(\.receivedAt).min().map { $0 + Self.gapWaitInterval }
-        }.min()
+        streamsBySSRC.values.compactMap(\.gapDeadline).min()
     }
 
     var pendingPacketCount: Int {
@@ -41,7 +48,8 @@ struct EchoLinkAudioReorderBuffer {
     mutating func insert(
         _ data: Data,
         metadata: EchoLinkVoicePacketMetadata?,
-        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+        playbackLeadSamples: Int = 0
     ) -> [Data] {
         guard let metadata else { return [data] }
 
@@ -72,7 +80,12 @@ struct EchoLinkAudioReorderBuffer {
                 return output
             }
 
-            stream.pending[metadata.sequenceNumber] = PendingPacket(data: data, receivedAt: now)
+            // Use only audio already scheduled at the native renderer. Snapshot
+            // the deadline so later arrivals cannot keep extending the gap.
+            let usableLead = Double(max(0, playbackLeadSamples)) / 8_000 - Self.rendererSafetyInterval
+            let wait = min(Self.maximumGapWaitInterval, max(Self.minimumGapWaitInterval, usableLead))
+            stream.pending[metadata.sequenceNumber] = PendingPacket(
+                data: data, receivedAt: now, deadline: now + wait)
             var output: [Data] = []
             if stream.pending.count > Self.maximumPendingPackets {
                 output = skipGapAndRelease(from: &stream)
@@ -94,8 +107,7 @@ struct EchoLinkAudioReorderBuffer {
         now: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> [Data] {
         let expiredSSRCs = streamsBySSRC.compactMap { ssrc, stream -> (UInt32, TimeInterval)? in
-            guard let oldest = stream.pending.values.map(\.receivedAt).min() else { return nil }
-            let deadline = oldest + Self.gapWaitInterval
+            guard let deadline = stream.gapDeadline else { return nil }
             return deadline <= now ? (ssrc, deadline) : nil
         }.sorted {
             $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1

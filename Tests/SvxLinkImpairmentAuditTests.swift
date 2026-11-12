@@ -103,6 +103,82 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         XCTAssertEqual(previous - current, 0.160, accuracy: 0.002)
     }
 
+    func testNativeHeadroomRecoversLateSpeechWithoutPlaybackUnderrun() throws {
+        for codec in [EchoLinkVoiceCodec.gsm, .speex] {
+            for timestamped in [false, true] {
+                let fixture = try packets(codec: codec, timestamped: timestamped)
+                let reference = try referenceDecode(fixture, codec: codec)
+                let arrivals = trace(fixture, impairment: .reordered, reorderDelay: 0.140)
+                // Model speech already scheduled by preceding traffic. This is
+                // renderer lead, not a new startup delay imposed on this stream.
+                let prebufferedSpeech = Array(reference.prefix(1920))
+                let fixed = try render(arrivals, codec: codec, nativeReorderHeadroom: false,
+                    prebufferedSamples: prebufferedSpeech)
+                let adaptive = try render(arrivals, codec: codec, nativeReorderHeadroom: true,
+                    prebufferedSamples: prebufferedSpeech)
+                let label = "\(codec)-\(timestamped ? "timestamped" : "svx-zero-time")"
+
+                print("SVXLINK_HEADROOM \(label) acceptedBefore=\(fixed.accepted) acceptedAfter=\(adaptive.accepted) missingBefore=\(fixed.missing) missingAfter=\(adaptive.missing) gapsBeforeMs=\(fixed.silenceSeconds * 1000) gapsAfterMs=\(adaptive.silenceSeconds * 1000)")
+                XCTAssertEqual(fixed.accepted, fixture.count - 1, label)
+                XCTAssertEqual(fixed.missing, 1, label)
+                XCTAssertEqual(fixed.late, 1, label)
+                XCTAssertEqual(adaptive.accepted, fixture.count, label)
+                XCTAssertEqual(adaptive.missing, 0, label)
+                XCTAssertEqual(adaptive.late, 0, label)
+                XCTAssertEqual(adaptive.decoded, reference, "Every real packet must reach the decoder in order: \(label)")
+                XCTAssertEqual(adaptive.syntheticSamples, 0, label)
+                XCTAssertEqual(adaptive.discarded, 0, label)
+                XCTAssertLessThan(adaptive.silenceSeconds, 0.002, label)
+                XCTAssertLessThanOrEqual(adaptive.maximumLead, 0.323, label)
+                XCTAssertLessThanOrEqual(adaptive.maximumWait, 0.242, label)
+
+                if !timestamped {
+                    for (policy, result) in [("fixed", fixed), ("headroom", adaptive)] {
+                        let attachment = XCTAttachment(data: wav(result.rendered), uniformTypeIdentifier: "com.microsoft.waveform-audio")
+                        attachment.name = "\(label)-late-reorder-\(policy).wav"
+                        attachment.lifetime = .keepAlways
+                        add(attachment)
+                    }
+                }
+            }
+        }
+    }
+
+    func testBundledSpokenWelcomeUnderNetworkImpairment() throws {
+        let gsmPayloads = LocalDemoAnnouncement.echoTestPackets()
+        XCTAssertGreaterThan(gsmPayloads.count, 50, "Spoken fixture must be present, not silently skipped")
+        let welcomeDecoder = GSMCodec()
+        let spokenPCM = gsmPayloads.flatMap { welcomeDecoder.decodePacket($0) }
+        XCTAssertGreaterThan(spokenPCM.map { abs(Int($0)) }.max() ?? 0, 1_000)
+
+        for codec in [EchoLinkVoiceCodec.gsm, .speex] {
+            // The existing welcome is synthesized speech already encoded as GSM.
+            // Speex uses a transcode; comparisons use that codec's own clean decode.
+            let payloads = codec == .gsm ? gsmPayloads : try XCTUnwrap(SpeexCodec().encode(spokenPCM))
+            let fixture = packetize(payloads, codec: codec, timestamped: false)
+            let reference = try referenceDecode(fixture, codec: codec)
+            for impairment: Impairment in [.clean, .jitter, .burstLoss, .longStall] {
+                let result = try render(trace(fixture, impairment: impairment), codec: codec)
+                let label = "spoken-\(codec)-\(impairment.rawValue)"
+                print("SVXLINK_SPOKEN \(label) accepted=\(result.accepted) missing=\(result.missing) discarded=\(result.discarded) gapsMs=\(result.silenceSeconds * 1000)")
+                XCTAssertEqual(result.accepted, fixture.count - (impairment == .burstLoss ? 2 : 0), label)
+                XCTAssertEqual(result.missing, impairment == .burstLoss ? 2 : 0, label)
+                XCTAssertLessThanOrEqual(result.discarded, impairment == .longStall ? 4 : 0, label)
+                XCTAssertLessThanOrEqual(result.maximumLead, 0.323, label)
+                XCTAssertLessThanOrEqual(result.maximumWait, 0.242, label)
+                XCTAssertLessThan(result.silenceSeconds, impairment == .longStall ? 0.750 : impairment == .burstLoss ? 0.250 : 0.002, label)
+                if impairment == .clean || impairment == .jitter {
+                    XCTAssertEqual(result.decoded, reference, label)
+                }
+                XCTAssertEqual(Array(result.decoded.suffix(640)), Array(reference.suffix(640)), label)
+                let attachment = XCTAttachment(data: wav(result.rendered), uniformTypeIdentifier: "com.microsoft.waveform-audio")
+                attachment.name = "\(label).wav"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+
     private func packets(codec: EchoLinkVoiceCodec, timestamped: Bool) throws -> [Data] {
         // Speech-like voiced/unvoiced transitions with a fixed seed, without external assets.
         var state: UInt32 = 0x51_58_4C
@@ -123,13 +199,17 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
             payloads = try XCTUnwrap(SpeexCodec().encode(source))
         }
         XCTAssertEqual(payloads.count, 80)
-        return payloads.enumerated().map { index, payload in
+        return packetize(payloads, codec: codec, timestamped: timestamped)
+    }
+
+    private func packetize(_ payloads: [Data], codec: EchoLinkVoiceCodec, timestamped: Bool) -> [Data] {
+        payloads.enumerated().map { index, payload in
             EchoLinkAudioPacketCodec.buildLegacyVoicePacket(gsmPayload: payload,
                 sequence: 65520 &+ UInt16(index), timestamp: timestamped ? UInt32(index * 640) : 0, codec: codec)
         }
     }
 
-    private func trace(_ packets: [Data], impairment: Impairment) -> [Arrival] {
+    private func trace(_ packets: [Data], impairment: Impairment, reorderDelay: Double = 0.100) -> [Arrival] {
         var state: UInt32 = 0xBADC0DE
         var arrivals: [Arrival] = []
         for index in packets.indices {
@@ -138,7 +218,7 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
             var time = Double(index) * 0.08 + 0.035
             state = 1664525 &* state &+ 1013904223
             if impairment == .jitter { time += Double(state % 41) / 1000 - 0.020 }
-            if impairment == .reordered, index == 24 { time += 0.100 }
+            if impairment == .reordered, index == 24 { time += reorderDelay }
             if impairment == .wifiBurst, (24...27).contains(index) { time = 28 * 0.08 + 0.035 }
             if impairment == .longStall, (24...32).contains(index) { time = 33 * 0.08 + 0.035 }
             arrivals.append(Arrival(time: time, packet: packets[index]))
@@ -164,8 +244,10 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         }
     }
 
-    private func render(_ arrivals: [Arrival], codec: EchoLinkVoiceCodec) throws -> Result {
+    private func render(_ arrivals: [Arrival], codec: EchoLinkVoiceCodec,
+                        nativeReorderHeadroom: Bool = true, prebufferedSamples: [Int16] = []) throws -> Result {
         var result = Result()
+        result.rendered = prebufferedSamples
         var reorder = EchoLinkAudioReorderBuffer()
         var playout = ReceiveAdaptivePlayoutBuffer()
         let smoother = ReceiveSpeechSmoother()
@@ -175,7 +257,8 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         let queue = ReceivePlaybackQueue()
         var gain = ReceivePlaybackGain()
         var nextArrival = 0
-        var renderEnd = 0.0
+        var renderEnd = Double(prebufferedSamples.count) / 8000
+        result.maximumLead = renderEnd
         var lastDecodedAt = -Double.infinity
         func lead(_ now: Double) -> Int { max(0, Int(((renderEnd - now) * 8000).rounded())) }
         func drain(_ now: Double) {
@@ -226,7 +309,8 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
             while nextArrival < arrivals.count, arrivals[nextArrival].time <= now + 0.0000001 {
                 let arrival = arrivals[nextArrival]
                 let parsed = try XCTUnwrap(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(arrival.packet))
-                for packet in reorder.insert(arrival.packet, metadata: parsed.metadata, now: now) {
+                for packet in reorder.insert(arrival.packet, metadata: parsed.metadata, now: now,
+                    playbackLeadSamples: nativeReorderHeadroom ? lead(now) : 0) {
                     try admit(packet, now: now)
                 }
                 nextArrival += 1

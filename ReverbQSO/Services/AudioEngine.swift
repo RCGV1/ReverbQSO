@@ -1968,6 +1968,14 @@ final class AudioEngine: ObservableObject {
         playbackHistory.remainingSamples(renderedSampleTime: renderedPlaybackSampleTime)
     }
 
+    /// Confirmed native output lead available to recover a reordered packet.
+    /// Pending decoded speech and output preroll are not guaranteed coverage.
+    var receiveReorderHeadroomSamples: Int {
+        guard isRunning, engine.isRunning, playerNode.isPlaying, !receiveOutputMuted,
+              let rendered = renderedPlaybackSampleTime, rendered >= 0 else { return 0 }
+        return playbackHistory.remainingSamples(renderedSampleTime: rendered)
+    }
+
     private func trimPlaybackTimeline(reason: String = "backlog-trim") {
 #if DEBUG
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditTimelineResetCount += 1 }

@@ -5,6 +5,13 @@ import XCTest
 
 @MainActor
 final class AudioEngineMeterTests: XCTestCase {
+    func testStoppedRendererDoesNotAdvertiseReorderHeadroom() {
+        let engine = AudioEngine()
+        XCTAssertEqual(engine.receiveReorderHeadroomSamples, 0)
+        engine.setReceiveOutputMuted(true)
+        XCTAssertEqual(engine.receiveReorderHeadroomSamples, 0)
+    }
+
     func testReceivedPCMReachesRecordingBeforeSpeakerStartup() {
         let engine = AudioEngine()
         var received: [Int16] = []

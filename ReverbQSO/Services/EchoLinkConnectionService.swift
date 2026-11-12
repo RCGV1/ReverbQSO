@@ -2891,7 +2891,10 @@ final class EchoLinkConnectionService: ObservableObject {
             logger.debug("Dropped malformed voice payload before receive sequence admission")
             return
         }
-        let ready = receiveReorderBuffer.insert(data, metadata: datagram.metadata)
+        let rendererLead = currentSession.isMuted || isBackgroundMuted || usesWatchAudioOutput
+            ? 0 : audioEngine.receiveReorderHeadroomSamples
+        let ready = receiveReorderBuffer.insert(data, metadata: datagram.metadata,
+            playbackLeadSamples: rendererLead)
         for packet in ready {
             guard let parsed = EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet) else { continue }
             playIncomingAudioDatagram(packet, datagram: parsed)
