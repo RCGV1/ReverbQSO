@@ -84,6 +84,84 @@ final class ReceivePacketLossConcealerTests: XCTestCase {
         XCTAssertEqual(concealer.processReceived([100, 200, 300]), [100, 200, 300])
     }
 
+    func testCappedConcealmentKeepsSuffixAfterReblendingItsBoundary() {
+        let packet = sine(frequency: 100, sampleCount: 640, amplitude: 16_000, phase: .pi / 2)
+        let reference = ReceivePacketLossConcealer()
+        reference.record(packet)
+        let full = reference.conceal(sampleCount: 1_280)
+
+        for budget in [1, 16, 32, 160, 640, 1_280, Int.max] {
+            let concealer = ReceivePacketLossConcealer()
+            concealer.record(packet)
+            let retained = concealer.conceal(sampleCount: 1_280, maximumOutputSamples: budget)
+            let retainedCount = min(budget, full.count)
+
+            XCTAssertEqual(retained.count, retainedCount, "budget=\(budget)")
+            XCTAssertLessThanOrEqual(abs(Int(retained[0]) - Int(packet.last!)), 1_000)
+            XCTAssertLessThanOrEqual(retained.map { abs(Int($0)) }.max()!, 16_000)
+            XCTAssertEqual(Array(retained.dropFirst(32)),
+                Array(full.suffix(retainedCount).dropFirst(32)))
+            if budget >= full.count { XCTAssertEqual(retained, full) }
+        }
+    }
+
+    func testZeroAndNegativeBudgetsRecoverFromActualPrecedingSpeech() {
+        let prior = [Int16](repeating: 12_000, count: 640)
+        let returning = [Int16](repeating: -12_000, count: 640)
+        for budget in [0, -1, Int.min] {
+            let concealer = ReceivePacketLossConcealer()
+            concealer.record(prior)
+
+            XCTAssertEqual(concealer.conceal(sampleCount: 1_280, maximumOutputSamples: budget), [])
+            let recovered = concealer.processReceived(returning)
+
+            XCTAssertEqual(recovered.count, returning.count)
+            XCTAssertEqual(recovered.first, 11_700)
+            XCTAssertEqual(Array(recovered.dropFirst(80)), Array(returning.dropFirst(80)))
+            XCTAssertEqual(concealer.processReceived(returning), returning)
+        }
+    }
+
+    func testCappedConcealmentStillConsumesFullLossBudget() {
+        for budget in [0, -1, 160, 640, 1_280] {
+            let concealer = ReceivePacketLossConcealer()
+            concealer.record(sine(frequency: 100, sampleCount: 640, amplitude: 16_000))
+            _ = concealer.conceal(sampleCount: 20_000, maximumOutputSamples: budget)
+
+            XCTAssertEqual(concealer.conceal(sampleCount: 640),
+                [Int16](repeating: 0, count: 640), "budget=\(budget)")
+        }
+    }
+
+    func testCappedRecoveryRecordsActualReceivedAudioForNextLoss() {
+        let prior = sine(frequency: 100, sampleCount: 640, amplitude: 16_000, phase: .pi / 2)
+        let returning = sine(frequency: 180, sampleCount: 640, amplitude: 9_000, phase: -.pi / 2)
+        for budget in [0, -1, 160, 640, 1_280] {
+            let concealer = ReceivePacketLossConcealer()
+            concealer.record(prior)
+            _ = concealer.conceal(sampleCount: 1_280, maximumOutputSamples: budget)
+            _ = concealer.processReceived(returning)
+            let reference = ReceivePacketLossConcealer()
+            reference.record(prior)
+            reference.record(returning)
+
+            XCTAssertEqual(concealer.conceal(sampleCount: 1_280),
+                reference.conceal(sampleCount: 1_280), "budget=\(budget)")
+        }
+    }
+
+    func testNonpositiveLossRequestsDoNotChangeCleanAudio() {
+        let concealer = ReceivePacketLossConcealer()
+        let packet = sine(frequency: 100, sampleCount: 640, amplitude: 16_000)
+        concealer.record(packet)
+        for count in [0, -1, Int.min] {
+            XCTAssertEqual(concealer.conceal(sampleCount: count, maximumOutputSamples: 0), [])
+            XCTAssertEqual(concealer.processReceived(packet), packet)
+        }
+        XCTAssertEqual(concealer.conceal(sampleCount: 640, maximumOutputSamples: 0), [])
+        XCTAssertEqual(concealer.processReceived([]), [])
+    }
+
     private func sine(
         frequency: Double,
         sampleCount: Int,

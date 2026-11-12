@@ -22,7 +22,9 @@ final class ReceiveSpeechSmoother {
                     timestampGap >= UInt32(min(80, previousCount)) && timestampGap <= 1280
                 let missing = plausibleTimestamp ? Int(timestampGap) : (distance - 1) * previousCount
                 if (1...1280).contains(missing) {
-                    gap = concealer.conceal(sampleCount: missing)
+                    // Advance the full loss run without displacing queued speech.
+                    gap = concealer.conceal(sampleCount: missing,
+                        maximumOutputSamples: maximumConcealmentSamples)
                 } else { concealer.reset() }
             } else if distance != 1 { concealer.reset() }
         } else { concealer.reset() }
@@ -30,9 +32,7 @@ final class ReceiveSpeechSmoother {
         self.previous = metadata
         previousCount = samples.count
         lastArrival = now
-        // Advance loss history fully, but do not let synthetic audio displace
-        // received speech that is already waiting for playback.
-        return Array(gap.suffix(max(0, maximumConcealmentSamples))) + speech
+        return gap + speech
     }
     func reset() {
         concealer.reset()

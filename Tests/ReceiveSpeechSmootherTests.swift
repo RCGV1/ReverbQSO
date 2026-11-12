@@ -29,6 +29,71 @@ final class ReceiveSpeechSmootherTests: XCTestCase {
         XCTAssertEqual(Array(recovered.suffix(560)), Array(packet.suffix(560)))
     }
 
+    func testBudgetedLossSplicesStayContinuousAcrossPhasesAndPolarities() {
+        for payload: UInt8 in [0, 3] {
+            for phase in [0.0, Double.pi / 2] {
+                for polarity in [-1.0, 1.0] {
+                    let packet: [Int16] = (0..<640).map { index in
+                        Int16((polarity * 16_000 * sin(2 * .pi * 100 * Double(index) / 8_000 + phase)).rounded())
+                    }
+                    for returning in [packet, packet.map { -$0 }] {
+                        for distance: UInt16 in [2, 3] {
+                            for budget in [Int.min, -1, 0, 1, 16, 160, 640, 1_280, Int.max] {
+                                let smoother = ReceiveSpeechSmoother()
+                                let context = "payload=\(payload) phase=\(phase) polarity=\(polarity) distance=\(distance) budget=\(budget)"
+                                let prior = smoother.process(packet, metadata: metadata(100, payload: payload), now: 0)
+                                let recovered = smoother.process(returning,
+                                    metadata: metadata(100 + distance, payload: payload), now: 0.01,
+                                    maximumConcealmentSamples: budget)
+                                let retainedCount = min(max(0, budget), Int(distance - 1) * packet.count)
+
+                                XCTAssertEqual(prior, packet)
+                                XCTAssertEqual(recovered.count, retainedCount + returning.count, context)
+                                XCTAssertLessThanOrEqual(abs(Int(prior.last!) - Int(recovered[0])), 1_000, context)
+                                let preceding = retainedCount > 0 ? recovered[retainedCount - 1] : prior.last!
+                                XCTAssertLessThanOrEqual(abs(Int(preceding) - Int(recovered[retainedCount])), 400, context)
+                                XCTAssertLessThanOrEqual(recovered.map { abs(Int($0)) }.max()!, 16_000, context)
+                                XCTAssertEqual(Array(recovered.dropFirst(retainedCount + 80)),
+                                    Array(returning.dropFirst(80)), context)
+                                XCTAssertEqual(smoother.process(returning,
+                                    metadata: metadata(101 + distance, payload: payload), now: 0.02), returning, context)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testFullAndOversizedBudgetsMatchDefaultRecoveryExactly() {
+        let packet = (0..<640).map { Int16(8_000 * sin(Double($0) * .pi / 40)) }
+        let returning = packet.map { -$0 }
+        let reference = ReceiveSpeechSmoother()
+        _ = reference.process(packet, metadata: metadata(100), now: 0)
+        let expected = reference.process(returning, metadata: metadata(103), now: 0.01)
+
+        for budget in [1_280, Int.max] {
+            let smoother = ReceiveSpeechSmoother()
+            _ = smoother.process(packet, metadata: metadata(100), now: 0)
+            XCTAssertEqual(smoother.process(returning, metadata: metadata(103), now: 0.01,
+                maximumConcealmentSamples: budget), expected)
+        }
+    }
+
+    func testCleanPacketsRemainBitIdenticalRegardlessOfConcealmentBudget() {
+        let packet = (0..<640).map { Int16(8_000 * sin(Double($0) * .pi / 40)) }
+        let returning = packet.map { -$0 }
+        for budget in [Int.min, -1, 0, 160, 640, 1_280, Int.max] {
+            let smoother = ReceiveSpeechSmoother()
+            XCTAssertEqual(smoother.process(packet, metadata: metadata(100), now: 0,
+                maximumConcealmentSamples: budget), packet)
+            XCTAssertEqual(smoother.process([], metadata: metadata(102), now: 0.005,
+                maximumConcealmentSamples: budget), [])
+            XCTAssertEqual(smoother.process(returning, metadata: metadata(101), now: 0.01,
+                maximumConcealmentSamples: budget), returning)
+        }
+    }
+
     private func metadata(_ sequence: UInt16, ssrc: UInt32 = 1, payload: UInt8 = 3) -> EchoLinkVoicePacketMetadata {
         .init(payloadType: payload, sequenceNumber: sequence, timestamp: 0, ssrc: ssrc)
     }
