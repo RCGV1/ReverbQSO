@@ -117,6 +117,7 @@
 		4A92643B26A065BEA12CE382 /* SpeexTransmitNegotiationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87D626C16504AC800EB87B17 /* SpeexTransmitNegotiationTests.swift */; };
 		4AFA94078584154DA3874CCC /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE902BACF5D5E9E9421692AA /* Network.framework */; };
 		4B0F81D0401A4559D0BD4259 /* EchoLinkAutomaticTransportSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE44705AB6D2A345B0D324B /* EchoLinkAutomaticTransportSelector.swift */; };
+		4B53C00D713896F3626C4D75 /* SpeexBitrateCompatibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 929ACA69A9D7FA8C3D7C94FF /* SpeexBitrateCompatibilityTests.swift */; };
 		4C555A734F39EAFB9323DE63 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */; };
 		4C92B055EFCC52B7E4F057BF /* DirectCQSocketPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */; };
 		4D743BB3690EF1522F7769D0 /* LocalDemoHostingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A589F5DEFDA7E71736CF95BB /* LocalDemoHostingTests.swift */; };
@@ -639,6 +640,7 @@
 		8FC50F141ED5191797613ED8 /* cb_search_arm4.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cb_search_arm4.h; sourceTree = "<group>"; };
 		8FC7B0125184C014B0BBB878 /* EchoLinkConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConnectionService.swift; sourceTree = "<group>"; };
 		90ABBDD741C05A2804F8184B /* EchoLinkPublicProxyListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkPublicProxyListTests.swift; sourceTree = "<group>"; };
+		929ACA69A9D7FA8C3D7C94FF /* SpeexBitrateCompatibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeexBitrateCompatibilityTests.swift; sourceTree = "<group>"; };
 		9307CF5CCE7FB54E600A241B /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		93304898C5B9D4B78B98237E /* gsm_decode.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gsm_decode.c; sourceTree = "<group>"; };
 		9413FAB70C08D5441E6BC3DE /* EchoLinkConferenceHostService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLinkConferenceHostService.swift; sourceTree = "<group>"; };
@@ -956,6 +958,7 @@
 				31B55BE192C7F61684907B34 /* RemoteVoiceActivityTests.swift */,
 				C88E0AF046423A217B96BFCB /* SessionRecordingTests.swift */,
 				1884ADE0E3D3974D89C41CF9 /* SpacePTTReleaseMonitorTests.swift */,
+				929ACA69A9D7FA8C3D7C94FF /* SpeexBitrateCompatibilityTests.swift */,
 				0D59A635F171D394AA164C29 /* SpeexCodecTests.swift */,
 				31BDE607C823AD1DDADDC9E1 /* SpeexReceiveStreamDecoderTests.swift */,
 				3AE78B9A116D6DBE0F596A80 /* SpeexTransmitConnectionTests.swift */,
@@ -1782,6 +1785,7 @@
 				BFFFE65CD99B5A801140C285 /* RemoteVoiceActivityTests.swift in Sources */,
 				6DCC6ADD211C255BC7D63752 /* SessionRecordingTests.swift in Sources */,
 				C39BE7B1ABE0AF5A5CB12796 /* SpacePTTReleaseMonitorTests.swift in Sources */,
+				4B53C00D713896F3626C4D75 /* SpeexBitrateCompatibilityTests.swift in Sources */,
 				9ABC42B6BD501158C5BF9207 /* SpeexCodecTests.swift in Sources */,
 				44AB3F65122999E723DFD4AC /* SpeexReceiveStreamDecoderTests.swift in Sources */,
 				67E687059396415808259B74 /* SpeexTransmitConnectionTests.swift in Sources */,
