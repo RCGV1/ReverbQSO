@@ -41,6 +41,8 @@ final class QSOHub: ObservableObject {
     private let networkConfigurationProvider: @MainActor () -> EchoLinkProxyConfiguration
     private var subscriptions: [UUID: AnyCancellable] = [:]
     private var initialConnectionIDs: Set<UUID> = []
+    private var connectedEntryIDs: Set<UUID> = []
+    private var previousActiveIDs: [UUID: UUID] = [:]
     private var primarySubscription: AnyCancellable?
     var effectiveTransportProvider: ((String) -> EchoLinkEffectiveTransport?)?
     var configure: ((EchoLinkConnectionService, String) -> Void)?
@@ -59,10 +61,12 @@ final class QSOHub: ObservableObject {
         self.connectOperation = connectOperation
         observeRecordingFailures(in: primary)
         primarySubscription = primary.$session.sink { [weak self, weak primary] session in
-            guard session != nil else { return }
+            guard let self, let primary, let session,
+                  session.state == .connecting || session.state == .connected,
+                  !self.entries.contains(where: { $0.service === primary }) else { return }
             Task { @MainActor [weak self, weak primary] in
                 guard let self, let primary,
-                      primary.session != nil,
+                      primary.session?.id == session.id,
                       !self.entries.contains(where: { $0.service === primary }) else { return }
                 self.adoptExistingPrimary(as: primary.localCallsign)
             }
@@ -80,30 +84,23 @@ final class QSOHub: ObservableObject {
     func entry(for id: UUID) -> Entry? { entries.first(where: { $0.id == id }) }
 
     func adoptExistingPrimary(as callsign: String) {
-        guard primary.session != nil,
+        guard let session = primary.session,
+              session.state == .connecting || session.state == .connected,
               !entries.contains(where: { $0.service === primary }) else { return }
         let id = UUID()
-        entries.append(
-            Entry(
-                id: id,
-                callsign: callsign,
-                mode: effectiveTransportProvider?(callsign)?.configuration.mode ?? networkConfigurationProvider().mode,
-                service: primary,
-                modeProvider: { [weak self] in
-                    self?.effectiveTransportProvider?(callsign)?.configuration.mode
-                        ?? self?.networkConfigurationProvider().mode
-                }
-            )
-        )
-        primary.pttPermission = { [weak self] in self?.activeID == id }
-        subscriptions[id] = primary.$session.combineLatest(primary.$isReconnecting, primary.$reconnectCandidate).dropFirst()
-            .sink { [weak self, weak primary] _, _, _ in
-                Task { @MainActor [weak self, weak primary] in
-                    guard let self, let primary else { return }
-                    if primary.session == nil && !primary.isReconnecting && primary.reconnectCandidate == nil { self.remove(id) }
-                    else { self.objectWillChange.send() }
-                }
+        let entry = Entry(
+            id: id,
+            callsign: callsign,
+            mode: effectiveTransportProvider?(callsign)?.configuration.mode ?? networkConfigurationProvider().mode,
+            service: primary,
+            modeProvider: { [weak self] in
+                self?.effectiveTransportProvider?(callsign)?.configuration.mode
+                    ?? self?.networkConfigurationProvider().mode
             }
+        )
+        entries.append(entry)
+        primary.pttPermission = { [weak self] in self?.activeID == id }
+        observeSession(in: entry)
         if activeID == nil {
             select(id)
         } else {
@@ -158,29 +155,20 @@ final class QSOHub: ObservableObject {
             guard let self, self.activeID == id else { return false }
             return !self.entries.contains { $0.id != id && $0.service.session?.isPTTActive == true }
         }
+        previousActiveIDs[id] = activeID
         entries.append(entry)
         initialConnectionIDs.insert(id)
-        subscriptions[id] = service.$session.combineLatest(service.$isReconnecting, service.$reconnectCandidate).dropFirst()
-            .sink { [weak self, weak service] _, _, _ in
-                Task { @MainActor [weak self, weak service] in
-                    guard let self, let service else { return }
-                    if !self.initialConnectionIDs.contains(id) && service.session == nil
-                        && !service.isReconnecting && service.reconnectCandidate == nil {
-                        self.remove(id)
-                    } else {
-                        self.objectWillChange.send()
-                    }
-                }
-            }
+        observeSession(in: entry)
         select(id)
         let savedResolver = service.resolveStation
         if preservingEndpoint { service.resolveStation = nil }
         await connectOperation(service, station)
-        initialConnectionIDs.remove(id)
-        if preservingEndpoint { service.resolveStation = savedResolver }
-        if service.session == nil && service.reconnectCandidate == nil {
-            remove(id)
+        if preservingEndpoint && !entries.contains(where: { $0.id != id && $0.service === service }) {
+            service.resolveStation = savedResolver
         }
+        guard entries.contains(where: { $0.id == id && $0.service === service }) else { return service }
+        initialConnectionIDs.remove(id)
+        refreshPresentation(for: id)
         if let error = service.error {
             lastError = error.localizedDescription
         }
@@ -216,6 +204,8 @@ final class QSOHub: ObservableObject {
         }
         entries.removeAll()
         initialConnectionIDs.removeAll()
+        connectedEntryIDs.removeAll()
+        previousActiveIDs.removeAll()
         subscriptions.removeAll()
         activeID = nil
     }
@@ -236,15 +226,54 @@ final class QSOHub: ObservableObject {
         }
     }
 
+    private func observeSession(in entry: Entry) {
+        let id = entry.id
+        let service = entry.service
+        subscriptions[id] = service.$session.combineLatest(service.$isReconnecting, service.$reconnectCandidate)
+            .sink { [weak self, weak service] session, _, _ in
+                guard let self, let service,
+                      self.entries.contains(where: { $0.id == id && $0.service === service }) else { return }
+                // Published sends before the property changes, including rapid connect/drop transitions.
+                if session?.state == .connected {
+                    self.connectedEntryIDs.insert(id)
+                    self.previousActiveIDs.removeValue(forKey: id)
+                }
+                Task { @MainActor [weak self] in
+                    self?.refreshPresentation(for: id)
+                }
+            }
+    }
+
+    private func refreshPresentation(for id: UUID) {
+        guard let entry = entry(for: id) else { return }
+        let service = entry.service
+        guard !initialConnectionIDs.contains(id) else {
+            objectWillChange.send()
+            return
+        }
+        let failedInitialConnection = !connectedEntryIDs.contains(id)
+            && service.session?.state != .connecting && !service.isReconnecting
+        if failedInitialConnection {
+            if let error = service.error { lastError = error.localizedDescription }
+            remove(id)
+        } else if service.session == nil && !service.isReconnecting && service.reconnectCandidate == nil {
+            remove(id)
+        } else {
+            objectWillChange.send()
+        }
+    }
+
     private func remove(_ id: UUID) {
         guard let removed = entries.first(where: { $0.id == id }) else { return }
+        let previousActiveID = previousActiveIDs.removeValue(forKey: id)
         removed.service.pttPermission = nil
         removed.service.setBackgroundMuted(false)
         entries.removeAll { $0.id == id }
         initialConnectionIDs.remove(id)
+        connectedEntryIDs.remove(id)
         subscriptions.removeValue(forKey: id)
         if activeID == id {
-            activeID = entries.last?.id
+            activeID = entries.first(where: { $0.id == previousActiveID })?.id ?? entries.last?.id
         }
         for entry in entries {
             entry.service.setBackgroundMuted(entry.id != activeID)

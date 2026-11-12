@@ -46,26 +46,211 @@ final class QSOHubTests: XCTestCase {
         XCTAssertNotNil(service.error)
     }
 
-    func testFailedConnectionKeepsItsRetryPresentationUntilExplicitDisconnect() async {
+    func testFailedInitialConnectionRemovesPresentationAndPreservesError() async {
         let station = Station(callsign: "TEST-RETRY", ipAddress: "127.0.0.1")
-        let hub = QSOHub(primary: EchoLinkConnectionService(),
+        let failure = ConnectionError.connectionFailed("The peer stopped responding.")
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
             networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
             connectOperation: { service, station in
                 service.registerReconnectCandidate(station)
-                service.error = ConnectionError.connectionFailed("The peer stopped responding.")
+                service.error = failure
                 service.session = QSOSession(station: station, state: .disconnected)
                 service.session = nil // The transport's delayed cleanup has completed.
             })
         let service = await hub.connect(to: station, as: "N0RETRY")
-        for _ in 0..<10 { await Task.yield() }
 
-        XCTAssertEqual(hub.entries.count, 1)
-        XCTAssertNotNil(hub.activeID)
-        XCTAssertTrue(hub.activeService === service)
-        XCTAssertEqual(hub.entries.first?.station?.callsign, station.callsign)
-        await hub.disconnect(callsign: "N0RETRY")
+        XCTAssertTrue(hub.entries.isEmpty)
+        XCTAssertNil(hub.activeID)
+        XCTAssertEqual(hub.lastError, failure.localizedDescription)
+        XCTAssertEqual(service.error?.localizedDescription, failure.localizedDescription)
+        XCTAssertEqual(service.reconnectCandidate?.callsign, station.callsign)
         for _ in 0..<10 { await Task.yield() }
         XCTAssertTrue(hub.entries.isEmpty)
+        XCTAssertNil(hub.activeID)
+        XCTAssertNil(service.pttPermission)
+        XCTAssertEqual(hub.lastError, failure.localizedDescription)
+        XCTAssertEqual(service.error?.localizedDescription, failure.localizedDescription)
+    }
+
+    func testFailedDisconnectedPrimaryIsNotReadoptedByDeferredSessionObservation() async {
+        let failure = ConnectionError.connectionFailed("The initial handshake failed.")
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                service.registerReconnectCandidate(station)
+                service.session = QSOSession(station: station, state: .disconnected)
+                service.error = failure
+            })
+
+        let service = await hub.connect(to: Station(callsign: "TEST-FAIL", ipAddress: "127.0.0.1"), as: "N0FAIL")
+
+        XCTAssertTrue(hub.entries.isEmpty)
+        XCTAssertNil(hub.activeID)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertTrue(hub.entries.isEmpty)
+        XCTAssertNil(hub.activeID)
+        XCTAssertNil(service.pttPermission)
+        XCTAssertEqual(hub.lastError, failure.localizedDescription)
+        XCTAssertEqual(service.error?.localizedDescription, failure.localizedDescription)
+        service.session = nil
+    }
+
+    func testFailedSecondaryAttemptRestoresPreviouslySelectedCallAndPreservesOtherAccounts() async throws {
+        let failure = ConnectionError.connectionFailed("The new station did not answer.")
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                if station.callsign == "TEST-FAIL" {
+                    service.registerReconnectCandidate(station)
+                    service.session = QSOSession(station: station, state: .disconnected)
+                    service.session = nil
+                    service.error = failure
+                } else {
+                    service.session = QSOSession(station: station, state: .connected)
+                }
+            })
+        let first = await hub.connect(to: Station(callsign: "TEST-A", ipAddress: "127.0.0.1"), as: "N0AAA")
+        let second = await hub.connect(to: Station(callsign: "TEST-B", ipAddress: "127.0.0.2"), as: "N0BBB")
+        let existingIDs = hub.entries.map(\.id)
+        let selectedID = try XCTUnwrap(existingIDs.first)
+        hub.select(selectedID)
+
+        let failed = await hub.connect(to: Station(callsign: "TEST-FAIL", ipAddress: "127.0.0.3"), as: "N0FAIL")
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(hub.entries.map(\.id), existingIDs)
+        XCTAssertEqual(hub.activeID, selectedID)
+        XCTAssertTrue(hub.activeService === first)
+        XCTAssertEqual(first.session?.state, .connected)
+        XCTAssertEqual(second.session?.state, .connected)
+        XCTAssertEqual(first.pttPermission?(), true)
+        XCTAssertEqual(second.pttPermission?(), false)
+        XCTAssertTrue(first.hasAudioFocus)
+        XCTAssertFalse(second.hasAudioFocus)
+        XCTAssertNil(failed.pttPermission)
+        XCTAssertEqual(hub.lastError, failure.localizedDescription)
+        XCTAssertEqual(failed.error?.localizedDescription, failure.localizedDescription)
+        first.session = nil
+        second.session = nil
+    }
+
+    func testConnectingAttemptRemainsManagedUntilItFailsAfterConnectReturns() async throws {
+        let failure = ConnectionError.connectionFailed("The pending handshake failed.")
+        let station = Station(callsign: "TEST-PENDING", ipAddress: "127.0.0.1")
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                service.registerReconnectCandidate(station)
+                service.session = QSOSession(station: station, state: .connecting)
+            })
+        let service = await hub.connect(to: station, as: "N0PENDING")
+        let id = try XCTUnwrap(hub.activeID)
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(hub.entries.map(\.id), [id])
+        XCTAssertEqual(hub.activeID, id)
+        XCTAssertEqual(service.session?.state, .connecting)
+        XCTAssertEqual(service.pttPermission?(), true)
+        XCTAssertFalse(service.canTransmit)
+
+        service.error = failure
+        var disconnected = service.session
+        disconnected?.state = .disconnected
+        service.session = disconnected
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertTrue(hub.entries.isEmpty)
+        XCTAssertNil(hub.activeID)
+        XCTAssertNil(service.pttPermission)
+        XCTAssertEqual(service.error?.localizedDescription, failure.localizedDescription)
+        service.session = nil
+    }
+
+    func testCancelledInitialAttemptDoesNotRemainAfterSuspendedConnectReturns() async throws {
+        let started = expectation(description: "initial connection started")
+        var finishConnection: CheckedContinuation<Void, Never>?
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                service.registerReconnectCandidate(station)
+                service.session = QSOSession(station: station, state: .connecting)
+                await withCheckedContinuation { continuation in
+                    finishConnection = continuation
+                    started.fulfill()
+                }
+            })
+        let connection = Task {
+            await hub.connect(to: Station(callsign: "TEST-CANCEL", ipAddress: "127.0.0.1"), as: "N0CANCEL")
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let pendingID = hub.activeID
+        let pendingService = hub.entries.first?.service
+        hub.cancelPendingConnection(as: "N0CANCEL")
+        finishConnection?.resume()
+        let service = await connection.value
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertNotNil(pendingID)
+        XCTAssertTrue(pendingService === service)
+        XCTAssertTrue(hub.entries.isEmpty)
+        XCTAssertNil(hub.activeID)
+        XCTAssertNil(service.session)
+        XCTAssertNil(service.pttPermission)
+    }
+
+    func testConnectedPrimaryRetainsSameReconnectPresentationAfterDrop() async throws {
+        let station = Station(callsign: "TEST-DROP", ipAddress: "127.0.0.1")
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                service.session = QSOSession(station: station, state: .connected)
+            })
+        let service = await hub.connect(to: station, as: "N0DROP")
+        let id = try XCTUnwrap(hub.activeID)
+        service.registerReconnectCandidate(station)
+        var disconnected = service.session
+        disconnected?.state = .disconnected
+        service.session = disconnected
+        service.session = nil
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(hub.entries.map(\.id), [id])
+        XCTAssertEqual(hub.activeID, id)
+        XCTAssertTrue(hub.activeService === service)
+        XCTAssertEqual(hub.entry(for: id)?.station?.callsign, station.callsign)
+        XCTAssertEqual(service.pttPermission?(), true)
+        XCTAssertFalse(service.canTransmit)
+        await hub.disconnectAll()
+    }
+
+    func testRapidConnectAndDropWithinInitialOperationRetainsReconnectPresentation() async throws {
+        let station = Station(callsign: "TEST-RAPID", ipAddress: "127.0.0.1")
+        var connectingID: UUID?
+        let hub = QSOHub(primary: EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false)),
+            networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+            connectOperation: { service, station in
+                var session = QSOSession(station: station, state: .connecting)
+                service.session = session
+                connectingID = session.id
+                session.state = .connected
+                service.session = session
+                service.registerReconnectCandidate(station)
+                session.state = .disconnected
+                service.session = session
+                service.session = nil
+            })
+        let service = await hub.connect(to: station, as: "N0RAPID")
+        let id = try XCTUnwrap(hub.activeID)
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertNotNil(connectingID)
+        XCTAssertEqual(hub.entries.map(\.id), [id])
+        XCTAssertEqual(hub.activeID, id)
+        XCTAssertTrue(hub.activeService === service)
+        XCTAssertEqual(hub.entry(for: id)?.station?.callsign, station.callsign)
+        XCTAssertEqual(service.pttPermission?(), true)
+        XCTAssertFalse(service.canTransmit)
+        await hub.disconnectAll()
     }
 
     func testBackgroundExpirationPreservesExistingAndOtherAccountAttempts() async {
