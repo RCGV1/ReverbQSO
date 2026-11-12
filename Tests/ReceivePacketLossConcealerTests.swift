@@ -122,14 +122,132 @@ final class ReceivePacketLossConcealerTests: XCTestCase {
         }
     }
 
-    func testCappedConcealmentStillConsumesFullLossBudget() {
-        for budget in [0, -1, 160, 640, 1_280] {
-            let concealer = ReceivePacketLossConcealer()
-            concealer.record(sine(frequency: 100, sampleCount: 640, amplitude: 16_000))
-            _ = concealer.conceal(sampleCount: 20_000, maximumOutputSamples: budget)
+    func testZeroRetainedLossPreservesExactlyContinuousMuLawVoicedPCM() {
+        for count in [160, 320, 640] {
+            let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: count)
+            XCTAssertEqual(packet.last, packet.first)
+            for budget in [Int.min, -1, 0] {
+                let context = "count=\(count) budget=\(budget)"
+                let concealer = ReceivePacketLossConcealer()
+                XCTAssertEqual(concealer.processReceived(packet), packet, context)
+                XCTAssertEqual(concealer.conceal(sampleCount: count,
+                    maximumOutputSamples: budget), [], context)
 
-            XCTAssertEqual(concealer.conceal(sampleCount: 640),
-                [Int16](repeating: 0, count: 640), "budget=\(budget)")
+                let recoveredPCM = concealer.processReceived(packet)
+
+                XCTAssertEqual(recoveredPCM.count, packet.count, context)
+                XCTAssertEqual(Array(recoveredPCM.prefix(80)), Array(packet.prefix(80)), context)
+                XCTAssertEqual(recoveredPCM, packet, context)
+                let next = packet.map { -$0 }
+                XCTAssertEqual(concealer.processReceived(next), next, context)
+            }
+        }
+    }
+
+    func testRetainedLossWithExactlyMatchedFirstSampleKeepsExistingRecoveryBlend() {
+        for count in [160, 320, 640] {
+            let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: count)
+            let budgets: [Int?] = [nil, 1, 16, 32, count, 1_280, Int.max]
+            for budget in budgets {
+                let context = "count=\(count) budget=\(String(describing: budget))"
+                let concealer = ReceivePacketLossConcealer()
+                concealer.record(packet)
+                let retained: [Int16]
+                if let budget {
+                    retained = concealer.conceal(sampleCount: count, maximumOutputSamples: budget)
+                } else {
+                    retained = concealer.conceal(sampleCount: count)
+                }
+                XCTAssertEqual(retained.count, min(count, budget ?? count), context)
+                guard let preceding = retained.last else {
+                    XCTFail("Expected retained concealment: \(context)")
+                    continue
+                }
+                var returning = packet
+                returning[0] = preceding
+                let expected = ReceivePLCJoinFixture.heldSampleRecovery(returning, following: preceding)
+
+                XCTAssertNotEqual(expected, returning, context)
+                XCTAssertEqual(concealer.processReceived(returning), expected, context)
+                XCTAssertEqual(concealer.processReceived(returning), returning, context)
+            }
+        }
+    }
+
+    func testZeroRetainedNonmatchingJoinStillUsesExistingRecoveryBlend() {
+        for count in [160, 320, 640] {
+            let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: count)
+            var nearMatch = packet
+            nearMatch[0] -= 1
+            let extremes = (0..<count).map { $0.isMultiple(of: 2) ? Int16.min : Int16.max }
+            for returning in [nearMatch, packet.map { -$0 }, extremes] {
+                for budget in [Int.min, -1, 0] {
+                    let context = "count=\(count) budget=\(budget) first=\(returning[0])"
+                    let concealer = ReceivePacketLossConcealer()
+                    concealer.record(packet)
+                    XCTAssertEqual(concealer.conceal(sampleCount: count,
+                        maximumOutputSamples: budget), [], context)
+                    let expected = ReceivePLCJoinFixture.heldSampleRecovery(returning,
+                        following: packet.last!)
+
+                    XCTAssertNotEqual(expected, returning, context)
+                    XCTAssertEqual(concealer.processReceived(returning), expected, context)
+                }
+            }
+        }
+    }
+
+    func testZeroRetainedStateDoesNotSurviveRecordOrReset() {
+        let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: 640)
+        let next = packet.map { -$0 }
+        for resetHistory in [false, true] {
+            let concealer = ReceivePacketLossConcealer()
+            concealer.record(packet)
+            XCTAssertEqual(concealer.conceal(sampleCount: 640, maximumOutputSamples: 0), [])
+            if resetHistory {
+                concealer.reset()
+            } else {
+                concealer.record(packet)
+            }
+            XCTAssertEqual(concealer.processReceived(next), next)
+
+            let retained = concealer.conceal(sampleCount: 640)
+            var returning = packet
+            returning[0] = retained.last!
+            let expected = ReceivePLCJoinFixture.heldSampleRecovery(returning,
+                following: retained.last!)
+            XCTAssertNotEqual(expected, returning)
+            XCTAssertEqual(concealer.processReceived(returning), expected)
+        }
+    }
+
+    func testRetainedConcealmentAfterZeroRetainedLossStillUsesExistingRecoveryBlend() {
+        let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: 640)
+        let concealer = ReceivePacketLossConcealer()
+        concealer.record(packet)
+        XCTAssertEqual(concealer.conceal(sampleCount: 160, maximumOutputSamples: 0), [])
+
+        let retained = concealer.conceal(sampleCount: 160)
+        XCTAssertEqual(retained.count, 160)
+        var returning = packet
+        returning[0] = retained.last!
+        let expected = ReceivePLCJoinFixture.heldSampleRecovery(returning,
+            following: retained.last!)
+
+        XCTAssertNotEqual(expected, returning)
+        XCTAssertEqual(concealer.processReceived(returning), expected)
+    }
+
+    func testCappedConcealmentStillConsumesFullLossBudget() {
+        for count in [1_280, 20_000] {
+            for budget in [Int.min, -1, 0, 160, 640, 1_280] {
+                let concealer = ReceivePacketLossConcealer()
+                concealer.record(sine(frequency: 100, sampleCount: 640, amplitude: 16_000))
+                _ = concealer.conceal(sampleCount: count, maximumOutputSamples: budget)
+
+                XCTAssertEqual(concealer.conceal(sampleCount: 640),
+                    [Int16](repeating: 0, count: 640), "count=\(count) budget=\(budget)")
+            }
         }
     }
 
@@ -181,5 +299,29 @@ final class ReceivePacketLossConcealerTests: XCTestCase {
     private func meanAbsoluteDifference(_ lhs: [Int16], _ rhs: [Int16]) -> Double {
         guard !lhs.isEmpty, lhs.count == rhs.count else { return .infinity }
         return zip(lhs, rhs).reduce(0.0) { $0 + abs(Double($1.0) - Double($1.1)) } / Double(lhs.count)
+    }
+}
+
+enum ReceivePLCJoinFixture {
+    static func voicedPacket(sampleCount: Int) -> [Int16] {
+        let levels = (0...255).map { EchoLinkAudioPacketCodec.decodeMuLaw(UInt8($0)) }
+        // Half-sample phase gives an exact last-to-first match over each 80-sample cycle.
+        let cycle: [Int16] = (0..<80).map { index in
+            let angle = 2 * Double.pi * (Double(index) + 0.5) / 80
+            let target = Int((12_000 * cos(angle) + 3_000 * cos(3 * angle)).rounded())
+            return levels.min { abs(Int($0) - target) < abs(Int($1) - target) }!
+        }
+        return (0..<sampleCount).map { cycle[$0 % cycle.count] }
+    }
+
+    static func heldSampleRecovery(_ samples: [Int16], following preceding: Int16) -> [Int16] {
+        var expected = samples
+        let count = min(80, samples.count)
+        for index in 0..<count {
+            let weight = Double(index + 1) / Double(count)
+            expected[index] = Int16((Double(preceding) * (1 - weight)
+                + Double(samples[index]) * weight).rounded())
+        }
+        return expected
     }
 }
