@@ -2,18 +2,44 @@
 import Foundation
 
 struct ReceivePlaybackGain {
-    private var gain: Float = 2.5
+    private static let maximumGain = 2.5
+    private static let peakLimit = 0.95
+    private static let attackSamples = 80
+    private static let releaseStep = 1 - exp(-1.0 / (8_000 * 0.3))
+    private var gain = Self.maximumGain
+
     mutating func process(_ samples: [Int16]) -> [Float] {
         guard !samples.isEmpty else { return [] }
-        let peak = Float(samples.reduce(0) { max($0, abs(Int($1))) }) / 32768
-        let target = peak > 0 ? min(2.5, 0.95 / peak) : 2.5
-        // Reduce gain before a loud buffer, then recover over 300 ms. Apply
-        // one gain to the waveform instead of flattening individual peaks.
-        if target < gain { gain = target }
-        else { gain += (target - gain) * Float(1 - exp(-Double(samples.count) / 8_000 / 0.3)) }
-        return samples.map { Float($0) / 32768 * gain }
+        let peak = Double(samples.reduce(0) { max($0, abs(Int($1))) }) / 32768
+        let target = peak > 0 ? min(Self.maximumGain, Self.peakLimit / peak) : Self.maximumGain
+        if target < gain {
+            let initialGain = gain
+            let end = samples.firstIndex {
+                Double(abs(Int($0))) / 32768 * initialGain > Self.peakLimit
+            } ?? 0
+            let start = max(0, end - Self.attackSamples)
+            gain = target
+            // The packet already provides lookahead. Finish the ramp before
+            // its first unsafe sample, without delaying or clipping speech.
+            return samples.enumerated().map { index, sample in
+                let appliedGain: Double
+                if index < start { appliedGain = initialGain }
+                else if index < end {
+                    let progress = Double(index - start) / Double(end - start)
+                    appliedGain = initialGain + (target - initialGain) * progress
+                } else { appliedGain = target }
+                return Float(Double(sample) / 32768 * appliedGain)
+            }
+        }
+
+        // Recover over 300 ms of samples, not a step at each packet boundary.
+        return samples.map { sample in
+            let output = Float(Double(sample) / 32768 * gain)
+            gain += (target - gain) * Self.releaseStep
+            return output
+        }
     }
-    mutating func reset() { gain = 2.5 }
+    mutating func reset() { gain = Self.maximumGain }
 }
 
 struct ReceivePlaybackQueue {

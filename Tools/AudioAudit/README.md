@@ -85,3 +85,35 @@ lag must agree within one sample. This aligns files for listening; it does not
 remove actual runtime packetization or network latency. Raw files are preserved.
 Clipping causes the tool to fail. Bitrate, RMS, and waveform checks are not MOS,
 PESQ, intelligibility, or proof of perceptual superiority.
+
+## Receive Gain Comparison
+
+The file-only Swift harness uses the shipping `ReceivePlaybackGain` implementation
+to compare packet-boundary gain changes. It accepts the same uncompressed 8 kHz
+mono signed little-endian PCM excerpt prepared above. No codec, loss, normalization,
+resampling, hardware, sockets, or station traffic is involved.
+
+```sh
+OUT=/tmp/reverb-receive-gain-comparison
+git show 7dd0385:ReverbQSO/Services/ReceiveAudioPlaybackState.swift > /tmp/reverb-gain-baseline.swift
+swiftc -O -parse-as-library /tmp/reverb-gain-baseline.swift \
+  Tools/AudioAudit/receive_gain_compare.swift -o /tmp/reverb-gain-before
+swiftc -O -parse-as-library ReverbQSO/Services/ReceiveAudioPlaybackState.swift \
+  Tools/AudioAudit/receive_gain_compare.swift -o /tmp/reverb-gain-after
+shasum -a 256 /tmp/reverb-speex-rate-comparison/source/excerpt-s16le.pcm
+/tmp/reverb-gain-before /tmp/reverb-speex-rate-comparison/source/excerpt-s16le.pcm "$OUT" before
+/tmp/reverb-gain-after /tmp/reverb-speex-rate-comparison/source/excerpt-s16le.pcm "$OUT" after
+```
+
+Choose an unused output directory or unused alphanumeric/hyphen tags: existing
+outputs are rejected. Each run writes `TAG-speech.wav`, `TAG-tone.wav`, and
+`TAG-metrics.json`. The tone is a synthetic 100 Hz signal with controlled level
+changes; the speech remains attributed to **Open Speech Repository**. Both paths
+preserve the input's duration and share exactly the same source and gain limits.
+Do not apply separate output normalization before listening.
+
+The JSON reports peak, RMS, clipped/over-limit samples, and boundary steps. The
+gain-induced boundary metric subtracts the sample expected if the preceding
+sample's gain continued; it excludes boundaries whose preceding input magnitude
+is below 256 PCM counts. This isolates a gain discontinuity from the source's
+natural waveform step, but is not a perceptual score or hardware listening test.
