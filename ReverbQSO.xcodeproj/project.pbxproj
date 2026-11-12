@@ -259,6 +259,7 @@
 		A249A59197CC1395C8A1CD18 /* StationDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43631BB64688D1A3FC8A1AB0 /* StationDetailSheet.swift */; };
 		A2557EB720D58E0E533A3D3B /* LocalDemoAudioBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F698176A60DD005C9990551C /* LocalDemoAudioBufferTests.swift */; };
 		A2D4FCAE1B68702BA5A33F52 /* EchoLinkAutomaticDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85EA15343F2892B2CDF4D408 /* EchoLinkAutomaticDirectoryTests.swift */; };
+		A3E51608877F1D770A9FF2DE /* DirectoryLoginFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 607C92B28A415FAB65FAFB36 /* DirectoryLoginFallbackTests.swift */; };
 		A4B31933217A689C62BFC076 /* CallCQTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9B8219BBAAB71988872820 /* CallCQTests.swift */; };
 		A76C47D2BC06F34A0799D067 /* CallAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18704A39DC9EB635C80C43DC /* CallAccessPolicyTests.swift */; };
 		A7DB640E44C7CC33DA34B96E /* AudioDeviceRecoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2202AB981281867DF8C3C07 /* AudioDeviceRecoveryPolicy.swift */; };
@@ -588,6 +589,7 @@
 		5CA9FBADECA8A8AA0B4C9AC7 /* PhoneSessionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneSessionSnapshot.swift; sourceTree = "<group>"; };
 		5D3B239D0A3AB9496A3E191E /* GSMCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GSMCodec.swift; sourceTree = "<group>"; };
 		5DF0A4AC7AA900DCC26C4A50 /* LiveCaptureBacklogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCaptureBacklogPolicy.swift; sourceTree = "<group>"; };
+		607C92B28A415FAB65FAFB36 /* DirectoryLoginFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryLoginFallbackTests.swift; sourceTree = "<group>"; };
 		60B5F2805612ED351FB9E86D /* CallCQClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallCQClient.swift; sourceTree = "<group>"; };
 		6190CABA5CE02F9171FB0509 /* DirectoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryView.swift; sourceTree = "<group>"; };
 		62021BBBE6F315E82F4A880D /* lsp_bfin.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lsp_bfin.h; sourceTree = "<group>"; };
@@ -914,6 +916,7 @@
 				BB8A1DE4FA89DB9DCFC0DF96 /* ConferenceFloorRouterTests.swift */,
 				21CC0DAA4C3D90A827733833 /* ConferenceReceiveAudioCodecTests.swift */,
 				21118117E514A70F447CA1FC /* DirectoryClientTests.swift */,
+				607C92B28A415FAB65FAFB36 /* DirectoryLoginFallbackTests.swift */,
 				2AD466FE90495150F47D7079 /* DirectorySearchTests.swift */,
 				E73DBB5732516755733AA899 /* EchoLinkAccountDeletionRequesterTests.swift */,
 				56915CEFBA0C1EB93D38FE89 /* EchoLinkAudioPacketCodecTests.swift */,
@@ -1744,6 +1747,7 @@
 				208333EA314B79BF64DD5C37 /* ConferenceFloorRouterTests.swift in Sources */,
 				1D1E7B28ACD451BE674CDDFE /* ConferenceReceiveAudioCodecTests.swift in Sources */,
 				5CA6BDF487EB6E9679B3803D /* DirectoryClientTests.swift in Sources */,
+				A3E51608877F1D770A9FF2DE /* DirectoryLoginFallbackTests.swift in Sources */,
 				793CE5F371DFA0BBCB61D10A /* DirectorySearchTests.swift in Sources */,
 				EFDFC778750C8A080B191F03 /* EchoLinkAccountDeletionRequesterTests.swift in Sources */,
 				0B7BD9344CF04E8209EC9A2D /* EchoLinkAudioPacketCodecTests.swift in Sources */,
