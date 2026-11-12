@@ -202,17 +202,14 @@ final class QSOHub: ObservableObject {
     }
 
     func disconnectAll() async {
-        for entry in entries {
+        // A captured service may be reused by a new entry while teardown is suspended.
+        let capturedEntries = entries
+        for entry in capturedEntries {
+            guard entries.contains(where: { $0.id == entry.id && $0.service === entry.service }) else { continue }
             await disconnectOperation(entry.service)
-            entry.service.pttPermission = nil
-            entry.service.setBackgroundMuted(false)
+            guard entries.contains(where: { $0.id == entry.id && $0.service === entry.service }) else { continue }
+            remove(entry.id)
         }
-        entries.removeAll()
-        initialConnectionIDs.removeAll()
-        connectedEntryIDs.removeAll()
-        previousActiveIDs.removeAll()
-        subscriptions.removeAll()
-        activeID = nil
     }
 
     func disconnect(callsign: String) async {
