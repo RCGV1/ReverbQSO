@@ -19,6 +19,7 @@ final class ReceivePacketLossConcealer {
     private var history: [Int16] = []
     private var concealedSampleCount = 0
     private var lastConcealedSample: Int16?
+    private var lastConcealmentRetainedNoSamples = false
 
     /// Adds decoded audio to the recent speech history and begins a new loss run.
     func record(_ samples: [Int16]) {
@@ -26,6 +27,7 @@ final class ReceivePacketLossConcealer {
         appendToHistory(samples)
         concealedSampleCount = 0
         lastConcealedSample = nil
+        lastConcealmentRetainedNoSamples = false
     }
 
     /// Produces at most two nominal packets of concealment for the current gap.
@@ -35,6 +37,7 @@ final class ReceivePacketLossConcealer {
         guard sampleCount > 0 else { return [] }
         let outputCount = min(sampleCount, Self.synthesisBudget)
         let retainedCount = min(outputCount, max(0, maximumOutputSamples))
+        lastConcealmentRetainedNoSamples = retainedCount == 0
         guard !history.isEmpty else {
             concealedSampleCount = min(Self.synthesisBudget, concealedSampleCount + outputCount)
             lastConcealedSample = nil
@@ -87,7 +90,9 @@ final class ReceivePacketLossConcealer {
     /// the actual received samples as the basis for any later loss.
     func processReceived(_ samples: [Int16]) -> [Int16] {
         guard !samples.isEmpty else { return [] }
-        guard concealedSampleCount > 0, let previous = lastConcealedSample else {
+        // With no retained PLC, an exactly matched join needs no recovery fade.
+        guard concealedSampleCount > 0, let previous = lastConcealedSample,
+              !(lastConcealmentRetainedNoSamples && previous == samples[0]) else {
             record(samples)
             return samples
         }
@@ -100,9 +105,7 @@ final class ReceivePacketLossConcealer {
                 + Double(samples[index]) * receivedWeight
             output[index] = clampedInt16(value)
         }
-        appendToHistory(samples)
-        concealedSampleCount = 0
-        lastConcealedSample = nil
+        record(samples)
         return output
     }
 
@@ -110,6 +113,7 @@ final class ReceivePacketLossConcealer {
         history.removeAll(keepingCapacity: false)
         concealedSampleCount = 0
         lastConcealedSample = nil
+        lastConcealmentRetainedNoSamples = false
     }
 
     private func appendToHistory(_ samples: [Int16]) {
