@@ -500,6 +500,20 @@ actor DirectoryClient {
             return stations
         }
 
+        // EchoLink also sends registration rejection as display-only loopback
+        // rows. Match that sentinel, never authentication words in station prose.
+        if framing.status == .complete {
+            let lines = text.components(separatedBy: "\n").map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if lines.count >= 6, lines[0] == "@@@", lines[2].isEmpty,
+               lines[3].uppercased().filter(\.isLetter) == "NOTLOGGEDIN",
+               lines[4].isEmpty, lines[5] == "127.0.0.1" {
+                logger.error("Directory list rejected the current registration")
+                throw DirectoryClientError.notConnected
+            }
+        }
+
         // Authentication errors are standalone responses; station prose is data.
         if framing.status == .notCounted {
             let uppercase = text.uppercased()

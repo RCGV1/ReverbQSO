@@ -173,7 +173,7 @@ final class DirectoryClientTests: XCTestCase {
     }
 
     func testStationDescriptionsContainingAuthWordsRemainDirectoryData() async throws {
-        for description in ["DENIED access road", "INCORRECT PASSWORD help desk", "IN-USE repeater"] {
+        for description in ["DENIED access road", "INCORRECT PASSWORD help desk", "IN-USE repeater", "NOT LOGGED IN monitor"] {
             for text in ["@@@\n1\nK6SAFE-R\n\(description)\n123\n192.0.2.1\n+++",
                          "K6SAFE-R\t192.0.2.1\t\(description)\n+++"] {
                 let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [Data(text.utf8)])
@@ -187,6 +187,48 @@ final class DirectoryClientTests: XCTestCase {
                 XCTAssertEqual(stations.first?.description, description)
             }
         }
+    }
+
+    func testCountedNotLoggedInNoticeReportsLostRegistration() async throws {
+        // Real directory servers encode this rejection as seven display-only
+        // loopback rows, not as stations or a failed password response.
+        let messages = ["NOT LOGGED IN", "", "You are not currently logged", "in.",
+                        "If this message persists,", "check to ensure your software", "configuration is correct."]
+        for newline in ["\n", "\r\n"] {
+            let rows = messages.flatMap { [" ", $0, "    ", "127.0.0.1"] }
+            let response = (["@@@", "7"] + rows + ["+++"]).joined(separator: newline)
+            let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [Data(response.utf8)])
+            server.listener.start(queue: server.queue)
+            defer { server.listener.cancel() }
+            await fulfillment(of: [server.ready], timeout: 2)
+            let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+            try await client.login(callsign: "N0TEST", password: "SECRET")
+            do {
+                _ = try await client.fetchStations()
+                XCTFail("A display-only authentication notice is not an empty station list")
+            } catch DirectoryClientError.notConnected {
+                XCTAssertEqual(server.requests.filter { $0 == "s" }.count, 1,
+                               "Do not repeat the same rejected registration's directory request")
+            } catch {
+                XCTFail("Expected lost registration, not a parsing/password error: \(error)")
+            }
+            await client.logout()
+        }
+    }
+
+    func testUnrelatedDisplayOnlyDirectoryDoesNotMasqueradeAsLostRegistration() async throws {
+        let response = "@@@\n1\n \nMaintenance message\n    \n127.0.0.1\n+++"
+        let server = try LocalEnhancedDirectory(password: "SECRET", directoryChunks: [Data(response.utf8)])
+        server.listener.start(queue: server.queue)
+        defer { server.listener.cancel() }
+        await fulfillment(of: [server.ready], timeout: 2)
+        let client = DirectoryClient(host: "127.0.0.1", port: try XCTUnwrap(server.listener.port?.rawValue))
+        try await client.login(callsign: "N0TEST", password: "SECRET")
+        do {
+            _ = try await client.fetchStations()
+            XCTFail("An unrelated malformed directory must remain an error")
+        } catch DirectoryClientError.unexpectedResponse { }
+        await client.logout()
     }
 
     func testDirectCountedDirectoryWaitsPastDescriptionMarkersAndSplitTerminator() async throws {
