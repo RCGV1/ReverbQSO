@@ -12,6 +12,12 @@ Sequences cross rollover. A separate localhost UDP test exercises registration,
 SDES, real voice datagram admission, duplicate rejection, reorder, and remote BYE
 through the production connection service with hardware playback muted.
 
+Additional speech-bearing cases reuse the app's bundled synthesized welcome,
+original GSM and a Speex transcode, under clean traffic, jitter, two-packet loss,
+and a long stall. Their clean decoded references are codec-specific; a transcode
+is not a reference-quality comparison between codecs. All eight cases retain WAV
+attachments for listening, in addition to the deterministic voiced/noise fixtures.
+
 SvxLink's EchoLink voice format uses four 160-sample frames per packet at 8 kHz
 (80 ms). Locally encoded packets have a 12-byte legacy RTP header with zero
 timestamp and SSRC. The primary fixture follows that format; timestamped traffic
@@ -30,7 +36,9 @@ xcodebuild -project ReverbQSO.xcodeproj -scheme ReverbQSO \
   -test-timeouts-enabled YES -default-test-execution-time-allowance 30 \
   -maximum-test-execution-time-allowance 60 \
   -only-testing:ReverbQSOTests/SvxLinkImpairmentAuditTests \
-  -only-testing:ReverbQSOTests/SvxLinkLocalPeerTests test
+  -only-testing:ReverbQSOTests/SvxLinkLocalPeerTests \
+  -only-testing:ReverbQSOTests/EchoLinkAudioReorderBufferTests \
+  -only-testing:ReverbQSOTests/ReceiveAudioSoakTests clean test
 ```
 
 These tests use local fixtures and localhost peers. They do not require an
@@ -69,12 +77,53 @@ native queue of 321 ms. Accepted packet counts describe decoder admission, not
 proof that every sample reached playback. The decoded clean-tail comparison checks
 decoder recovery; queue and gap metrics separately describe virtual rendering.
 
+## Reordering with native output headroom
+
+In-order packets are delivered immediately. A sequence gap normally waits 40 ms.
+When the native player is actively rendering, a gap may wait for the verified
+queued audio duration minus a 20 ms safety margin, capped at 120 ms total. The
+oldest pending arrival fixes the deadline; later arrivals cannot extend it.
+Decoded pending audio and output preroll do not qualify as verified headroom.
+Muted, background, and Watch-forwarded sessions retain the default 40 ms wait.
+
+A GSM/Speex comparison, with both zero and advancing timestamps, delays one packet
+until 60 ms after the following packet arrives. With preceding speech already
+queued, the old fixed deadline admitted 79 of 80 packets. Headroom-aware waiting
+admits all 80 in order, adds no synthetic replacement samples, and has no uncovered
+render time or playback discards. This does not add a new startup buffer; it uses
+lead already present in the native renderer. It cannot recover packets after
+audible headroom has run out, and it does not prevent outages caused by lost Wi-Fi.
+
+## Long-running clock and waveform checks
+
+`ReceiveAudioSoakTests` runs two ten-minute virtual QSOs at 80 ms packet cadence
+and two two-minute QSOs at 20 ms cadence, with receiver clocks at +300 and -300 ppm.
+Fixed +/-3 ms jitter remains strictly ordered. An actual PCM FIFO consumes samples
+at the mismatched clock rate, retaining fractional progress across events. Every
+packet must pass through production clock correction and fully reach the renderer;
+startup silence is counted separately from later gaps.
+
+These no-loss traces require zero playback discards, overflows, or post-startup
+gaps, bounded native capacity, arrival-to-first-sample delay below 150 ms, and
+arrival-to-last-sample delay below 250 ms. Settled 30-second mean-delay windows must
+vary by less than 10 ms, and final output correction must track the clock mismatch
+within 75 ppm. Identity-tagged constant PCM verifies order and sample accounting,
+not speech quality. A reset/replay case checks fractional state, pending audio,
+timers, and stale completion isolation against a fresh receiver.
+
+Two additional 60-second traces exercise continuous-phase 2873/3371 Hz PCM through
+both correction directions. They check every rendered packet join and compare
+interior samples with an analytic, endpoint-aligned resampling reference. These
+checks cover waveform continuity and upper-speech-band interpolation, not perceived
+quality or the effects of an actual codec or audio device.
+
 ## Limits
 
 This is a SvxLink-compatible simulated peer and a component audio audit, not a full
-SvxLink daemon or an over-the-air radio test. The WAV attachments contain a seeded
-synthetic voiced/noise signal rather than natural-language speech. Virtual output
-measures local timing, sample preservation, and waveform properties; it does not certify perceived speech
+SvxLink daemon or an over-the-air radio test. WAV attachments contain seeded
+voiced/noise signals or the app's synthesized spoken welcome, not recordings of
+human speakers. Virtual output measures local timing, sample preservation, and
+waveform properties; it does not certify perceived speech
 quality, Bluetooth behavior, microphone acoustics, or real-device render timing.
 Missing speech cannot be reconstructed exactly, and a long Wi-Fi outage still
 causes an audible interruption. No MOS/PESQ score is inferred from these checks.
