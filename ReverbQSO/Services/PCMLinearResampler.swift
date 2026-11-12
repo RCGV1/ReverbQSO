@@ -82,7 +82,9 @@ enum PCMLinearResampler {
         while position < inputLimit {
             output.append(
                 interpolate(
-                    at: position,
+                    // One source sample of causal delay makes both endpoints
+                    // available without guessing across callback boundaries.
+                    at: position - 1,
                     in: resamplingInput,
                     previousSample: state.lastSourceSample
                 )
@@ -183,13 +185,6 @@ enum PCMLinearResampler {
         let upperSample: Int16
         if upperIndex >= 0, upperIndex < samples.count {
             upperSample = samples[upperIndex]
-        } else if lowerIndex == samples.count - 1, samples.count > 1 {
-            // The following chunk is not available yet. Extending the local
-            // slope avoids flattening the final fractional interval, which
-            // otherwise creates a click-like error at arbitrary tap boundaries.
-            let last = Int(samples[samples.count - 1])
-            let prior = Int(samples[samples.count - 2])
-            upperSample = Int16(clamping: last + (last - prior))
         } else {
             upperSample = samples[samples.count - 1]
         }
