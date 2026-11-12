@@ -23,6 +23,21 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         var maximumWait = 0.0
         var decoded: [Int16] = []
         var rendered: [Int16] = []
+        var admittedSequences: [UInt16] = []
+        var duplicateRejections = 0
+        var lateRejections = 0
+        var invalidDecodes = 0
+        var maximumRendererSamples = 0
+        var maximumPendingSamples = 0
+        var maximumReorderPackets = 0
+        var scheduledPackets = 0
+        var scheduledSamples = 0
+        var consumedSamples = 0
+        var pendingPlaybackBuffers = 0
+        var completionTime = Double.infinity
+        var speechEnd = 0.0
+        var finalCorrectionRatio = 1.0
+        var receiverClockSamples = 0
     }
 
     func testSvxLinkGSMAndSpeexAcrossDeterministicWifiTraces() throws {
@@ -179,10 +194,91 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         }
     }
 
-    private func packets(codec: EchoLinkVoiceCodec, timestamped: Bool) throws -> [Data] {
+    func testGSMCombinedNetworkAndReceiverClockMismatch() throws {
+        try assertCombinedNetworkAndClock(codec: .gsm)
+    }
+
+    func testSpeexCombinedNetworkAndReceiverClockMismatch() throws {
+        try assertCombinedNetworkAndClock(codec: .speex)
+    }
+
+    private func assertCombinedNetworkAndClock(codec: EchoLinkVoiceCodec) throws {
+        let packetCount = 1_500 // 120 seconds at 80 ms per packet.
+        let duration = Double(packetCount) * 0.080
+        let fixture = try packets(codec: codec, timestamped: false, packetCount: packetCount)
+        let clean = try render(trace(fixture, impairment: .clean), codec: codec)
+        let cleanDelay = clean.speechEnd - duration
+        XCTAssertEqual(clean.accepted, packetCount)
+        XCTAssertEqual(clean.missing, 0)
+        XCTAssertEqual(clean.late, 0)
+        XCTAssertEqual(clean.discarded, 0)
+        XCTAssertEqual(clean.invalidDecodes, 0)
+
+        let combined = combinedTrace(fixture)
+        let expectedSequences = try fixture.enumerated().compactMap { index, packet -> UInt16? in
+            guard !combined.omittedIndices.contains(index) else { return nil }
+            return try XCTUnwrap(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(packet)?.metadata).sequenceNumber
+        }
+        // The pair shares its jitter offset: recovery cannot accidentally cross
+        // the default 40 ms reorder deadline when jitter has opposite signs.
+        let early = try XCTUnwrap(combined.arrivals.first { $0.packet == fixture[401] })
+        let recovered = try XCTUnwrap(combined.arrivals.first { $0.packet == fixture[400] })
+        XCTAssertGreaterThan(recovered.time - early.time, 0)
+        XCTAssertLessThan(recovered.time - early.time, 0.040)
+        XCTAssertGreaterThanOrEqual(duration - combined.cleanTailStart, 30)
+        let cleanTailIndex = Int((combined.cleanTailStart / 0.080).rounded())
+        let tail = Array(combined.arrivals.suffix(packetCount - cleanTailIndex))
+        XCTAssertEqual(tail.map(\.packet), Array(fixture.suffix(packetCount - cleanTailIndex)))
+        for (offset, arrival) in tail.enumerated() {
+            XCTAssertEqual(arrival.time, Double(cleanTailIndex + offset) * 0.080 + 0.035, accuracy: 0.000_000_1)
+        }
+
+        for ppm in [-1_000, 1_000] {
+            let rate = 8_000 * (1 + Double(ppm) / 1_000_000)
+            // Use the default gap wait, not adaptive native headroom, to prove
+            // that this trace's reordering is independently recoverable.
+            let result = try render(combined.arrivals, codec: codec,
+                nativeReorderHeadroom: false, receiverSampleRate: rate)
+            let label = "\(codec)-combined-\(ppm)ppm"
+            let finalDelay = result.speechEnd - duration
+            print("SVXLINK_COMBINED \(label) omitted=\(combined.omittedIndices.count) accepted=\(result.accepted) missing=\(result.missing) duplicates=\(result.duplicateRejections) late=\(result.lateRejections) invalid=\(result.invalidDecodes) discarded=\(result.discarded) syntheticMs=\(Double(result.syntheticSamples) / 8) gapsMs=\(result.silenceSeconds * 1000) maxQueue=\(result.maximumRendererSamples) maxPending=\(result.maximumPendingSamples) maxWaitMs=\(result.maximumWait * 1000) finalDelayMs=\(finalDelay * 1000) cleanDelayMs=\(cleanDelay * 1000) ratio=\(result.finalCorrectionRatio) consumed=\(result.consumedSamples)/\(result.scheduledSamples) completedAt=\(result.completionTime)")
+            XCTAssertEqual(result.accepted, packetCount - combined.omittedIndices.count, label)
+            XCTAssertEqual(result.admittedSequences, expectedSequences, "Unique, ordered decoder admission: \(label)")
+            XCTAssertEqual(Set(result.admittedSequences).count, result.accepted, label)
+            XCTAssertEqual(result.missing, combined.omittedIndices.count, label)
+            XCTAssertEqual(result.duplicateRejections, combined.duplicateCount, label)
+            XCTAssertEqual(result.late, combined.duplicateCount, label)
+            XCTAssertEqual(result.lateRejections, 0, label)
+            XCTAssertEqual(result.invalidDecodes, 0, label)
+            XCTAssertEqual(result.decoded.count, result.accepted * 640, label)
+            XCTAssertGreaterThan(result.syntheticSamples, 0, label)
+            XCTAssertEqual(result.discarded, 0, label)
+            XCTAssertLessThanOrEqual(result.maximumRendererSamples, ReceivePlaybackQueue().maximumSamples, label)
+            XCTAssertLessThanOrEqual(result.maximumLead, 0.323, label)
+            XCTAssertLessThanOrEqual(result.maximumPendingSamples, 3_840, label)
+            XCTAssertLessThanOrEqual(result.maximumReorderPackets, 4, label)
+            XCTAssertLessThanOrEqual(result.maximumWait, 0.240, label)
+            XCTAssertEqual(result.scheduledPackets, result.accepted, label)
+            XCTAssertEqual(result.consumedSamples, result.scheduledSamples, label)
+            XCTAssertEqual(result.pendingPlaybackBuffers, 0, label)
+            XCTAssertTrue(result.completionTime.isFinite, label)
+            XCTAssertLessThan(result.completionTime, duration + 1, label)
+            XCTAssertEqual(Array(result.decoded.suffix(8_000)), Array(clean.decoded.suffix(8_000)),
+                "Clean-tail sequential decoder recovery: \(label)")
+            XCTAssertGreaterThanOrEqual(finalDelay, 0, label)
+            XCTAssertLessThanOrEqual(finalDelay, 0.160, label)
+            XCTAssertEqual(finalDelay, cleanDelay, accuracy: 0.025, label)
+            XCTAssertEqual(result.finalCorrectionRatio, rate / 8_000, accuracy: 0.0005, label)
+            XCTAssertEqual(result.receiverClockSamples, Int((result.completionTime * rate).rounded(.down)), label)
+            XCTAssertGreaterThanOrEqual(abs(result.receiverClockSamples
+                - Int((result.completionTime * 8_000).rounded(.down))), 960, label)
+        }
+    }
+
+    private func packets(codec: EchoLinkVoiceCodec, timestamped: Bool, packetCount: Int = 80) throws -> [Data] {
         // Speech-like voiced/unvoiced transitions with a fixed seed, without external assets.
         var state: UInt32 = 0x51_58_4C
-        let source: [Int16] = (0..<(80 * 640)).map { index in
+        let source: [Int16] = (0..<(packetCount * 640)).map { index in
             state = 1664525 &* state &+ 1013904223
             let time = Double(index) / 8000
             let envelope = 0.35 + 0.65 * pow(sin(.pi * time / 0.32), 2)
@@ -198,7 +294,7 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         case .speex:
             payloads = try XCTUnwrap(SpeexCodec().encode(source))
         }
-        XCTAssertEqual(payloads.count, 80)
+        XCTAssertEqual(payloads.count, packetCount)
         return packetize(payloads, codec: codec, timestamped: timestamped)
     }
 
@@ -231,6 +327,35 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         }.map(\.element)
     }
 
+    private func combinedTrace(_ packets: [Data]) -> (arrivals: [Arrival], omittedIndices: Set<Int>,
+                                                    duplicateCount: Int, cleanTailStart: Double) {
+        let omitted: Set<Int> = [240, 640, 641]
+        let cleanTailStart = 90.0
+        let cleanTailIndex = 1_125
+        var state: UInt32 = 0xC10C_A11D
+        var times = packets.indices.map { index -> Double in
+            state = 1664525 &* state &+ 1013904223
+            let jitter = index < cleanTailIndex ? Double(state % 31) / 1_000 - 0.015 : 0
+            return Double(index) * 0.080 + 0.035 + jitter
+        }
+        times[400] = times[401] + 0.020
+        // Three intact packets coalesce after a bounded 160 ms Wi-Fi hold.
+        for index in 900...902 { times[index] = times[902] }
+        var arrivals: [Arrival] = []
+        var duplicateCount = 0
+        for index in packets.indices where !omitted.contains(index) {
+            arrivals.append(Arrival(time: times[index], packet: packets[index]))
+            if index < cleanTailIndex, index.isMultiple(of: 97) {
+                arrivals.append(Arrival(time: times[index] + 0.005, packet: packets[index]))
+                duplicateCount += 1
+            }
+        }
+        arrivals = arrivals.enumerated().sorted {
+            $0.element.time == $1.element.time ? $0.offset < $1.offset : $0.element.time < $1.element.time
+        }.map(\.element)
+        return (arrivals, omitted, duplicateCount, cleanTailStart)
+    }
+
     private func referenceDecode(_ packets: [Data], codec: EchoLinkVoiceCodec) throws -> [Int16] {
         let gsm = GSMCodec()
         let speex = SpeexCodec()
@@ -245,7 +370,9 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
     }
 
     private func render(_ arrivals: [Arrival], codec: EchoLinkVoiceCodec,
-                        nativeReorderHeadroom: Bool = true, prebufferedSamples: [Int16] = []) throws -> Result {
+                        nativeReorderHeadroom: Bool = true, prebufferedSamples: [Int16] = [],
+                        receiverSampleRate: Double = 8_000) throws -> Result {
+        precondition(receiverSampleRate.isFinite && receiverSampleRate > 0)
         var result = Result()
         result.rendered = prebufferedSamples
         var reorder = EchoLinkAudioReorderBuffer()
@@ -257,10 +384,18 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         let queue = ReceivePlaybackQueue()
         var gain = ReceivePlaybackGain()
         var nextArrival = 0
-        var renderEnd = Double(prebufferedSamples.count) / 8000
+        var renderEnd = Double(prebufferedSamples.count) / receiverSampleRate
         result.maximumLead = renderEnd
+        result.scheduledSamples = prebufferedSamples.count
+        result.maximumRendererSamples = prebufferedSamples.count
+        var completions: [(end: Double, samples: Int)] = prebufferedSamples.isEmpty
+            ? [] : [(renderEnd, prebufferedSamples.count)]
+        var nextCompletion = 0
+        var seenArrivals: Set<Data> = []
         var lastDecodedAt = -Double.infinity
-        func lead(_ now: Double) -> Int { max(0, Int(((renderEnd - now) * 8000).rounded())) }
+        // Keep fractional sample time across the entire receive run. Rounding
+        // each 1 ms tick to an integer sample count would erase +/-1000 ppm.
+        func lead(_ now: Double) -> Int { max(0, Int(((renderEnd - now) * receiverSampleRate).rounded())) }
         func drain(_ now: Double) {
             let capacity = Int(Double(max(0, queue.maximumSamples - lead(now))) / 1.005)
             for packet in playout.drain(now: now, maximumSamples: capacity) {
@@ -268,12 +403,16 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
                     targetQueuedSamples: Int(playout.targetDelay * 8000))
                 if renderEnd > 0 { result.silenceSeconds += max(0, now - renderEnd) }
                 let start = max(now, renderEnd)
-                let startSample = Int((start * 8000).rounded())
+                let startSample = Int((start * receiverSampleRate).rounded())
                 if result.rendered.count < startSample {
                     result.rendered += repeatElement(0, count: startSample - result.rendered.count)
                 }
                 result.rendered += gain.process(corrected).map { Int16(clamping: Int(($0 * 32768).rounded())) }
-                renderEnd = start + Double(corrected.count) / 8000
+                renderEnd = start + Double(corrected.count) / receiverSampleRate
+                result.scheduledPackets += 1
+                result.scheduledSamples += corrected.count
+                completions.append((renderEnd, corrected.count))
+                result.maximumRendererSamples = max(result.maximumRendererSamples, lead(now))
                 result.maximumLead = max(result.maximumLead, renderEnd - now)
             }
         }
@@ -298,32 +437,63 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
             if now - lastDecodedAt >= 0.5 { clock.reset() }
             lastDecodedAt = now
             result.accepted += 1
+            if let metadata = parsed.metadata { result.admittedSequences.append(metadata.sequenceNumber) }
+            if received.count != 640 { result.invalidDecodes += 1 }
             result.decoded += received
             result.syntheticSamples += output.count - received.count
             drain(now)
             playout.enqueue(output, networkSampleCount: received.count, now: now, rendererLeadSamples: lead(now))
+            result.maximumPendingSamples = max(result.maximumPendingSamples, playout.pendingSampleCount)
             drain(now)
         }
-        for tick in 0...8500 {
+        let finalTick = max(8_500, Int((((arrivals.last?.time ?? 0) + 1) * 1_000).rounded(.up)))
+        for tick in 0...finalTick {
             let now = Double(tick) / 1000
             while nextArrival < arrivals.count, arrivals[nextArrival].time <= now + 0.0000001 {
                 let arrival = arrivals[nextArrival]
                 let parsed = try XCTUnwrap(EchoLinkAudioPacketCodec.parseIncomingAudioDatagram(arrival.packet))
-                for packet in reorder.insert(arrival.packet, metadata: parsed.metadata, now: now,
-                    playbackLeadSamples: nativeReorderHeadroom ? lead(now) : 0) {
+                let duplicate = !seenArrivals.insert(arrival.packet).inserted
+                let rejectedBefore = reorder.duplicateOrLatePacketCount
+                let admitted = reorder.insert(arrival.packet, metadata: parsed.metadata, now: now,
+                    playbackLeadSamples: nativeReorderHeadroom ? lead(now) : 0)
+                let rejections = reorder.duplicateOrLatePacketCount - rejectedBefore
+                if duplicate { result.duplicateRejections += rejections }
+                else { result.lateRejections += rejections }
+                result.maximumReorderPackets = max(result.maximumReorderPackets, reorder.pendingPacketCount)
+                for packet in admitted {
                     try admit(packet, now: now)
                 }
                 nextArrival += 1
             }
             for packet in reorder.drain(now: now) { try admit(packet, now: now) }
             drain(now)
+            while nextCompletion < completions.count, completions[nextCompletion].end <= now {
+                result.consumedSamples += completions[nextCompletion].samples
+                nextCompletion += 1
+            }
+            if !result.completionTime.isFinite, nextArrival == arrivals.count,
+               reorder.pendingPacketCount == 0, playout.pendingSampleCount == 0,
+               nextCompletion == completions.count {
+                result.completionTime = now
+                result.receiverClockSamples = Int((now * receiverSampleRate).rounded(.down))
+            }
         }
         result.missing = reorder.missingPacketCount
         result.late = reorder.duplicateOrLatePacketCount
         result.discarded = playout.discardedPackets
         result.maximumWait = playout.maximumObservedWait
+        result.pendingPlaybackBuffers = completions.count - nextCompletion
+        result.speechEnd = renderEnd
+        result.finalCorrectionRatio = clock.correctionRatio
         XCTAssertEqual(nextArrival, arrivals.count)
         XCTAssertEqual(playout.pendingSampleCount, 0)
+        XCTAssertEqual(reorder.pendingPacketCount, 0)
+        XCTAssertNil(reorder.nextDeadline)
+        XCTAssertNil(playout.nextDeadline)
+        XCTAssertTrue(result.completionTime.isFinite)
+        XCTAssertLessThanOrEqual(renderEnd, Double(finalTick) / 1_000)
+        XCTAssertEqual(result.pendingPlaybackBuffers, 0)
+        XCTAssertEqual(result.consumedSamples, result.scheduledSamples)
         return result
     }
 
