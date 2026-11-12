@@ -54,8 +54,8 @@ if [[ "$MODE" != full ]]; then
         SUITES+=(SvxLinkImpairmentAuditTests ReceiveAudioSoakTests
             SvxLinkLocalPeerTests ConferenceReceiveAudioCodecTests
             EchoLinkAudioReorderBufferTests ReceiveSpeechSmootherTests
-            ReceiveNativeSpeechSmootherTests ReceiveAdaptivePlayoutBufferTests
-            ReceiveClockRecoveryTests ReceivePlaybackQueueTests)
+            ReceiveNativeConcealmentSmootherTests ReceiveAdaptivePlayoutBufferTests
+            ReceiveClockCompensatorTests ReceiveAudioPlaybackStateTests)
     fi
     for suite in "${SUITES[@]}"; do
         ARGS+=("-only-testing:ReverbQSOTests/$suite")
