@@ -259,12 +259,11 @@ final class EchoLinkDirectoryService: ObservableObject {
         }
 
         do {
-            let selection: EchoLinkEffectiveTransport
+            var selection: EchoLinkEffectiveTransport
             if let retainingTransport { selection = retainingTransport }
             else { selection = try await transportSelector.select(configurationProvider()) }
             try Task.checkCancellation()
             guard lifecycleGeneration.matches(generation) else { return }
-            effectiveTransport = selection
             var excludedProxyCandidates: [EchoLinkProxyConfiguration] = []
             var initialStations: [Station] = []
             var registeredWithProxy = false
@@ -277,15 +276,45 @@ final class EchoLinkDirectoryService: ObservableObject {
                 try Task.checkCancellation()
                 guard lifecycleGeneration.matches(generation) else { return }
                 await client.setProxySession(proxySession)
+                try Task.checkCancellation()
+                guard lifecycleGeneration.matches(generation) else { return }
+                var registrationSucceeded = false
                 do {
                     try await client.login(callsign: cs, password: pw, relayAddress: selection.relayAddress)
+                    try Task.checkCancellation()
                     guard lifecycleGeneration.matches(generation) else { return }
+                    registrationSucceeded = true
                     initialStations = try await client.fetchStations()
                     try Task.checkCancellation()
                     guard lifecycleGeneration.matches(generation) else { return }
                     registeredWithProxy = proxySession != nil
                     break
                 } catch {
+                    try Task.checkCancellation()
+                    guard lifecycleGeneration.matches(generation) else { return }
+                    if registrationSucceeded,
+                       selection.preference.mode == .automatic,
+                       selection.configuration.mode == .direct || selection.configuration.mode == .relay,
+                       let directoryError = error as? DirectoryClientError,
+                       case .notConnected = directoryError {
+                        // Retire the rejected source before registering the same
+                        // supplied account through a proxy. Changing the local
+                        // selection makes this transition one-way for this login.
+                        await client.logout()
+                        try Task.checkCancellation()
+                        guard lifecycleGeneration.matches(generation) else { return }
+                        let preference = selection.preference
+                        selection = EchoLinkEffectiveTransport(
+                            preference: preference,
+                            configuration: EchoLinkProxyConfiguration(
+                                mode: .publicProxy, host: preference.host,
+                                port: preference.port, password: "PUBLIC"
+                            ),
+                            relayAddress: nil
+                        )
+                        logger.warning("Automatic directory registration rejected by initial list; trying public proxy")
+                        continue
+                    }
                     guard let proxySession else { throw error }
                     let rejectedConfiguration = proxySession.configuration
                     let rejectedCount = excludedProxyCandidates.count + 1
@@ -298,12 +327,15 @@ final class EchoLinkDirectoryService: ObservableObject {
                     }
                     excludedProxyCandidates.append(rejectedConfiguration)
                     await client.setProxySession(nil)
+                    try Task.checkCancellation()
+                    guard lifecycleGeneration.matches(generation) else { return }
                     logger.warning(
                         "Public proxy rejected first directory command; retrying another candidate"
                     )
                 }
             }
 
+            effectiveTransport = selection
             authenticatedCallsign = cs.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             publishSnapshot(initialStations)
             applyFilter()
