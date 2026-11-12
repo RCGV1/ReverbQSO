@@ -1475,15 +1475,23 @@ final class AudioEngine: ObservableObject {
         if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
         lastReceiveArrival = now
         let playbackSamples: [Int16]
+        let rendererLead = remainingPlaybackSamples
+        let pendingSamples = receivePlayout.pendingSampleCount
         if let nativeConcealment {
             receiveSpeech.reset()
             let retained = playbackQueue.retainedConcealment(nativeConcealment,
-                receivedSamples: samples.count, remainingSamples: remainingPlaybackSamples)
+                receivedSamples: samples.count, remainingSamples: rendererLead,
+                pendingSamples: pendingSamples)
 #if DEBUG
             auditConcealmentSkippedSamples += nativeConcealment.count - retained.count
 #endif
             playbackSamples = Array(retained) + samples
-        } else { playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now) }
+        } else {
+            playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now,
+                maximumConcealmentSamples: playbackQueue.concealmentSampleBudget(
+                    receivedSamples: samples.count, remainingSamples: rendererLead,
+                    pendingSamples: pendingSamples))
+        }
         drainReceivePlayout()
         receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, now: now,
                               rendererLeadSamples: remainingPlaybackSamples)

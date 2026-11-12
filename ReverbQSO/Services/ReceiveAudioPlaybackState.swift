@@ -23,11 +23,20 @@ struct ReceivePlaybackQueue {
     // Absorb two extra packets during measured native startup or short bursts.
     // Overflow rejects incoming speech while preserving the running timeline.
     let recoverySamples = 1_280 // 160 ms concealment budget
+    func concealmentSampleBudget(receivedSamples: Int, remainingSamples: Int, pendingSamples: Int = 0) -> Int {
+        var budget = recoverySamples
+        for count in [receivedSamples, remainingSamples, pendingSamples] {
+            budget -= min(budget, max(0, count))
+        }
+        return budget
+    }
     /// Decoder state has already advanced over the full loss. Render only the
     /// recent synthesized tail that fits, preserving capacity for received voice
     /// and the next packet instead of restarting playback to discard real speech.
-    func retainedConcealment(_ samples: [Int16], receivedSamples: Int, remainingSamples: Int) -> ArraySlice<Int16> {
-        let available = max(0, recoverySamples - max(0, receivedSamples) - max(0, remainingSamples))
+    func retainedConcealment(_ samples: [Int16], receivedSamples: Int, remainingSamples: Int,
+                             pendingSamples: Int = 0) -> ArraySlice<Int16> {
+        let available = concealmentSampleBudget(receivedSamples: receivedSamples,
+            remainingSamples: remainingSamples, pendingSamples: pendingSamples)
         return samples.suffix(available)
     }
     /// Completion callbacks can arrive after the player has rendered their audio.

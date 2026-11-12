@@ -2,6 +2,33 @@
 import XCTest
 @testable import ReverbQSO
 final class ReceiveSpeechSmootherTests: XCTestCase {
+    func testLossBurstReservesQueuedSpeechAndKeepsReturningPacketIntact() {
+        let smoother = ReceiveSpeechSmoother()
+        let queue = ReceivePlaybackQueue()
+        let packet = [Int16](repeating: 1000, count: 640)
+        _ = smoother.process(packet, metadata: metadata(1), now: 0)
+        let returning = [Int16](repeating: 2000, count: 640)
+        let budget = queue.concealmentSampleBudget(receivedSamples: returning.count,
+            remainingSamples: 320, pendingSamples: 160)
+        let recovered = smoother.process(returning, metadata: metadata(4), now: 0.24,
+            maximumConcealmentSamples: budget)
+        XCTAssertEqual(recovered.count, 800)
+        XCTAssertEqual(Array(recovered.suffix(560)), Array(returning.suffix(560)))
+        XCTAssertEqual(recovered.count + 320 + 160, queue.recoverySamples)
+        let next = smoother.process(returning, metadata: metadata(5), now: 0.32)
+        XCTAssertEqual(next, returning)
+    }
+
+    func testFullRealSpeechQueueDoesNotAcquireSyntheticDelay() {
+        let smoother = ReceiveSpeechSmoother()
+        let packet = [Int16](repeating: 1000, count: 640)
+        _ = smoother.process(packet, metadata: metadata(1), now: 0)
+        let recovered = smoother.process(packet, metadata: metadata(3), now: 0.16,
+            maximumConcealmentSamples: 0)
+        XCTAssertEqual(recovered.count, packet.count)
+        XCTAssertEqual(Array(recovered.suffix(560)), Array(packet.suffix(560)))
+    }
+
     private func metadata(_ sequence: UInt16, ssrc: UInt32 = 1, payload: UInt8 = 3) -> EchoLinkVoicePacketMetadata {
         .init(payloadType: payload, sequenceNumber: sequence, timestamp: 0, ssrc: ssrc)
     }

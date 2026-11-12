@@ -8,7 +8,8 @@ final class ReceiveSpeechSmoother {
     private var previous: EchoLinkVoicePacketMetadata?
     private var previousCount = 0
     private var lastArrival = -Double.infinity
-    func process(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata?, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [Int16] {
+    func process(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata?, now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+                 maximumConcealmentSamples: Int = 1280) -> [Int16] {
         guard !samples.isEmpty else { return [] }
         var gap: [Int16] = []
         if let metadata, let previous, metadata.ssrc == previous.ssrc,
@@ -29,7 +30,9 @@ final class ReceiveSpeechSmoother {
         self.previous = metadata
         previousCount = samples.count
         lastArrival = now
-        return gap + speech
+        // Advance loss history fully, but do not let synthetic audio displace
+        // received speech that is already waiting for playback.
+        return Array(gap.suffix(max(0, maximumConcealmentSamples))) + speech
     }
     func reset() {
         concealer.reset()

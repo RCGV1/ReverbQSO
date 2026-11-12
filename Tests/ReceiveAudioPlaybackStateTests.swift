@@ -3,6 +3,17 @@ import XCTest
 @testable import ReverbQSO
 
 final class ReceiveAudioPlaybackStateTests: XCTestCase {
+    func testPendingDecodedSpeechAlsoReservesConcealmentCapacity() {
+        let queue = ReceivePlaybackQueue()
+        let synthetic = (0..<1280).map(Int16.init)
+        XCTAssertEqual(Array(queue.retainedConcealment(synthetic, receivedSamples: 640,
+            remainingSamples: 160, pendingSamples: 320)), Array(synthetic.suffix(160)))
+        XCTAssertTrue(queue.retainedConcealment(synthetic, receivedSamples: 640,
+            remainingSamples: 0, pendingSamples: 640).isEmpty)
+        XCTAssertEqual(queue.concealmentSampleBudget(receivedSamples: 640,
+            remainingSamples: Int.max, pendingSamples: Int.max), 0)
+    }
+
     func testConcealmentKeepsRecentSyntheticSpeechWithoutCrowdingReceivedVoice() {
         let queue = ReceivePlaybackQueue()
         let concealed = (0..<1_280).map(Int16.init)
