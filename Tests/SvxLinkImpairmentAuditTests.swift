@@ -378,6 +378,7 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
         var reorder = EchoLinkAudioReorderBuffer()
         var playout = ReceiveAdaptivePlayoutBuffer()
         let smoother = ReceiveSpeechSmoother()
+        let nativeSmoother = ReceiveNativeConcealmentSmoother()
         let gsm = GSMCodec()
         let speex = SpeexReceiveStreamDecoder()
         let clock = ReceiveClockCompensator()
@@ -424,14 +425,15 @@ final class SvxLinkImpairmentAuditTests: XCTestCase {
                 remainingSamples: lead(now), pendingSamples: playout.pendingSampleCount)
             switch parsed.packet {
             case .gsm(let data):
+                nativeSmoother.reset()
                 received = gsm.decodePacket(data)
                 output = smoother.process(received, metadata: parsed.metadata, now: now,
                     maximumConcealmentSamples: budget)
             case .speex(let data):
                 let decoded = try XCTUnwrap(speex.decode(data, metadata: parsed.metadata, now: now))
                 received = decoded.received
-                output = Array(queue.retainedConcealment(decoded.concealed, receivedSamples: received.count,
-                    remainingSamples: lead(now), pendingSamples: playout.pendingSampleCount)) + received
+                output = nativeSmoother.process(received, concealed: decoded.concealed,
+                    metadata: parsed.metadata, now: now, maximumConcealmentSamples: budget)
             default: throw CocoaError(.fileReadCorruptFile)
             }
             if now - lastDecodedAt >= 0.5 { clock.reset() }

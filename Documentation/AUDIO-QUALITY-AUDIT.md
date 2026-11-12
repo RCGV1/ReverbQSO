@@ -38,7 +38,8 @@ xcodebuild -project ReverbQSO.xcodeproj -scheme ReverbQSO \
   -only-testing:ReverbQSOTests/SvxLinkImpairmentAuditTests \
   -only-testing:ReverbQSOTests/SvxLinkLocalPeerTests \
   -only-testing:ReverbQSOTests/EchoLinkAudioReorderBufferTests \
-  -only-testing:ReverbQSOTests/ReceiveAudioSoakTests clean test
+  -only-testing:ReverbQSOTests/ReceiveAudioSoakTests \
+  -only-testing:ReverbQSOTests/ReceiveNativeConcealmentSmootherTests clean test
 ```
 
 These tests use local fixtures and localhost peers. They do not require an
@@ -58,6 +59,22 @@ When a concealment tail is shortened, its leading boundary is blended from the
 preceding speech. If no synthetic samples fit, returning speech blends from that
 same preceding speech, not from an unrendered concealment endpoint. This avoids a
 click without adding samples or extending the recovery budget.
+
+Native Speex concealment uses a playback-only join repair when its prefix is
+discarded. The first 32 retained samples blend from the preceding processed
+speech. With fewer than 32 samples retained, the first 80 received samples also
+join from the resulting boundary. No samples are added, and clean packets and
+untrimmed native concealment remain unchanged. Stream, codec, reset, invalid-time,
+and idle boundaries cannot reuse prior speech. The native decoder still advances
+through the full missing interval before decoding the returning packet.
+
+Actual Speex encode/decode tests sweep five voiced frequencies, four phases, and
+seven output budgets. The largest leading sample step for a 640-sample retained
+tail falls from 18,036 to 564 PCM units; for a zero-sample tail it falls from 16,273
+to 203. These are pre-gain waveform-continuity measurements, not perceptual scores.
+Tests retain before/after WAVs and independently compare native decoder output and
+subsequent decoding state with an unclipped reference. The same join policy is
+used by iOS playback and forwarded Watch playback.
 
 A deterministic two-packet-loss regression with 320 native samples and 160 decoded
 pending samples previously added 1,920 recovery samples, for 2,400 queued samples
@@ -117,6 +134,27 @@ interior samples with an analytic, endpoint-aligned resampling reference. These
 checks cover waveform continuity and upper-speech-band interpolation, not perceived
 quality or the effects of an actual codec or audio device.
 
+## Combined network and clock stress
+
+Four 120-second traces combine GSM/Speex with receiver clocks at -1000/+1000 ppm,
+seeded +/-15 ms jitter, three intentionally omitted packets, 12 duplicates, a
+recoverable reordered pair, and a three-packet Wi-Fi hold. Reordering uses the
+default 40 ms wait. The final 30 seconds are clean, allowing decoder and timing
+recovery to be checked against a clean sequential reference.
+
+All four runs admit the expected 1,497 unique packets in order, count exactly
+three missing packets, and reject only the known duplicates. No unexpected late
+packets, invalid decodes, or playback discards occur. Native output peaks at
+2,108 samples, decoded waiting peaks at 80 ms, and every scheduled virtual buffer
+finishes before teardown. Speech-end delay relative to the source timeline is
+80.876 ms at -1000 ppm and 68.262 ms at +1000 ppm, versus 75 ms for the clean
+reference. The final second of decoded PCM matches the clean decoder.
+
+Known loss and the Wi-Fi hold still cause 407...458 ms of uncovered virtual
+rendering time across each trace. No unexpected packet discard does not mean
+uninterrupted speech. These completion/queue checks model a renderer timeline;
+the separate long-QSO tests also consume PCM through an explicit sample FIFO.
+
 ## Limits
 
 This is a SvxLink-compatible simulated peer and a component audio audit, not a full
@@ -128,7 +166,7 @@ quality, Bluetooth behavior, microphone acoustics, or real-device render timing.
 Missing speech cannot be reconstructed exactly, and a long Wi-Fi outage still
 causes an audible interruption. No MOS/PESQ score is inferred from these checks.
 
-The independent full-suite baseline on Xcode 26.0.1/iOS Simulator 26.0 encountered
-a CoreAudio RPC abort during demo-session startup. The focused receive audit runs
-without a native output device; native iPhone/Watch playback remains a separate
-field-validation step.
+Offline regressions exclude live-station tests and opt-in physical audio audits.
+Native iPhone/Watch playback, Bluetooth behavior, and route recovery remain
+separate field-validation steps; simulator and component passes are not acoustic
+or full-daemon interoperability certification.
