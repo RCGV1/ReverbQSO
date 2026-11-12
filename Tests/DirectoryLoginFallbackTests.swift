@@ -234,6 +234,7 @@ private final class DirectoryLoginFallbackFixture {
          rejectedProxyCount: Int = 0, proxyRejectsList: Bool = false,
          gate: DirectoryLoginFallbackGate? = nil, resolving: XCTestExpectation? = nil) async throws {
         preference = EchoLinkProxyConfiguration(mode: mode, host: "preferred.invalid", port: 8123, password: "PUBLIC")
+        let events = self.events
         server = try DirectoryLoginFallbackEndpoint(name: "direct", events: events,
             directoryResponse: directoryResponse, registrationFailure: registrationFailure, holdList: holdDirectList)
         proxies = try (0..<max(1, rejectedProxyCount)).map { index in
