@@ -20,7 +20,8 @@ struct CapturePreparationOwnership {
     }
 
     mutating func schedule(hasPendingTask: Bool) -> UInt64? {
-        guard !hasPendingTask else { return nil }
+        // A direct preparation owns its generation even without an engine task.
+        guard !hasPendingTask, !isPreparing else { return nil }
         generation &+= 1
         return generation
     }
