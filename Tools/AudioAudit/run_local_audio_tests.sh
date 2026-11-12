@@ -11,9 +11,10 @@ case "$MODE" in
     quick|stress|full) ;;
     *) printf 'Usage: %s [quick|stress|full]\n' "$0" >&2; exit 2 ;;
 esac
-case "$ITERATIONS" in
-    ''|*[!0-9]*|0) printf 'REVERB_AUDIO_ITERATIONS must be a positive integer\n' >&2; exit 2 ;;
-esac
+if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'REVERB_AUDIO_ITERATIONS must be a positive integer\n' >&2
+    exit 2
+fi
 
 OUT=${REVERB_AUDIO_RESULTS:-$(mktemp -d /tmp/reverb-local-audio.XXXXXX)}
 mkdir -p "$OUT"
@@ -32,11 +33,14 @@ done
 ARGS=(-project "$ROOT/ReverbQSO.xcodeproj" -scheme ReverbQSO
     -destination "$DESTINATION" -derivedDataPath "$DERIVED_DATA"
     -resultBundlePath "$OUT/tests.xcresult" CODE_SIGNING_ALLOWED=NO
-    -parallel-testing-enabled NO -test-iterations "$ITERATIONS"
+    -parallel-testing-enabled NO
     -test-timeouts-enabled YES -default-test-execution-time-allowance 90
     -maximum-test-execution-time-allowance 180
     -skip-testing:ReverbQSOTests/LiveTransportSmokeTests
     -skip-testing:ReverbQSOTests/LiveAudioRoundTripTests)
+if [[ "$ITERATIONS" != 1 ]]; then
+    ARGS+=(-test-iterations "$ITERATIONS")
+fi
 
 if [[ "$MODE" != full ]]; then
     SUITES=(AudioEngineOfflineTests SimulatedSvxLinkCodecMatrixTests
