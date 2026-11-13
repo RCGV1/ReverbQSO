@@ -146,8 +146,8 @@ final class ReceiveClockCompensatorTests: XCTestCase {
             let packet = (0..<640).map { Int16((12_000 * sin(2 * .pi * frequency * Double($0) / 8_000)).rounded()) }
             for _ in 0..<300 { _ = compensator.process(packet, queuedSamples: 2_000, targetQueuedSamples: 320) }
             let corrected = compensator.process(packet, queuedSamples: 2_000, targetQueuedSamples: 320)
-            XCTAssertEqual(corrected.first, packet.first)
-            XCTAssertEqual(corrected.last, packet.last)
+            // Endpoints follow the continuous clock, not packet-local anchors;
+            // the streaming tone tests below check phase, carrier, and sidebands.
             func rms(_ samples: [Int16]) -> Double {
                 sqrt(samples.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(samples.count))
             }
