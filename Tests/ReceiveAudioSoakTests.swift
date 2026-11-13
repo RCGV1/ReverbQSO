@@ -76,7 +76,24 @@ final class ReceiveAudioSoakTests: XCTestCase {
             XCTAssertEqual(result.joinErrors, 0, "Rendered joins must retain the scheduled corrected PCM delta")
             XCTAssertLessThan(result.maximumUpperBandError, 0.10,
                               "Interior 2873/3371 Hz PCM must track the continuous global sample clock")
+            XCTAssertLessThan(result.maximumFullBandError, 0.10,
+                              "Packet edges must also track the continuous global sample clock")
             print(result.summary(configuration))
+        }
+    }
+
+    func testUpperSpeechBandPacketEdgesAcrossOtherLegalChunkSizes() {
+        for packetSamples in [80, 320, 640] {
+            for ppm in [-300.0, 300.0] {
+                let configuration = Configuration(duration: 8, packetSamples: packetSamples,
+                                                  receiverPPM: ppm, upperSpeechBand: true)
+                let result = VirtualReceiver(configuration).run()
+                assertDelivery(result, configuration: configuration)
+                XCTAssertLessThan(result.maximumUpperBandError, 0.10)
+                XCTAssertLessThan(result.maximumFullBandError, 0.10,
+                                  "N=\(packetSamples), receiver_ppm=\(ppm)")
+                print(result.summary(configuration))
+            }
         }
     }
 
