@@ -73,11 +73,89 @@ final class ReceiveAudioSoakTests: XCTestCase {
                 XCTAssertTrue(result.outputCounts.contains { $0 > configuration.packetSamples })
             }
             XCTAssertEqual(result.checkedJoins, configuration.packetCount - 1)
-            XCTAssertEqual(result.joinErrors, 0, "Rendered packet boundaries must retain the source delta")
+            XCTAssertEqual(result.joinErrors, 0, "Rendered joins must retain the scheduled corrected PCM delta")
             XCTAssertLessThan(result.maximumUpperBandError, 0.10,
-                              "Interior 2873/3371 Hz PCM must track the endpoint-aligned resampling reference")
+                              "Interior 2873/3371 Hz PCM must track the continuous global sample clock")
             print(result.summary(configuration))
         }
+    }
+
+    func testGlobalToneOracleRejectsPacketLocalEndpointTiming() {
+        let configuration = Configuration(duration: 8, packetSamples: 160,
+                                          receiverPPM: 0, upperSpeechBand: true)
+        for ratio in [0.9995, 1.0005] {
+            var referenceClock = ReferenceClock()
+            var emittedSamples = 0
+            var maximumIdealError = 0.0
+            var maximumEndpointError = 0.0
+            for id in 0..<configuration.packetCount {
+                let reference = referenceClock.process(inputCount: configuration.packetSamples, ratio: ratio)
+                // Independent constant-rate construction from the global output
+                // index, not the packet reference's carried fractional clock.
+                let ideal = (0..<reference.outputCount).map { index in
+                    Int16(configuration.tone(Double(emittedSamples + index + 1) / ratio - 1).rounded())
+                }
+                let endpointAligned = (0..<reference.outputCount).map { index in
+                    let position = Double(id * configuration.packetSamples)
+                        + Double(index * (configuration.packetSamples - 1)) / Double(reference.outputCount - 1)
+                    return Int16(configuration.tone(position).rounded())
+                }
+                maximumIdealError = max(maximumIdealError,
+                    Self.toneError(ideal, reference: reference, configuration: configuration))
+                maximumEndpointError = max(maximumEndpointError,
+                    Self.toneError(endpointAligned, reference: reference, configuration: configuration))
+                emittedSamples += reference.outputCount
+            }
+            XCTAssertLessThan(maximumIdealError, 0.0001)
+            XCTAssertGreaterThan(maximumEndpointError, 0.10,
+                                 "A packet-local endpoint fit must fail the unchanged tone-error limit")
+            print("ReceiveAudioSoak oracle calibration ratio=\(ratio) ideal=\(maximumIdealError) endpoint=\(maximumEndpointError)")
+        }
+    }
+
+    func testGloballyConstantPCMRemainsConstantAcrossClockFeedbackChanges() {
+        for count in [80, 160, 320, 640] {
+            for value: Int16 in [.min, -12_345, 0, 12_345, .max] {
+                let clock = ReceiveClockCompensator()
+                let input = [Int16](repeating: value, count: count)
+                for packet in 0..<200 {
+                    let queue = [640, 664, 616, 1_920, 0][(packet / 40) % 5]
+                    let output = clock.process(input, queuedSamples: queue)
+                    XCTAssertFalse(output.isEmpty)
+                    XCTAssertTrue(output.allSatisfy { $0 == value }, "N=\(count), DC=\(value), packet=\(packet)")
+                }
+            }
+        }
+    }
+
+    func testPacketTagAndScheduledPCMOraclesRejectCorruption() {
+        let current = [Int16](repeating: 22, count: 160)
+        let blended = [Int16](repeating: 21, count: 17) + current.dropFirst(17)
+        XCTAssertTrue(Self.matchesPacketTag(blended, id: 21))
+        XCTAssertFalse(Self.matchesPacketTag([Int16](repeating: 21, count: 160), id: 21))
+        var corrupt = blended
+        corrupt[80] = 0
+        XCTAssertFalse(Self.matchesPacketTag(corrupt, id: 21))
+        corrupt = blended
+        corrupt[0] = 20
+        XCTAssertFalse(Self.matchesPacketTag(corrupt, id: 21))
+
+        let previous = [Int16](repeating: 21, count: 160)
+        func trace(_ samples: [Int16]) -> PCMTrace {
+            var result = PCMTrace()
+            result.append(samples)
+            return result
+        }
+        let expected = trace(previous + blended)
+        var split = PCMTrace()
+        split.append(previous.prefix(79))
+        split.append(previous.dropFirst(79))
+        split.append(blended)
+        XCTAssertEqual(split, expected, "Render chunk boundaries must not change the stream fingerprint")
+        XCTAssertNotEqual(trace(blended + previous), expected)
+        XCTAssertNotEqual(trace(previous + Array(blended.dropFirst())), expected)
+        XCTAssertNotEqual(trace(previous + [blended[0]] + blended), expected)
+        XCTAssertNotEqual(trace(previous + corrupt), expected)
     }
 
     private func assertSoak(duration: Double, packetSamples: Int, receiverPPM: Double,
@@ -115,7 +193,9 @@ final class ReceiveAudioSoakTests: XCTestCase {
         XCTAssertEqual(result.renderedIDs, Array(0..<configuration.packetCount), file: file, line: line)
         XCTAssertEqual(result.outputCounts.count, configuration.packetCount, file: file, line: line)
         XCTAssertEqual(result.renderedSamples, result.outputCounts.reduce(0, +), file: file, line: line)
-        XCTAssertEqual(result.packetErrors, 0, "Source order, endpoints and constant PCM must survive", file: file, line: line)
+        XCTAssertEqual(result.packetErrors, 0, "Source order, correction counts and packet tag waveforms must survive", file: file, line: line)
+        XCTAssertEqual(result.renderedPCM, result.scheduledPCM,
+                       "Every corrected PCM sample must render exactly once in FIFO order", file: file, line: line)
         XCTAssertEqual(result.accountingErrors, 0, file: file, line: line)
         XCTAssertEqual(result.overflowAttempts, 0, file: file, line: line)
         XCTAssertEqual(result.discardedPackets, 0, file: file, line: line)
@@ -140,6 +220,68 @@ final class ReceiveAudioSoakTests: XCTestCase {
 
     private func mean(_ values: [Double]) -> Double {
         values.isEmpty ? .infinity : values.reduce(0, +) / Double(values.count)
+    }
+
+    private static func matchesPacketTag(_ samples: [Int16], id: Int) -> Bool {
+        guard !samples.isEmpty else { return false }
+        let tag = Int16(id + 1)
+        let previous = Int16(max(1, id))
+        // These tags form a unit staircase, not global DC. Prior kernel support
+        // may blend the preceding tag, but the stable body must be exact.
+        return samples.enumerated().allSatisfy { index, sample in
+            index < 17 ? (previous...tag).contains(sample) : sample == tag
+        }
+    }
+
+    private static func toneError(_ samples: [Int16], reference: PacketReference,
+                                  configuration: Configuration, interiorOnly: Bool = false) -> Double {
+        let margin = interiorOnly ? 16 : 0
+        var error = 0.0
+        var energy = 0.0
+        for index in margin..<(samples.count - margin) {
+            let expected = configuration.tone(reference.position(index))
+            error += pow(Double(samples[index]) - expected, 2)
+            energy += expected * expected
+        }
+        return sqrt(error / energy)
+    }
+
+    private struct PCMTrace: Equatable {
+        private var count = 0
+        private var fingerprint: UInt64 = 0xcbf29ce484222325
+
+        mutating func append<S: Sequence>(_ samples: S) where S.Element == Int16 {
+            for sample in samples {
+                count += 1
+                fingerprint ^= UInt64(UInt16(bitPattern: sample))
+                fingerprint &*= 0x100000001b3
+            }
+        }
+    }
+
+    private struct PacketReference {
+        let firstSourcePosition: Double
+        let sourceStep: Double
+        let outputCount: Int
+
+        func position(_ index: Int) -> Double { firstSourcePosition + Double(index) * sourceStep }
+    }
+
+    // Analytically invert integrated output-clock ticks, independently of the
+    // interpolator: there is no endpoint fit, kernel, or output-PCM feedback.
+    private struct ReferenceClock {
+        private var sourceSamples = 0
+        private var fractionalTicks = 0.0
+
+        mutating func process(inputCount: Int, ratio: Double) -> PacketReference {
+            let nextTicks = fractionalTicks + Double(inputCount) * ratio
+            let count = Int(nextTicks.rounded(.down))
+            let reference = PacketReference(firstSourcePosition: Double(sourceSamples) - 1 + (1 - fractionalTicks) / ratio,
+                                            sourceStep: 1 / ratio, outputCount: count)
+            fractionalTicks = nextTicks - Double(count)
+            sourceSamples += inputCount
+            return reference
+        }
     }
 
     private struct Configuration {
@@ -176,6 +318,8 @@ final class ReceiveAudioSoakTests: XCTestCase {
         var startDelays: [Double] = []
         var tailDelays: [Double] = []
         var renderedSamples = 0
+        var scheduledPCM = PCMTrace()
+        var renderedPCM = PCMTrace()
         var packetErrors = 0
         var accountingErrors = 0
         var overflowAttempts = 0
@@ -198,6 +342,7 @@ final class ReceiveAudioSoakTests: XCTestCase {
         var checkedJoins = 0
         var joinErrors = 0
         var maximumUpperBandError = 0.0
+        var maximumFullBandError = 0.0
 
         func summary(_ configuration: Configuration) -> String {
             String(format: "ReceiveAudioSoak seconds=%.0f packet_ms=%.0f receiver_ppm=%.0f",
@@ -205,9 +350,10 @@ final class ReceiveAudioSoakTests: XCTestCase {
                 + " submitted=\(submittedPackets) processed=\(processCalls) rendered=\(renderedIDs.count)"
                 + " native_peak=\(maximumNativeSamples) pending_peak=\(maximumPendingSamples)"
                 + " drops=\(discardedPackets) overflow=\(overflowAttempts) recoveries=\(recoveries) gaps=\(underruns)"
-                + String(format: " startup_ms=%.3f start_max_ms=%.3f tail_max_ms=%.3f ratio=%.7f...%.7f upper_band_error=%.5f",
+                + String(format: " startup_ms=%.3f start_max_ms=%.3f tail_max_ms=%.3f ratio=%.7f...%.7f upper_band_error=%.5f full_band_error=%.5f",
                          startupSilence * 1_000, (startDelays.max() ?? 0) * 1_000,
-                         (tailDelays.max() ?? 0) * 1_000, minimumRatio, maximumRatio, maximumUpperBandError)
+                         (tailDelays.max() ?? 0) * 1_000, minimumRatio, maximumRatio,
+                         maximumUpperBandError, maximumFullBandError)
         }
     }
 
@@ -216,6 +362,7 @@ final class ReceiveAudioSoakTests: XCTestCase {
             let id: Int
             let samples: [Int16]
             let token: UInt64
+            let expectedJoinDelta: Int?
             var cursor = 0
         }
 
@@ -228,6 +375,8 @@ final class ReceiveAudioSoakTests: XCTestCase {
         private var rendererTicks = 0
         private var lastRenderedEnd: Double?
         private var lastRenderedSample: Int16?
+        private var lastScheduledSample: Int16?
+        private var referenceClock = ReferenceClock()
         private var result = Result()
         var remainingSamples: Int { native.reduce(0) { $0 + $1.samples.count - $1.cursor } }
 
@@ -242,6 +391,8 @@ final class ReceiveAudioSoakTests: XCTestCase {
             rendererTicks = 0
             lastRenderedEnd = nil
             lastRenderedSample = nil
+            lastScheduledSample = nil
+            referenceClock = ReferenceClock()
             result = Result()
         }
 
@@ -300,23 +451,28 @@ final class ReceiveAudioSoakTests: XCTestCase {
                 if packet != expected { result.packetErrors += 1 }
                 let corrected = clock.process(packet, queuedSamples: remainingSamples,
                                               targetQueuedSamples: Int(playout.targetDelay * 8_000))
+                let reference = referenceClock.process(inputCount: packet.count, ratio: clock.correctionRatio)
                 result.processCalls += 1
                 result.outputCounts.append(corrected.count)
                 result.minimumRatio = min(result.minimumRatio, clock.correctionRatio)
                 result.maximumRatio = max(result.maximumRatio, clock.correctionRatio)
                 if corrected.count != packet.count { result.changedPackets += 1 }
-                if corrected.first != expected.first || corrected.last != expected.last
+                if corrected.count != reference.outputCount
                     || corrected.count < Int((Double(packet.count) * 0.970).rounded(.down))
                     || corrected.count > Int((Double(packet.count) * 1.005).rounded(.up)) {
                     result.packetErrors += 1
                 }
-                if configuration.upperSpeechBand { checkUpperBand(corrected, id: id) }
+                if configuration.upperSpeechBand { checkUpperBand(corrected, reference: reference) }
+                else if !ReceiveAudioSoakTests.matchesPacketTag(corrected, id: id) { result.packetErrors += 1 }
                 guard !queue.wouldOverflow(adding: corrected.count, remainingSamples: remainingSamples) else {
                     result.overflowAttempts += 1
                     continue
                 }
                 let token = queue.reserve(corrected.count)
-                native.append(NativePacket(id: id, samples: corrected, token: token))
+                let joinDelta = corrected.first.flatMap { first in lastScheduledSample.map { Int(first) - Int($0) } }
+                native.append(NativePacket(id: id, samples: corrected, token: token, expectedJoinDelta: joinDelta))
+                result.scheduledPCM.append(corrected)
+                lastScheduledSample = corrected.last
                 result.maximumNativeSamples = max(result.maximumNativeSamples, remainingSamples)
                 checkAccounting()
             }
@@ -345,19 +501,14 @@ final class ReceiveAudioSoakTests: XCTestCase {
                         result.startupSilence = start - configuration.arrival(0)
                     }
                     if configuration.upperSpeechBand, let lastRenderedSample {
-                        let expectedDelta = Int(configuration.packet(id)[0]) - Int(configuration.packet(id - 1).last!)
                         let actualDelta = Int(native[0].samples[0]) - Int(lastRenderedSample)
                         result.checkedJoins += 1
-                        if actualDelta != expectedDelta { result.joinErrors += 1 }
+                        if actualDelta != native[0].expectedJoinDelta { result.joinErrors += 1 }
                     }
                 }
                 let endCursor = native[0].cursor + count
                 let consumed = native[0].samples[native[0].cursor..<endCursor]
-                // Identity-tagged constant PCM verifies shape and packet order,
-                // not acoustic quality, codec fidelity, or real device output.
-                if !configuration.upperSpeechBand && !consumed.allSatisfy({ $0 == Int16(id + 1) }) {
-                    result.packetErrors += 1
-                }
+                result.renderedPCM.append(consumed)
                 lastRenderedSample = consumed.last
                 native[0].cursor = endCursor
                 tick += count
@@ -383,17 +534,19 @@ final class ReceiveAudioSoakTests: XCTestCase {
             }
         }
 
-        private func checkUpperBand(_ samples: [Int16], id: Int) {
-            var error = 0.0
-            var energy = 0.0
-            for index in 16..<(samples.count - 16) {
-                let position = Double(id * configuration.packetSamples)
-                    + Double(index * (configuration.packetSamples - 1)) / Double(samples.count - 1)
-                let reference = configuration.tone(position)
-                error += pow(Double(samples[index]) - reference, 2)
-                energy += reference * reference
+        private func checkUpperBand(_ samples: [Int16], reference: PacketReference) {
+            result.maximumUpperBandError = max(result.maximumUpperBandError,
+                ReceiveAudioSoakTests.toneError(samples, reference: reference,
+                    configuration: configuration, interiorOnly: true))
+            let fullError = ReceiveAudioSoakTests.toneError(samples, reference: reference, configuration: configuration)
+            if fullError > result.maximumFullBandError, fullError >= 0.10 {
+                let errors = samples.enumerated().map { index, sample in
+                    abs(Double(sample) - configuration.tone(reference.position(index)))
+                }
+                let worst = errors.indices.max { errors[$0] < errors[$1] }!
+                print("ReceiveAudioSoak edge diagnostic ppm=\(configuration.receiverPPM) packet=\(result.processCalls - 1) ratio=\(clock.correctionRatio) full_error=\(fullError) worst_index=\(worst)/\(samples.count) source=\(reference.position(worst)) actual=\(samples[worst]) expected=\(configuration.tone(reference.position(worst)))")
             }
-            result.maximumUpperBandError = max(result.maximumUpperBandError, sqrt(error / energy))
+            result.maximumFullBandError = max(result.maximumFullBandError, fullError)
         }
     }
 }
