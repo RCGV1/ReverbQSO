@@ -117,3 +117,18 @@ gain-induced boundary metric subtracts the sample expected if the preceding
 sample's gain continued; it excludes boundaries whose preceding input magnitude
 is below 256 PCM counts. This isolates a gain discontinuity from the source's
 natural waveform step, but is not a perceptual score or hardware listening test.
+
+## Receive Clock Quality Limits
+
+`ReceiveClockCompensatorTests` checks continuous sample phase, speech-band carrier
+fidelity, boundary clipping, exact counts, DC, and reset behavior. The soak tests
+also check queue bounds, latency, drift, packet order, and scheduled/rendered PCM
+stream fingerprints. These are software checks, not device listening results.
+
+The clock interpolator uses prior/current input only, with reduced kernel support
+near each packet's right edge rather than waiting for another packet. This can
+attenuate high-frequency edge samples. In the 20 ms, 2873/3371 Hz two-tone soak at
+receiver clocks of +/-300 ppm, the maximum whole-packet normalized RMS error is
+about 0.1427, versus about 0.00116 for the interior samples. The existing interior
+limit is 0.10; whole-packet error is measured and logged, not currently gated.
+Passing tests therefore do not establish transparent full-packet reconstruction.
