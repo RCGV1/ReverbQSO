@@ -125,10 +125,20 @@ fidelity, boundary clipping, exact counts, DC, and reset behavior. The soak test
 also check queue bounds, latency, drift, packet order, and scheduled/rendered PCM
 stream fingerprints. These are software checks, not device listening results.
 
-The clock interpolator uses prior/current input only, with reduced kernel support
-near each packet's right edge rather than waiting for another packet. This can
-attenuate high-frequency edge samples. In the 20 ms, 2873/3371 Hz two-tone soak at
-receiver clocks of +/-300 ppm, the maximum whole-packet normalized RMS error is
-about 0.1427, versus about 0.00116 for the interior samples. The existing interior
-limit is 0.10; whole-packet error is measured and logged, not currently gated.
-Passing tests therefore do not establish transparent full-packet reconstruction.
+The clock interpolator keeps its radius-16 kernel over available prior/current
+samples, omits unavailable future taps, and normalizes the remaining weights.
+Truncated-edge outputs are bounded to the observed support's sample range to
+prevent new edge extrema. No future-packet wait or signal delay is added.
+
+The 2873/3371 Hz two-tone soak now gates both interior and whole-packet normalized
+RMS error below 0.10 at receiver clocks of +/-300 ppm across 80/160/320/640-sample
+chunks. Worst whole-packet errors are about 0.0964 for 80-sample chunks and 0.0659
+for 160-sample chunks, compared with 0.1957 and 0.1427 with the shrinking kernel.
+Interior error remains about 0.00119 or less.
+
+This is a fixture-specific bound, not a universal speech-quality guarantee.
+Without future PCM, edge reconstruction is still approximate and the envelope
+bound can limit legitimate intersample peaks. A different upper-band multitone
+probe, including 3% catch-up, measures errors up to about 0.1372 for 80-sample
+chunks. Passing tests do not establish transparent full-packet reconstruction,
+perceptual superiority, or actual device listening quality.
