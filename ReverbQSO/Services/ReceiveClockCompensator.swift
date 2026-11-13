@@ -64,12 +64,15 @@ final class ReceiveClockCompensator {
             // unchanged, rather than restarting sample phase at its endpoints.
             let position = (Double(outputIndex + 1) - previousFraction) / correctionRatio - 1
             let center = Int(position.rounded(.down))
-            // Use prior/current input only: taper support at the right edge
-            // instead of extending a plateau or waiting for the next packet.
-            let radius = min(16, max(1, Double(samples.count - 1) - position))
+            // Keep the past-side kernel when future support is unavailable;
+            // narrowing both sides attenuates upper-speech-band packet edges.
+            let radius = 16.0
+            let truncated = center + 16 >= samples.count
             var sum = 0.0
             var weightSum = 0.0
-            for index in (center - 15)...(center + 16) {
+            var minimum = Int16.max
+            var maximum = Int16.min
+            for index in (center - 15)...min(center + 16, samples.count - 1) {
                 let distance = position - Double(index)
                 guard abs(distance) < radius else { continue }
                 let argument = Double.pi * cutoff * distance
@@ -84,8 +87,16 @@ final class ReceiveClockCompensator {
                 }
                 sum += Double(value) * weight
                 weightSum += weight
+                if truncated {
+                    minimum = min(minimum, value)
+                    maximum = max(maximum, value)
+                }
             }
-            return Int16(clamping: Int((sum / weightSum).rounded()))
+            // Missing future taps cannot constrain asymmetric-kernel overshoot.
+            // Bound only those outputs to the available support's PCM envelope.
+            let value = sum / weightSum
+            let bounded = truncated ? min(Double(maximum), max(Double(minimum), value)) : value
+            return Int16(clamping: Int(bounded.rounded()))
         }
     }
 
