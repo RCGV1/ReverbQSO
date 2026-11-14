@@ -94,12 +94,15 @@ targets:
       - path: ReverbQSO/Features/Recent/RecordingsView.swift
       - path: Companions/Watch/PrivacyInfo.xcprivacy
       - path: ReverbQSO/Features/Settings/CallRestrictionsView.swift
+      - path: ReverbQSO/Features/Settings/LicensesView.swift
       - path: ReverbQSO/Features/Settings/RecordingSettingsRows.swift
       - path: Companions/Watch
         excludes:
           - WatchInfo.plist
           - PrivacyInfo.xcprivacy
       - path: ReverbQSO/Resources/Audio
+      - path: ReverbQSO/Resources/Legal
+        buildPhase: resources
       - path: ReverbQSO/Models
         excludes:
           - RecentConnection.swift

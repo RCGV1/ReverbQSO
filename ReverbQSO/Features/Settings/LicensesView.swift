@@ -14,10 +14,16 @@ struct LicensesView: View {
                 ScrollView {
                     Text(licenseText(file))
                         .font(.footnote.monospaced())
+                        #if !os(watchOS)
                         .textSelection(.enabled)
+                        #endif
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
-                }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+                }
+                .navigationTitle(title)
+                #if !os(watchOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
             }
         }.navigationTitle("Licenses")
     }
