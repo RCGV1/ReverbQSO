@@ -783,7 +783,7 @@ final class EchoLinkConnectionService: ObservableObject {
         audioDiagnosticsTotals.rxPackets += 1
         audioDiagnosticsTotals.rxPayloadBytes += payloadBytes
     }
-#if DEBUG
+#if DEBUG || REVERB_TESTING
     var onAuditIncomingDatagram: (@MainActor (Data) -> Void)?
     var onAuditAcceptedPacket: (@MainActor (EchoLinkVoicePacketMetadata?) -> Void)?
     var onAuditOutgoingDatagramSent: (@MainActor () async -> Void)?
@@ -1960,7 +1960,7 @@ final class EchoLinkConnectionService: ObservableObject {
     }
 #endif
 
-#if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
+#if (DEBUG || REVERB_TESTING) && (os(iOS) || targetEnvironment(macCatalyst))
     func installSimulatorDemoSession(station: Station) {
         resetAudioDiagnostics()
         session = QSOSession(
@@ -2243,7 +2243,7 @@ final class EchoLinkConnectionService: ObservableObject {
                 } else {
                     throw ConnectionError.notConnected
                 }
-#if DEBUG
+#if DEBUG || REVERB_TESTING
                 if let observer = onAuditOutgoingDatagramSent { await observer() }
 #endif
                 guard !Task.isCancelled,
@@ -2855,7 +2855,7 @@ final class EchoLinkConnectionService: ObservableObject {
             logger.debug("Dropped non-audio UDP packet on audio port size=\(data.count)")
             return
         }
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         onAuditIncomingDatagram?(data)
 #endif
 
@@ -2933,7 +2933,7 @@ final class EchoLinkConnectionService: ObservableObject {
             audioStatusMessage = nil
             incomingVoicePackets += 1
             recordReceivedAudio(codec: "GSM", payloadBytes: payload.count)
-#if DEBUG
+#if DEBUG || REVERB_TESTING
             onAuditAcceptedPacket?(datagram.metadata)
 #endif
             let forwarded = forwardReceiveToWatch(data, session: currentSession)
@@ -2962,7 +2962,7 @@ final class EchoLinkConnectionService: ObservableObject {
             let wireCodec = datagram.metadata?.payloadType == 8 ? "G.711 A-law"
                 : datagram.metadata?.payloadType == 0 ? "G.711 µ-law" : "G.711 µ-law (inferred)"
             recordReceivedAudio(codec: wireCodec, payloadBytes: samples.count)
-#if DEBUG
+#if DEBUG || REVERB_TESTING
             onAuditAcceptedPacket?(datagram.metadata)
 #endif
             let forwarded = forwardReceiveToWatch(data, session: currentSession)
@@ -2996,7 +2996,7 @@ final class EchoLinkConnectionService: ObservableObject {
             audioStatusMessage = nil
             incomingVoicePackets += 1
             recordReceivedAudio(codec: "Speex", payloadBytes: payload.count)
-#if DEBUG
+#if DEBUG || REVERB_TESTING
             onAuditAcceptedPacket?(datagram.metadata)
 #endif
             let forwarded = forwardReceiveToWatch(data, session: currentSession)

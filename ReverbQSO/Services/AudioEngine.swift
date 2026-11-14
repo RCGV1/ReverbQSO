@@ -650,7 +650,8 @@ final class AudioEngine: ObservableObject {
          100 / receiveClock.correctionRatio,
          hardwareEnabled ? AVAudioSession.sharedInstance().outputLatency * 1000 : 0)
     }
-#if DEBUG
+// REVERB_TESTING exposes audit hooks without enabling DEBUG runtime paths.
+#if DEBUG || REVERB_TESTING
     private var auditScheduledSamples = 0
     private var auditTrimCount = 0
     private var auditTrimmedSamples = 0
@@ -797,7 +798,7 @@ final class AudioEngine: ObservableObject {
 
     private func replaceEngineAfterSessionActivation() {
         guard hardwareEnabled else { return }
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditGraphReplacementCount += 1 }
 #endif
         recordEngineAudit("graph-replacement-begin")
@@ -872,7 +873,7 @@ final class AudioEngine: ObservableObject {
 
     // State transitions only; keep packet scheduling diagnostics separate.
     private func recordEngineAudit(_ event: String) {
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         guard hardwareEnabled, ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
         let row = ["time": String(ProcessInfo.processInfo.systemUptime), "event": event,
                    "engine": String(describing: ObjectIdentifier(engine)),
@@ -886,7 +887,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func recordAudioFailure(_ error: Error, operation: String) {
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         guard hardwareEnabled, ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
         let failure = error as NSError
         let session = AVAudioSession.sharedInstance()
@@ -1506,7 +1507,7 @@ final class AudioEngine: ObservableObject {
             let budget = playbackQueue.concealmentSampleBudget(
                 receivedSamples: samples.count, remainingSamples: rendererLead,
                 pendingSamples: pendingSamples)
-#if DEBUG
+#if DEBUG || REVERB_TESTING
             auditConcealmentSkippedSamples += nativeConcealment.count - min(nativeConcealment.count, budget)
 #endif
             playbackSamples = receiveNativeSpeech.process(samples, concealed: nativeConcealment,
@@ -1922,7 +1923,7 @@ final class AudioEngine: ObservableObject {
         let start = freshTimelineStart ?? max(playbackEndSampleTime, max(0, renderedSnapshot ?? 0))
         let scheduledBuffer = buffer
         let scheduledSamples = incomingSamples
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         let auditEventIndex = auditScheduleEvents.count
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" {
             auditScheduledSamples += incomingCount
@@ -1935,7 +1936,7 @@ final class AudioEngine: ObservableObject {
             diagnosticsPlaybackOverflowDrops += 1
             // Preserve scheduled speech and the native render clock. Restarting
             // the player here adds preroll and can cascade into further losses.
-#if DEBUG
+#if DEBUG || REVERB_TESTING
             auditTrimCount += 1
             auditOverflowDropCount += 1
             auditTrimmedSamples += incomingCount
@@ -1955,7 +1956,7 @@ final class AudioEngine: ObservableObject {
         let count = scheduledSamples.count
         playbackEndSampleTime = start + Int64(count)
         playbackHistory.append(scheduledSamples, startingAt: start)
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         if auditScheduleEvents.count > auditEventIndex {
             auditScheduleEvents[auditEventIndex]["scheduledCount"] = Double(count)
             auditScheduleEvents[auditEventIndex]["scheduledStart"] = Double(start)
@@ -2008,7 +2009,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func trimPlaybackTimeline(reason: String = "backlog-trim") {
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditTimelineResetCount += 1 }
 #endif
         recordEngineAudit("timeline-reset reason=\(reason)")

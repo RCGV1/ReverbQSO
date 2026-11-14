@@ -615,8 +615,8 @@ final class EchoLinkConferenceHostService: ObservableObject {
         }
     }
 
-    #if DEBUG
-    /// UI-only fixture. It never opens sockets or registers with EchoLink.
+    #if DEBUG || REVERB_TESTING
+    /// Explicit UI/test fixture. It never opens sockets or registers with EchoLink.
     func installSimulatorDemoIncomingCall(callsign: String = "K6DEMO") {
         guard !isRunning else { return }
         let station = Station(callsign: callsign, ipAddress: "127.0.0.1", type: .user)
