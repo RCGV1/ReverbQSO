@@ -6,6 +6,7 @@ MODE=${1:-quick}
 DESTINATION=${REVERB_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 17 Pro}
 DERIVED_DATA=${REVERB_DERIVED_DATA:-/tmp/reverb-audio-build}
 ITERATIONS=${REVERB_AUDIO_ITERATIONS:-1}
+CONFIGURATION=${REVERB_TEST_CONFIGURATION:-Debug}
 
 case "$MODE" in
     quick|stress|full) ;;
@@ -15,6 +16,10 @@ if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
     printf 'REVERB_AUDIO_ITERATIONS must be a positive integer\n' >&2
     exit 2
 fi
+case "$CONFIGURATION" in
+    Debug|Release) ;;
+    *) printf 'REVERB_TEST_CONFIGURATION must be Debug or Release\n' >&2; exit 2 ;;
+esac
 
 OUT=${REVERB_AUDIO_RESULTS:-$(mktemp -d /tmp/reverb-local-audio.XXXXXX)}
 mkdir -p "$OUT"
@@ -31,6 +36,7 @@ for flag in ECHOLINK_RUN_AUDIO_AUDIT ECHOLINK_RUN_LOCAL_SPEEX_AUDIT \
 done
 
 ARGS=(-project "$ROOT/ReverbQSO.xcodeproj" -scheme ReverbQSO
+    -configuration "$CONFIGURATION"
     -destination "$DESTINATION" -derivedDataPath "$DERIVED_DATA"
     -resultBundlePath "$OUT/tests.xcresult" CODE_SIGNING_ALLOWED=NO
     -parallel-testing-enabled NO
@@ -38,6 +44,10 @@ ARGS=(-project "$ROOT/ReverbQSO.xcodeproj" -scheme ReverbQSO
     -maximum-test-execution-time-allowance 180
     -skip-testing:ReverbQSOTests/LiveTransportSmokeTests
     -skip-testing:ReverbQSOTests/LiveAudioRoundTripTests)
+if [[ "$CONFIGURATION" == Release ]]; then
+    ARGS+=(ENABLE_TESTABILITY=YES ONLY_ACTIVE_ARCH=YES
+        'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) REVERB_TESTING')
+fi
 if [[ "$ITERATIONS" != 1 ]]; then
     ARGS+=(-test-iterations "$ITERATIONS")
 fi
@@ -62,7 +72,7 @@ if [[ "$MODE" != full ]]; then
     done
 fi
 
-printf 'Local audio gate: %s (%s iteration(s))\nResults: %s\n' "$MODE" "$ITERATIONS" "$OUT"
+printf 'Local audio gate: %s, %s (%s iteration(s))\nResults: %s\n' "$MODE" "$CONFIGURATION" "$ITERATIONS" "$OUT"
 STATUS=0
 xcodebuild "${ARGS[@]}" test 2>&1 | tee "$OUT/xcodebuild.log" || STATUS=$?
 if [[ -d "$OUT/tests.xcresult" ]]; then

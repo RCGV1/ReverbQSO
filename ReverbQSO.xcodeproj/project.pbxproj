@@ -122,6 +122,7 @@
 		4C555A734F39EAFB9323DE63 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C40444E0B7266BE9CBDB225 /* AVFoundation.framework */; };
 		4C92B055EFCC52B7E4F057BF /* DirectCQSocketPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E093C8FD41175CDA8BB42DA /* DirectCQSocketPair.swift */; };
 		4D743BB3690EF1522F7769D0 /* LocalDemoHostingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A589F5DEFDA7E71736CF95BB /* LocalDemoHostingTests.swift */; };
+		4D9FB275CE8953FA59257C6F /* libspeex-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = 02C75C610A6A12E74CBAFA1E /* libspeex-COPYING.txt */; };
 		4DC6DD4D9065A3422F1542D4 /* lpc.c in Sources */ = {isa = PBXBuildFile; fileRef = BF2049383B9D05134465FD85 /* lpc.c */; };
 		4E213BDDBEC38BC37D07903D /* EchoLinkRelayClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FCFE0628164575D1111C6CC /* EchoLinkRelayClientTests.swift */; };
 		4E675408DBC15CC6C74EB388 /* EchoLinkRelayProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5809DBE651C23428FB3F1B6 /* EchoLinkRelayProtocolTests.swift */; };
@@ -164,6 +165,7 @@
 		66EEE92D5BD66D38C3D0A7AC /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D74DFDDD365B8B32CB0BF1 /* Station.swift */; };
 		67073044CF41728F108E9A3B /* ReverbQSOMenuBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 548C83CE5A2D89DD54938BF9 /* ReverbQSOMenuBarApp.swift */; };
 		67E687059396415808259B74 /* SpeexTransmitConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE78B9A116D6DBE0F596A80 /* SpeexTransmitConnectionTests.swift */; };
+		6818E111B5769D77D8AC471A /* GPL-3.0.txt in Resources */ = {isa = PBXBuildFile; fileRef = B10B94BB44D80968D929DF15 /* GPL-3.0.txt */; };
 		686BE471F1CABA08EC7C821D /* VoicePipelineSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F9E7DB3830DDC7AD71AF54 /* VoicePipelineSmokeTests.swift */; };
 		686E4FD292C9858CDE7A37A5 /* StationParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6588487C3BF2989B9C82C3F0 /* StationParserTests.swift */; };
 		695CFACC6509297EC4D64096 /* InboundStationVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32444518FE355D2119D6015 /* InboundStationVerifierTests.swift */; };
@@ -211,6 +213,7 @@
 		8444049B055945FAF5D5E9C2 /* lsp_tables_nb.c in Sources */ = {isa = PBXBuildFile; fileRef = F066B9F54ED35CBA89C6C937 /* lsp_tables_nb.c */; };
 		84CB3AB1FFB8C7C29A396FDF /* decode.c in Sources */ = {isa = PBXBuildFile; fileRef = 8C72D8DEA106DEFAD2868625 /* decode.c */; };
 		84E9021F9F07B0AC62BFDC62 /* ltp.c in Sources */ = {isa = PBXBuildFile; fileRef = A26BB8ABEF7B95D9E05E2365 /* ltp.c */; };
+		8507B9069CF35C7FA6C4726D /* Upstream-MIT.txt in Resources */ = {isa = PBXBuildFile; fileRef = F1D19C66A8D6697C34C7ABEE /* Upstream-MIT.txt */; };
 		85B8BF98DA518BE9AB788C4E /* rpe.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E1C870C75EFB0D77AE8F29A /* rpe.c */; };
 		86889DD089B2ED2AE4E0C964 /* ReceiveAudioPlaybackState.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0516615AA80A8D4B7BA005 /* ReceiveAudioPlaybackState.swift */; };
 		877B72FFC31582F08F74C2DC /* code.c in Sources */ = {isa = PBXBuildFile; fileRef = 946733CA1FC5012A240792CA /* code.c */; };
@@ -296,6 +299,7 @@
 		B61269523AF6841919227DB2 /* WatchAudioForwardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73634338644DC196AB198191 /* WatchAudioForwardingTests.swift */; };
 		B6C59E9D05F8742F2242028E /* EchoLinkRegistrationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29284FD611CDD0D6C961539 /* EchoLinkRegistrationClientTests.swift */; };
 		B6F3123BE6E7F20C384DABDF /* StationDirectoryObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B95D9A670EA4A70980782A7 /* StationDirectoryObservation.swift */; };
+		B802B89C6D5FE7BD3B4994EB /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 974F1A659815E325DADC68A2 /* LicensesView.swift */; };
 		B94FBDF96B0B8A4B94EAC061 /* LocalDemoAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44DD215844E28AACC669B9F6 /* LocalDemoAccount.swift */; };
 		BB4818F591983B93EADCC8C8 /* AudioAuditRenderCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCBA1EB5D1555FCF9AC03F3 /* AudioAuditRenderCapture.swift */; };
 		BC9F8D6A4943DE0CF706B113 /* CaptureBufferProcessingBarrierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E5BA3065370247A2BDCF46 /* CaptureBufferProcessingBarrierTests.swift */; };
@@ -342,6 +346,7 @@
 		D70F8F05F92EC9F779B04AEA /* QSOHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7BB94D5DD2FD18660428C1 /* QSOHub.swift */; };
 		D779D1CAC42370718379092D /* Station+Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16252E19E45B823180D32398 /* Station+Location.swift */; };
 		D7A301772D3C88F82035FCA0 /* EchoLinkRelayConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AD741F40E453F9281698051 /* EchoLinkRelayConnectionTests.swift */; };
+		D7C449EC599A1A3F27AE1AF0 /* libgsm-COPYRIGHT.txt in Resources */ = {isa = PBXBuildFile; fileRef = 9B41435EC287F7056247E1CA /* libgsm-COPYRIGHT.txt */; };
 		D7D2E3E4426461213364F2CF /* LiveCaptureBacklogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF0A4AC7AA900DCC26C4A50 /* LiveCaptureBacklogPolicy.swift */; };
 		D9B0C5FBA9E29A6221DA832A /* CallCQService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C57F3296E7AA4AF46D3CAA6 /* CallCQService.swift */; };
 		DA0EBF6389ED83D7DDA9B083 /* EchoLinkDTMFToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DDD9699C439E9FF767B022C /* EchoLinkDTMFToneGenerator.swift */; };
@@ -1554,7 +1559,11 @@
 			files = (
 				B103714B2780616A31353C33 /* Assets.xcassets in Resources */,
 				2698D150EC9DC2375B4148F7 /* EchoTestWelcome.gsm in Resources */,
+				6818E111B5769D77D8AC471A /* GPL-3.0.txt in Resources */,
 				4569BF9D4E7B8FAEB452F88B /* PrivacyInfo.xcprivacy in Resources */,
+				8507B9069CF35C7FA6C4726D /* Upstream-MIT.txt in Resources */,
+				D7C449EC599A1A3F27AE1AF0 /* libgsm-COPYRIGHT.txt in Resources */,
+				4D9FB275CE8953FA59257C6F /* libspeex-COPYING.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1635,6 +1644,7 @@
 				8AA96E887B61D0AE2D036852 /* InboundHostSessionMachine.swift in Sources */,
 				F8F9C851BA3574C9D8B97A4C /* InboundStationVerifier.swift in Sources */,
 				5E86CAC7C9FB1A1004C8F4E4 /* KeychainService.swift in Sources */,
+				B802B89C6D5FE7BD3B4994EB /* LicensesView.swift in Sources */,
 				51E7B8A2CC769197B0EC9A62 /* LiveCaptureBacklogPolicy.swift in Sources */,
 				C58493160550FD7310D10BE3 /* LiveTransportMessageBuffer.swift in Sources */,
 				D3B355EDDE31A6291E19B97B /* LocalDemoAccount.swift in Sources */,
@@ -2168,7 +2178,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 45;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = FRFXFRT624;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2196,7 +2206,7 @@
 				);
 				INFOPLIST_FILE = ReverbQSO/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2290,7 +2300,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 45;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = FRFXFRT624;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -2316,7 +2326,7 @@
 				);
 				INFOPLIST_FILE = ReverbQSO/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_MODULE_NAME = ReverbQSO;

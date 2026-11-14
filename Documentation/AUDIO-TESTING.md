@@ -22,9 +22,12 @@ local relays, and explicit localhost destinations. They do not authenticate to
 EchoLink or contact real stations. Hardware and live-test opt-ins are disabled.
 
 ```sh
+bash Tools/AudioAudit/test_local_audio_runner.sh
 bash Tools/AudioAudit/run_local_audio_tests.sh quick
 REVERB_AUDIO_ITERATIONS=3 bash Tools/AudioAudit/run_local_audio_tests.sh stress
 bash Tools/AudioAudit/run_local_audio_tests.sh full
+REVERB_TEST_CONFIGURATION=Release bash Tools/AudioAudit/run_local_audio_tests.sh full
+REVERB_TEST_CONFIGURATION=Release REVERB_AUDIO_ITERATIONS=3 bash Tools/AudioAudit/run_local_audio_tests.sh stress
 ```
 
 Set `REVERB_TEST_DESTINATION` to another installed simulator, for example
@@ -34,6 +37,13 @@ build products. Each run creates a new result directory under `/tmp`, containing
 directory. Failure is propagated as a nonzero exit status. Repetitions do not
 retry failures away. Use the aggregate xcresult summary, not the last test
 process's summary after a runner restart.
+
+The default configuration is Debug. Release validation retains compiler
+optimization while enabling test access and the `REVERB_TESTING` observation
+hooks; it does not define `DEBUG` or enable screenshot-mode shortcuts. These
+flags apply only to the test invocation, not to distribution archives. Verify
+the actual signed Release product separately, including sandbox behavior and
+device audio. `REVERB_TEST_CONFIGURATION` accepts only Debug or Release.
 
 The quick gate covers packet formats, sequential codecs, recording, tail flush,
 voice/PTT state, capture conversion and callback chunk continuity. The stress

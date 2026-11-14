@@ -1,6 +1,6 @@
 # ReverbQSO Privacy Policy
 
-Effective date: October 7, 2026
+Effective date: November 14, 2026
 
 ReverbQSO is an independently developed amateur-radio client for iPhone, iPad, Mac, and Apple Watch. It connects to the EchoLink service and stations you choose. It is not operated by Synergenics, LLC, the provider of EchoLink. This policy describes ReverbQSO's current behavior, including its companion apps.
 
@@ -27,7 +27,7 @@ The app does not require a separate ReverbQSO cloud account. The maintainer does
 - Recording is off by default. If you start a clip or enable Always Record, received and transmitted audio is saved locally as WAV files with contact/time metadata. Recordings remain until you delete them. Exported copies are controlled by the destination you choose, such as Files, a cloud-drive provider, or another app.
 - The paired iPhone can send saved login information, favorites, recent stations, QSO state, and optional forwarded receive audio to Apple Watch using Apple's WatchConnectivity framework. The Watch saves its login in its own Keychain so it can operate independently. Remove saved logins separately on devices where they were stored; removing one device's copy does not revoke another device's copy.
 - The Mac menu-bar companion exchanges local QSO status and control commands with the Mac app. This local exchange is not sent to a ReverbQSO server.
-- Apple's system logs can contain diagnostic information such as callsigns, station/proxy addresses, route information, and connection errors. Debug/test builds can produce additional local diagnostics when explicitly enabled. There is no automatic upload to the maintainer. Review diagnostic files before sharing them.
+- Apple's system logs can contain diagnostic information such as callsigns, station/proxy addresses, route information, and connection errors. Normal app builds also keep a device-local `voice-diagnostic.log` cache with timestamped connection/PTT state transitions, audio route and device names, processing counters, and errors. This cache is written without an opt-in, is reset for a new connection, and rolls over at approximately 64 KiB; the operating system may remove cached files. It does not store audio recordings, and there is no automatic diagnostic upload to the maintainer. Debug/test builds can produce additional local diagnostics when explicitly enabled. Review diagnostic files before sharing them.
 
 Device backups, Keychain persistence, system logs, and exported files are also governed by your Apple/device settings and the relevant provider. Uninstalling an app does not necessarily remove its Keychain items or copies in backups.
 
