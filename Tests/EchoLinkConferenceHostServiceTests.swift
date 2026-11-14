@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import Combine
 import Foundation
 import XCTest
 @testable import ReverbQSO
@@ -97,28 +98,45 @@ final class EchoLinkConferenceHostServiceTests: XCTestCase {
     }
 
     func testDisconnectingLastPersonalPeerReleasesPTTDuringInputPreparation() async throws {
-        let preparing = expectation(description: "host preparing microphone")
-        var finishPreparation: CheckedContinuation<Bool, Never>?
-        let host = EchoLinkConferenceHostService(prepareCaptureInput: {
-            preparing.fulfill()
-            return await withCheckedContinuation { finishPreparation = $0 }
-        })
-        host.installSimulatorDemoIncomingCall()
-        await host.acceptPendingCall()
-        let caller = try XCTUnwrap(host.sessions.first)
-        host.setPTT(active: true)
-        await fulfillment(of: [preparing], timeout: 2)
+        for prepared in [false, true] {
+            let preparing = expectation(description: "host preparing microphone")
+            let preparationReturned = expectation(description: "cancelled preparation returned")
+            let released = expectation(description: "last personal peer released PTT")
+            var finishPreparation: CheckedContinuation<Bool, Never>?
+            var preparationWasCancelled: Bool?
+            let audioEngine = AudioEngine(hardwareEnabled: false)
+            let host = EchoLinkConferenceHostService(audioEngine: audioEngine, prepareCaptureInput: {
+                preparing.fulfill()
+                let result = await withCheckedContinuation { finishPreparation = $0 }
+                preparationWasCancelled = Task.isCancelled
+                preparationReturned.fulfill()
+                return result
+            })
+            host.installSimulatorDemoIncomingCall()
+            await host.acceptPendingCall()
+            let caller = try XCTUnwrap(host.sessions.first)
+            host.setPTT(active: true)
+            await fulfillment(of: [preparing], timeout: 2)
+            let releaseSubscription = host.$isTransmitting.first(where: { !$0 }).sink { _ in
+                released.fulfill()
+            }
+            defer { releaseSubscription.cancel() }
 
-        await host.disconnect(id: caller.id)
-        for _ in 0..<20 { await Task.yield() }
-        let wasStillTransmitting = host.isTransmitting
-        let staleTalker = host.talkerCallsign
-        // Complete the injected preparation so the test leaves no suspended task.
-        finishPreparation?.resume(returning: false)
-        await host.stop()
+            await host.disconnect(id: caller.id)
+            // Disconnect starts an asynchronous capture drain; wait for its state transition.
+            await fulfillment(of: [released], timeout: 2)
+            XCTAssertFalse(host.isTransmitting, "A finished personal QSO must release microphone preparation and PTT")
+            XCTAssertNil(host.talkerCallsign)
 
-        XCTAssertFalse(wasStillTransmitting, "A finished personal QSO must release microphone preparation and PTT")
-        XCTAssertNil(staleTalker)
+            finishPreparation?.resume(returning: prepared)
+            await fulfillment(of: [preparationReturned], timeout: 2)
+            XCTAssertEqual(preparationWasCancelled, true)
+            XCTAssertFalse(host.isTransmitting, "Late preparation must not restart a finished QSO")
+            XCTAssertNil(host.talkerCallsign)
+            XCTAssertNil(host.errorMessage)
+            XCTAssertFalse(audioEngine.isCapturing)
+            await host.stop()
+        }
     }
 
     func testLocalPTTSendsSpeexOnlyToCapablePeerAndFlushesOneShortPacket() async throws {
