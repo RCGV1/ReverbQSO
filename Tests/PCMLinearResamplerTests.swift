@@ -5,6 +5,31 @@ import XCTest
 
 final class PCMLinearResamplerTests: XCTestCase {
 
+    func testSingleSampleAndIrregularChunksMatchWholeSpeechBandConversion() {
+        for sourceRate in [16_000.0, 44_100.0, 48_000.0, 96_000.0] {
+            let input = sine(frequency: 2_800, sampleRate: sourceRate, duration: 0.1, amplitude: 8_000)
+            var referenceState = PCMLinearResamplerState()
+            let reference = PCMLinearResampler.resample(input, sourceSampleRate: sourceRate,
+                targetSampleRate: 8_000, state: &referenceState)
+            for chunkSizes in [[1], [1, 7, 2, 31, 3, 191]] {
+                var state = PCMLinearResamplerState()
+                var actual: [Int16] = []
+                var offset = 0
+                var chunk = 0
+                while offset < input.count {
+                    let end = min(input.count, offset + chunkSizes[chunk % chunkSizes.count])
+                    actual += PCMLinearResampler.resample(Array(input[offset..<end]),
+                        sourceSampleRate: sourceRate, targetSampleRate: 8_000, state: &state)
+                    offset = end
+                    chunk += 1
+                }
+                XCTAssertEqual(actual.count, reference.count, "\(sourceRate) / \(chunkSizes)")
+                let maximumError = zip(actual, reference).map { abs(Int($0) - Int($1)) }.max() ?? 0
+                XCTAssertLessThanOrEqual(maximumError, 1, "\(sourceRate) / \(chunkSizes)")
+            }
+        }
+    }
+
     private func rms(_ samples: [Int16], droppingPrefix count: Int = 0) -> Double {
         let measured = samples.dropFirst(min(count, samples.count))
         guard !measured.isEmpty else { return 0 }

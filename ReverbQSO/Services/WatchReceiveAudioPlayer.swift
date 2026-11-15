@@ -36,6 +36,7 @@ final class WatchReceiveAudioPlayer {
     private var playbackHistory = ReceivePlaybackHistory()
     private let receiveClock = ReceiveClockCompensator()
     private let receiveSpeech = ReceiveSpeechSmoother()
+    private let receiveNativeSpeech = ReceiveNativeConcealmentSmoother()
     private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
     private var playoutTask: Task<Void, Never>?
     private var playbackEndSampleTime: Int64 = 0
@@ -110,13 +111,24 @@ final class WatchReceiveAudioPlayer {
         if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
         lastReceiveArrival = now
         let playbackSamples: [Int16]
+        let queue = ReceivePlaybackQueue()
+        let rendererLead = remainingPlaybackSamples
+        let pendingSamples = receivePlayout.pendingSampleCount
         if let nativeConcealment {
             receiveSpeech.reset()
-            let retained = ReceivePlaybackQueue().retainedConcealment(nativeConcealment,
-                receivedSamples: samples.count, remainingSamples: remainingPlaybackSamples)
-            playbackSamples = Array(retained) + samples
+            let budget = queue.concealmentSampleBudget(
+                receivedSamples: samples.count, remainingSamples: rendererLead,
+                pendingSamples: pendingSamples)
+            playbackSamples = receiveNativeSpeech.process(samples, concealed: nativeConcealment,
+                metadata: parsed.metadata, now: now, maximumConcealmentSamples: budget)
         }
-        else { playbackSamples = receiveSpeech.process(samples, metadata: parsed.metadata, now: now) }
+        else {
+            receiveNativeSpeech.reset()
+            playbackSamples = receiveSpeech.process(samples, metadata: parsed.metadata, now: now,
+                maximumConcealmentSamples: queue.concealmentSampleBudget(
+                    receivedSamples: samples.count, remainingSamples: rendererLead,
+                    pendingSamples: pendingSamples))
+        }
         receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, now: now)
         schedulePlayout()
         return true
@@ -253,6 +265,7 @@ final class WatchReceiveAudioPlayer {
         playoutTask = nil
         receivePlayout.reset()
         receiveSpeech.reset()
+        receiveNativeSpeech.reset()
         receiveClock.reset()
         if isConfigured { playerNode.stop() }
     }

@@ -21,7 +21,8 @@ final class SpeexTransmitConnectionTests: XCTestCase {
             defer { relay.close() }
             let service = EchoLinkConnectionService(
                 relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
-                networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") })
+                networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
+                audioEngine: AudioEngine(hardwareEnabled: false))
             service.authenticatedCallsign = "N0TST"
             service.callAccessPolicyProvider = { CallAccessPolicy() }
             let server = Task {
@@ -82,7 +83,7 @@ final class SpeexTransmitConnectionTests: XCTestCase {
     func testOldSendCompletionCannotChangeReplacementSessionCounters() async throws {
         let relay = try BoundUDPSocket(localPort: 0)
         defer { relay.close() }
-        let engine = AudioEngine()
+        let engine = AudioEngine(hardwareEnabled: false)
         let service = EchoLinkConnectionService(
             relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
             networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },
@@ -126,7 +127,7 @@ final class SpeexTransmitConnectionTests: XCTestCase {
     }
 
     func testCapabilityIsStickyButResetsOnDisconnectAndMediaDoesNotEnableIt() async throws {
-        let engine = AudioEngine()
+        let engine = AudioEngine(hardwareEnabled: false)
         let service = EchoLinkConnectionService(audioEngine: engine)
         service.session = QSOSession(station: Station(callsign: "N0TST", ipAddress: "127.0.0.1"), state: .connected)
         XCTAssertEqual(service.transmitCodec, .gsm)
@@ -144,7 +145,7 @@ final class SpeexTransmitConnectionTests: XCTestCase {
     private func exerciseTransmission(speexPeer: Bool) async throws {
         let relay = try BoundUDPSocket(localPort: 0)
         defer { relay.close() }
-        let engine = AudioEngine()
+        let engine = AudioEngine(hardwareEnabled: false)
         let service = EchoLinkConnectionService(
             relayClientFactory: { EchoLinkRelayClient(host: "127.0.0.1", port: relay.actualLocalPort) },
             networkConfigurationProvider: { .init(mode: .relay, host: "", port: 8100, password: "") },

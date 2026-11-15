@@ -21,6 +21,7 @@ final class ReceiveClockCompensator {
     private var smoothedQueueError = 0.0
     private var fractionalOutputSamples = 0.0
     private var catchupCorrection = 0.0
+    private var sourceHistory: [Int16] = []
 
     private(set) var correctionRatio = 1.0
 
@@ -28,6 +29,7 @@ final class ReceiveClockCompensator {
     /// Reset explicitly at a new talk spurt; an underrun still needs correction.
     func process(_ samples: [Int16], queuedSamples: Int, targetQueuedSamples: Int = 640) -> [Int16] {
         guard !samples.isEmpty else { return [] }
+        defer { sourceHistory = Array(samples.suffix(17)) }
 
         let queueError = Double(max(0, queuedSamples) - max(0, targetQueuedSamples))
         let normalizedError = max(
@@ -45,38 +47,56 @@ final class ReceiveClockCompensator {
         }
         correctionRatio = 1 - (Self.maximumCorrection * smoothedQueueError) - catchupCorrection
 
+        let previousFraction = fractionalOutputSamples
         let exactOutputCount = Double(samples.count) * correctionRatio
             + fractionalOutputSamples
         let outputCount = max(1, Int(exactOutputCount.rounded(.down)))
         fractionalOutputSamples = exactOutputCount - Double(outputCount)
 
-        guard outputCount != samples.count, samples.count > 1, outputCount > 1 else {
+        guard samples.count > 1, outputCount > 1,
+              correctionRatio != 1 || previousFraction != 0 else {
             return samples
         }
 
-        let sourceSpan = Double(samples.count - 1)
-        let outputSpan = Double(outputCount - 1)
         let cutoff = outputCount < samples.count ? 0.95 * Double(outputCount) / Double(samples.count) : 1
         return (0..<outputCount).map { outputIndex in
-            // Preserve packet joins. The complete packet is already available,
-            // so the interpolation window adds no playback waiting or lookahead.
-            if outputIndex == 0 { return samples[0] }
-            if outputIndex == outputCount - 1 { return samples[samples.count - 1] }
-            let position = Double(outputIndex) * sourceSpan / outputSpan
+            // Invert cumulative output time even when this packet's count is
+            // unchanged, rather than restarting sample phase at its endpoints.
+            let position = (Double(outputIndex + 1) - previousFraction) / correctionRatio - 1
             let center = Int(position.rounded(.down))
+            // Keep the past-side kernel when future support is unavailable;
+            // narrowing both sides attenuates upper-speech-band packet edges.
+            let radius = 16.0
+            let truncated = center + 16 >= samples.count
             var sum = 0.0
             var weightSum = 0.0
-            for index in (center - 15)...(center + 16) {
+            var minimum = Int16.max
+            var maximum = Int16.min
+            for index in (center - 15)...min(center + 16, samples.count - 1) {
                 let distance = position - Double(index)
-                guard abs(distance) < 16 else { continue }
+                guard abs(distance) < radius else { continue }
                 let argument = Double.pi * cutoff * distance
                 let sinc = abs(argument) < 1e-12 ? 1 : sin(argument) / argument
-                let window = 0.5 * (1 + cos(Double.pi * distance / 16))
+                let window = 0.5 * (1 + cos(Double.pi * distance / radius))
                 let weight = cutoff * sinc * window
-                sum += Double(samples[min(samples.count - 1, max(0, index))]) * weight
+                let value: Int16
+                if index < 0, !sourceHistory.isEmpty {
+                    value = sourceHistory[max(0, sourceHistory.count + index)]
+                } else {
+                    value = samples[min(samples.count - 1, max(0, index))]
+                }
+                sum += Double(value) * weight
                 weightSum += weight
+                if truncated {
+                    minimum = min(minimum, value)
+                    maximum = max(maximum, value)
+                }
             }
-            return Int16(clamping: Int((sum / weightSum).rounded()))
+            // Missing future taps cannot constrain asymmetric-kernel overshoot.
+            // Bound only those outputs to the available support's PCM envelope.
+            let value = sum / weightSum
+            let bounded = truncated ? min(Double(maximum), max(Double(minimum), value)) : value
+            return Int16(clamping: Int(bounded.rounded()))
         }
     }
 
@@ -85,5 +105,6 @@ final class ReceiveClockCompensator {
         fractionalOutputSamples = 0
         catchupCorrection = 0
         correctionRatio = 1
+        sourceHistory.removeAll(keepingCapacity: true)
     }
 }

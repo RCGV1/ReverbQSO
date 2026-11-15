@@ -2,8 +2,194 @@
 import XCTest
 @testable import ReverbQSO
 final class ReceiveSpeechSmootherTests: XCTestCase {
-    private func metadata(_ sequence: UInt16, ssrc: UInt32 = 1, payload: UInt8 = 3) -> EchoLinkVoicePacketMetadata {
-        .init(payloadType: payload, sequenceNumber: sequence, timestamp: 0, ssrc: ssrc)
+    func testLossBurstReservesQueuedSpeechAndKeepsReturningPacketIntact() {
+        let smoother = ReceiveSpeechSmoother()
+        let queue = ReceivePlaybackQueue()
+        let packet = [Int16](repeating: 1000, count: 640)
+        _ = smoother.process(packet, metadata: metadata(1), now: 0)
+        let returning = [Int16](repeating: 2000, count: 640)
+        let budget = queue.concealmentSampleBudget(receivedSamples: returning.count,
+            remainingSamples: 320, pendingSamples: 160)
+        let recovered = smoother.process(returning, metadata: metadata(4), now: 0.24,
+            maximumConcealmentSamples: budget)
+        XCTAssertEqual(recovered.count, 800)
+        XCTAssertEqual(Array(recovered.suffix(560)), Array(returning.suffix(560)))
+        XCTAssertEqual(recovered.count + 320 + 160, queue.recoverySamples)
+        let next = smoother.process(returning, metadata: metadata(5), now: 0.32)
+        XCTAssertEqual(next, returning)
+    }
+
+    func testFullRealSpeechQueueDoesNotAcquireSyntheticDelay() {
+        let smoother = ReceiveSpeechSmoother()
+        let packet = [Int16](repeating: 1000, count: 640)
+        _ = smoother.process(packet, metadata: metadata(1), now: 0)
+        let recovered = smoother.process(packet, metadata: metadata(3), now: 0.16,
+            maximumConcealmentSamples: 0)
+        XCTAssertEqual(recovered.count, packet.count)
+        XCTAssertEqual(Array(recovered.suffix(560)), Array(packet.suffix(560)))
+    }
+
+    func testZeroRetainedLossPreservesExactlyContinuousMuLawVoicedPCM() {
+        for count in [160, 320, 640] {
+            let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: count)
+            XCTAssertEqual(packet.last, packet.first)
+            for budget in [Int.min, -1, 0] {
+                let context = "count=\(count) budget=\(budget)"
+                let smoother = ReceiveSpeechSmoother()
+                XCTAssertEqual(smoother.process(packet,
+                    metadata: metadata(100, payload: 0, timestamp: 0), now: 0), packet, context)
+
+                let recoveredPCM = smoother.process(packet,
+                    metadata: metadata(102, payload: 0, timestamp: UInt32(2 * count)),
+                    now: Double(2 * count) / 8_000, maximumConcealmentSamples: budget)
+
+                XCTAssertEqual(recoveredPCM.count, packet.count, context)
+                XCTAssertEqual(Array(recoveredPCM.prefix(80)), Array(packet.prefix(80)), context)
+                XCTAssertEqual(recoveredPCM, packet, context)
+                let next = packet.map { -$0 }
+                XCTAssertEqual(smoother.process(next,
+                    metadata: metadata(103, payload: 0, timestamp: UInt32(3 * count)),
+                    now: Double(3 * count) / 8_000), next, context)
+            }
+        }
+    }
+
+    func testRetainedLossWithExactlyMatchedFirstSampleKeepsExistingRecoveryBlend() {
+        for count in [160, 320, 640] {
+            let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: count)
+            let budgets: [Int?] = [nil, 1, 16, 32, count, 1_280, Int.max]
+            for budget in budgets {
+                let context = "count=\(count) budget=\(String(describing: budget))"
+                let reference = ReceivePacketLossConcealer()
+                reference.record(packet)
+                let gap = reference.conceal(sampleCount: count, maximumOutputSamples: budget ?? 1_280)
+                XCTAssertEqual(gap.count, min(count, budget ?? count), context)
+                guard let preceding = gap.last else {
+                    XCTFail("Expected retained concealment: \(context)")
+                    continue
+                }
+                var returning = packet
+                returning[0] = preceding
+                let expectedSpeech = ReceivePLCJoinFixture.heldSampleRecovery(returning,
+                    following: preceding)
+                XCTAssertNotEqual(expectedSpeech, returning, context)
+                let smoother = ReceiveSpeechSmoother()
+                XCTAssertEqual(smoother.process(packet,
+                    metadata: metadata(100, payload: 0, timestamp: 0), now: 0), packet, context)
+                let returningMetadata = metadata(102, payload: 0, timestamp: UInt32(2 * count))
+                let recoveredPCM: [Int16]
+                if let budget {
+                    recoveredPCM = smoother.process(returning, metadata: returningMetadata,
+                        now: Double(2 * count) / 8_000, maximumConcealmentSamples: budget)
+                } else {
+                    recoveredPCM = smoother.process(returning, metadata: returningMetadata,
+                        now: Double(2 * count) / 8_000)
+                }
+
+                XCTAssertEqual(recoveredPCM.count, gap.count + returning.count, context)
+                XCTAssertEqual(recoveredPCM, gap + expectedSpeech, context)
+                XCTAssertEqual(smoother.process(returning,
+                    metadata: metadata(103, payload: 0, timestamp: UInt32(3 * count)),
+                    now: Double(3 * count) / 8_000), returning, context)
+            }
+        }
+    }
+
+    func testZeroRetainedDiscontinuousMuLawJoinStillUsesExistingRecoveryBlend() {
+        for count in [160, 320, 640] {
+            let packet = ReceivePLCJoinFixture.voicedPacket(sampleCount: count)
+            let returning = packet.map { -$0 }
+            let expected = ReceivePLCJoinFixture.heldSampleRecovery(returning, following: packet.last!)
+            XCTAssertNotEqual(expected, returning)
+            for budget in [Int.min, -1, 0] {
+                let context = "count=\(count) budget=\(budget)"
+                let smoother = ReceiveSpeechSmoother()
+                XCTAssertEqual(smoother.process(packet,
+                    metadata: metadata(100, payload: 0, timestamp: 0), now: 0), packet, context)
+
+                let recoveredPCM = smoother.process(returning,
+                    metadata: metadata(102, payload: 0, timestamp: UInt32(2 * count)),
+                    now: Double(2 * count) / 8_000, maximumConcealmentSamples: budget)
+
+                XCTAssertEqual(recoveredPCM.count, returning.count, context)
+                XCTAssertEqual(recoveredPCM, expected, context)
+                XCTAssertLessThan(abs(Int(recoveredPCM[0]) - Int(packet.last!)),
+                    abs(Int(returning[0]) - Int(packet.last!)), context)
+                XCTAssertEqual(smoother.process(returning,
+                    metadata: metadata(103, payload: 0, timestamp: UInt32(3 * count)),
+                    now: Double(3 * count) / 8_000), returning, context)
+            }
+        }
+    }
+
+    func testBudgetedLossSplicesStayContinuousAcrossPhasesAndPolarities() {
+        for payload: UInt8 in [0, 3] {
+            for phase in [0.0, Double.pi / 2] {
+                for polarity in [-1.0, 1.0] {
+                    let packet: [Int16] = (0..<640).map { index in
+                        Int16((polarity * 16_000 * sin(2 * .pi * 100 * Double(index) / 8_000 + phase)).rounded())
+                    }
+                    for returning in [packet, packet.map { -$0 }] {
+                        for distance: UInt16 in [2, 3] {
+                            for budget in [Int.min, -1, 0, 1, 16, 160, 640, 1_280, Int.max] {
+                                let smoother = ReceiveSpeechSmoother()
+                                let context = "payload=\(payload) phase=\(phase) polarity=\(polarity) distance=\(distance) budget=\(budget)"
+                                let prior = smoother.process(packet, metadata: metadata(100, payload: payload), now: 0)
+                                let recovered = smoother.process(returning,
+                                    metadata: metadata(100 + distance, payload: payload), now: 0.01,
+                                    maximumConcealmentSamples: budget)
+                                let retainedCount = min(max(0, budget), Int(distance - 1) * packet.count)
+
+                                XCTAssertEqual(prior, packet)
+                                XCTAssertEqual(recovered.count, retainedCount + returning.count, context)
+                                XCTAssertLessThanOrEqual(abs(Int(prior.last!) - Int(recovered[0])), 1_000, context)
+                                let preceding = retainedCount > 0 ? recovered[retainedCount - 1] : prior.last!
+                                XCTAssertLessThanOrEqual(abs(Int(preceding) - Int(recovered[retainedCount])), 400, context)
+                                XCTAssertLessThanOrEqual(recovered.map { abs(Int($0)) }.max()!, 16_000, context)
+                                XCTAssertEqual(Array(recovered.dropFirst(retainedCount + 80)),
+                                    Array(returning.dropFirst(80)), context)
+                                XCTAssertEqual(smoother.process(returning,
+                                    metadata: metadata(101 + distance, payload: payload), now: 0.02), returning, context)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testFullAndOversizedBudgetsMatchDefaultRecoveryExactly() {
+        let packet = (0..<640).map { Int16(8_000 * sin(Double($0) * .pi / 40)) }
+        let returning = packet.map { -$0 }
+        let reference = ReceiveSpeechSmoother()
+        _ = reference.process(packet, metadata: metadata(100), now: 0)
+        let expected = reference.process(returning, metadata: metadata(103), now: 0.01)
+
+        for budget in [1_280, Int.max] {
+            let smoother = ReceiveSpeechSmoother()
+            _ = smoother.process(packet, metadata: metadata(100), now: 0)
+            XCTAssertEqual(smoother.process(returning, metadata: metadata(103), now: 0.01,
+                maximumConcealmentSamples: budget), expected)
+        }
+    }
+
+    func testCleanPacketsRemainBitIdenticalRegardlessOfConcealmentBudget() {
+        let packet = (0..<640).map { Int16(8_000 * sin(Double($0) * .pi / 40)) }
+        let returning = packet.map { -$0 }
+        for budget in [Int.min, -1, 0, 160, 640, 1_280, Int.max] {
+            let smoother = ReceiveSpeechSmoother()
+            XCTAssertEqual(smoother.process(packet, metadata: metadata(100), now: 0,
+                maximumConcealmentSamples: budget), packet)
+            XCTAssertEqual(smoother.process([], metadata: metadata(102), now: 0.005,
+                maximumConcealmentSamples: budget), [])
+            XCTAssertEqual(smoother.process(returning, metadata: metadata(101), now: 0.01,
+                maximumConcealmentSamples: budget), returning)
+        }
+    }
+
+    private func metadata(_ sequence: UInt16, ssrc: UInt32 = 1, payload: UInt8 = 3,
+                          timestamp: UInt32 = 0) -> EchoLinkVoicePacketMetadata {
+        .init(payloadType: payload, sequenceNumber: sequence, timestamp: timestamp, ssrc: ssrc)
     }
     func testConfirmedShortLossAddsOnlyMissingDuration() {
         let smoother = ReceiveSpeechSmoother()

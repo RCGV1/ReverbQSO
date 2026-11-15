@@ -136,7 +136,7 @@ actor EchoLinkRelayClient {
         let responseBuffer = LiveTransportMessageBuffer<EchoLinkRelayResponse>()
         responseBuffer.setOnConsumerCancellation { [weak self, weak responseBuffer] in
             guard let responseBuffer else { return }
-            Task { await self?.closeIfCurrentResponseBuffer(responseBuffer) }
+            Task { [weak self] in await self?.closeIfCurrentResponseBuffer(responseBuffer) }
         }
         self.responseBuffer = responseBuffer
         let stream = AsyncThrowingStream<EchoLinkRelayResponse, Error>(

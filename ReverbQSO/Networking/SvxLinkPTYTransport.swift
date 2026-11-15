@@ -78,12 +78,12 @@ actor SvxLinkPTYTransport {
 
         let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: stateQueue)
         source.setEventHandler { [weak self] in
-            Task { await self?.drainState() }
+            Task { [weak self] in await self?.drainState() }
         }
         source.setCancelHandler { Darwin.close(descriptor) }
         stateSource = source
         continuation.onTermination = { [weak self] _ in
-            Task { await self?.stopStates() }
+            Task { [weak self] in await self?.stopStates() }
         }
         source.resume()
         return stream

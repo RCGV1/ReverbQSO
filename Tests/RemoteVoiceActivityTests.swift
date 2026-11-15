@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class RemoteVoiceActivityTests: XCTestCase {
     func testSvxLinkRemoteOperatorRemainsTheTalkerWhenAudioArrives() async {
-        let service = EchoLinkConnectionService()
+        let service = EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "W6SLG-R", ipAddress: "127.0.0.1", type: .repeater),
             state: .connected
@@ -25,7 +25,7 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testSvxLinkRosterSwitchesOperatorAndThenClearsOnIdle() async {
-        let service = EchoLinkConnectionService()
+        let service = EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "W6SLG-R", ipAddress: "127.0.0.1", type: .repeater),
             state: .connected
@@ -53,7 +53,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testParticipantTalkingClearsWhenReceiveActivityExpires() async throws {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL-R", ipAddress: "127.0.0.1"),
             state: .connected
@@ -70,7 +71,7 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testRosterRefreshDoesNotKeepStatusOnlyTalkerStuck() async throws {
-        let service = EchoLinkConnectionService()
+        let service = EchoLinkConnectionService(audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL-R", ipAddress: "127.0.0.1"),
             state: .connected
@@ -90,7 +91,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testContinuedVoiceKeepsTalkingUntilTheLatestBurstExpires() async throws {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(200))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(200),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL-R", ipAddress: "127.0.0.1"),
             state: .connected
@@ -110,7 +112,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testAcceptedRemoteVoiceBlocksPTTUntilActivityExpires() async {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),
             state: .connected
@@ -130,7 +133,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testVoiceObservedDuringLocalPTTDoesNotLockNextTransmission() {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),
             state: .connected,
@@ -143,7 +147,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testMutedIncomingVoiceStillBlocksPTT() async {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),
             state: .connected,
@@ -162,7 +167,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testMutedSilentPacketsDoNotBlockPTT() async {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),
             state: .connected,
@@ -178,7 +184,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testSilentIncomingPacketsDoNotHoldReceiveBusy() async {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .milliseconds(40),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),
             state: .connected
@@ -195,7 +202,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testAudibleIncomingPacketBlocksPTT() async {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),
             state: .connected
@@ -210,7 +218,8 @@ final class RemoteVoiceActivityTests: XCTestCase {
     }
 
     func testViewModelPublishesServiceTransmitAvailability() async {
-        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1))
+        let service = EchoLinkConnectionService(remoteVoiceActivityHold: .seconds(1),
+                                              audioEngine: AudioEngine(hardwareEnabled: false))
         let viewModel = QSOViewModel(connectionService: service)
         service.session = QSOSession(
             station: Station(callsign: "N0CALL", ipAddress: "127.0.0.1"),

@@ -482,10 +482,12 @@ final class LiveAudioRoundTripTests: XCTestCase {
         let voice = Array(UnsafeBufferPointer(start: try XCTUnwrap(buffer.floatChannelData?[0]),
                                              count: min(Int(buffer.frameLength), 480_000)))
         var source = [Float](repeating: 0, count: 9_600)
-        source += (0..<14_400).map { n in
+        let calibration: [Float] = (0..<14_400).map { n -> Float in
             let t = Double(n) / 48_000
-            return Float(0.15 * sin(2 * .pi * (400 * t + 1_000 * t * t)))
+            let phase = 2.0 * Double.pi * (400.0 * t + 1_000.0 * t * t)
+            return Float(0.15 * sin(phase))
         }
+        source += calibration
         source += voice
         source += [Float](repeating: 0, count: 19_200)
         // Full 80 ms codec packets avoid ambiguous partial-frame padding.

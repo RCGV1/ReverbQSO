@@ -3,6 +3,17 @@ import XCTest
 @testable import ReverbQSO
 
 final class ReceiveAudioPlaybackStateTests: XCTestCase {
+    func testPendingDecodedSpeechAlsoReservesConcealmentCapacity() {
+        let queue = ReceivePlaybackQueue()
+        let synthetic = (0..<1280).map(Int16.init)
+        XCTAssertEqual(Array(queue.retainedConcealment(synthetic, receivedSamples: 640,
+            remainingSamples: 160, pendingSamples: 320)), Array(synthetic.suffix(160)))
+        XCTAssertTrue(queue.retainedConcealment(synthetic, receivedSamples: 640,
+            remainingSamples: 0, pendingSamples: 640).isEmpty)
+        XCTAssertEqual(queue.concealmentSampleBudget(receivedSamples: 640,
+            remainingSamples: Int.max, pendingSamples: Int.max), 0)
+    }
+
     func testConcealmentKeepsRecentSyntheticSpeechWithoutCrowdingReceivedVoice() {
         let queue = ReceivePlaybackQueue()
         let concealed = (0..<1_280).map(Int16.init)
@@ -39,6 +50,85 @@ final class ReceiveAudioPlaybackStateTests: XCTestCase {
         XCTAssertEqual(gain.process([1_000])[0], Float(1_000) / 32768 * 2.5, accuracy: 0.0001)
         gain.reset()
         XCTAssertEqual(gain.process([1_000])[0], Float(1_000) / 32768 * 2.5, accuracy: 0.0001)
+    }
+
+    func testLaterLoudPeakDoesNotCreateAnEarlierPacketBoundaryClick() {
+        var gain = ReceivePlaybackGain()
+        let quiet = gainTone { _ in 9_000 }
+        let rising = gainTone { index in
+            9_000 + 21_000 * min(1, max(0, Double(index - 240) / 160))
+        }
+        let previous = gain.process(quiet)
+        let output = gain.process(rising)
+        let step = abs(output[0] - previous[previous.count - 1])
+
+        print("RECEIVE_GAIN_ATTACK_JOIN step=\(step)")
+        XCTAssertLessThan(step, 0.005, "A later peak must not turn a continuous join into a click")
+        XCTAssertEqual(output[0], Float(rising[0]) / 32768 * 2.5, accuracy: 0.000_001)
+        XCTAssertEqual(output.count, rising.count)
+        XCTAssertTrue(output.allSatisfy { $0.isFinite && abs($0) <= 0.950_001 })
+    }
+
+    func testGainRecoveryDoesNotStepAtTheNextQuietPacketBoundary() {
+        var gain = ReceivePlaybackGain()
+        let falling = gainTone { index in
+            30_000 - 21_000 * min(1, max(0, Double(index - 160) / 160))
+        }
+        let quiet = gainTone { _ in 9_000 }
+        let previous = gain.process(falling)
+        let output = gain.process(quiet)
+        let step = abs(output[0] - previous[previous.count - 1])
+
+        print("RECEIVE_GAIN_RELEASE_JOIN step=\(step)")
+        XCTAssertLessThan(step, 0.005, "Release must not apply 80 ms of gain recovery at once")
+        XCTAssertEqual(output.count, quiet.count)
+        XCTAssertTrue(output.allSatisfy { $0.isFinite && abs($0) <= 0.950_001 })
+    }
+
+    func testGainReleaseIsIndependentOfLegalPacketPartitioning() {
+        let quiet = [Int16](repeating: 9_000, count: 6_400)
+        var referenceGain = ReceivePlaybackGain()
+        _ = referenceGain.process([Int16](repeating: 30_000, count: 640))
+        let reference = referenceGain.process(quiet)
+
+        for packetSize in [80, 160, 320, 640] {
+            var gain = ReceivePlaybackGain()
+            _ = gain.process([Int16](repeating: 30_000, count: 640))
+            var output: [Float] = []
+            for offset in stride(from: 0, to: quiet.count, by: packetSize) {
+                output += gain.process(Array(quiet[offset..<min(offset + packetSize, quiet.count)]))
+            }
+            XCTAssertEqual(output.count, reference.count)
+            let error = zip(output, reference).map { abs($0 - $1) }.max() ?? 0
+            print("RECEIVE_GAIN_PARTITION size=\(packetSize) maxError=\(error)")
+            XCTAssertLessThanOrEqual(error, 0.000_001,
+                "The same speech must not have different gain envelopes at different packet sizes")
+        }
+    }
+
+    private func gainTone(amplitude: (Int) -> Double) -> [Int16] {
+        (0..<640).map { index in
+            Int16((amplitude(index) * cos(2 * .pi * 100 * Double(index) / 8_000)).rounded())
+        }
+    }
+
+    func testGainTransitionsStayFiniteAndPeakBoundedAcrossBufferSizes() {
+        var gain = ReceivePlaybackGain()
+        for count in [1, 2, 7, 32, 80, 160, 320, 640, 1_280, 1_920, 1_930] {
+            for seed in 0..<12 {
+                let samples = (0..<count).map { index -> Int16 in
+                    if seed == 0 { return 0 }
+                    if seed == 1 { return index.isMultiple(of: 2) ? .min : .max }
+                    if seed == 2 { return index == count - 1 ? .max : 9_000 }
+                    return Int16(truncatingIfNeeded: index * 7_919 + seed * 12_347)
+                }
+                let output = gain.process(samples)
+                XCTAssertEqual(output.count, samples.count)
+                XCTAssertTrue(output.allSatisfy { $0.isFinite && abs($0) <= 0.950_001 },
+                    "Peak protection failed for count=\(count), seed=\(seed)")
+                XCTAssertEqual(gain.process([]), [])
+            }
+        }
     }
 
     func testPlaybackBacklogIsBoundedAndStaleCompletionsCannotClearNewAudio() {

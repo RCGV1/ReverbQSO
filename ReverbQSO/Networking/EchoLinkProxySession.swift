@@ -86,7 +86,7 @@ actor EchoLinkProxySession {
         let buffer = LiveTransportMessageBuffer<EchoLinkProxyMessage>()
         buffer.setOnConsumerCancellation { [weak self, weak buffer] in
             buffer?.finish(throwing: CancellationError())
-            Task { await self?.releaseUDPConsumer(consumerID) }
+            Task { [weak self] in await self?.releaseUDPConsumer(consumerID) }
         }
         udpBuffer = buffer
         if let terminalError { buffer.finish(throwing: terminalError) }

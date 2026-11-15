@@ -592,7 +592,8 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Audio Components
 
-    private var engine = AVAudioEngine()
+    private let hardwareEnabled: Bool
+    private lazy var engine = AVAudioEngine()
 #if targetEnvironment(macCatalyst)
     private var receiveNativeMixer: AVAudioMixerNode?
     private var receivePeakLimiter: AVAudioUnitEffect?
@@ -625,6 +626,7 @@ final class AudioEngine: ObservableObject {
 
     func setReceiveOutputMuted(_ muted: Bool) {
         receiveOutputMuted = muted
+        guard hardwareEnabled else { return }
         playerNode.volume = muted ? 0 : 1
     }
 #if targetEnvironment(macCatalyst)
@@ -635,7 +637,7 @@ final class AudioEngine: ObservableObject {
 
     private var microphoneNode: AVAudioInputNode { engine.inputNode }
 
-    private var playerNode = AVAudioPlayerNode()
+    private lazy var playerNode = AVAudioPlayerNode()
     private var diagnosticsPlaybackOverflowDrops = 0
     private var diagnosticsPlaybackDiscardBaseline = 0
     private var diagnosticsPlaybackRecoveryBaseline = 0
@@ -646,9 +648,10 @@ final class AudioEngine: ObservableObject {
          diagnosticsPlaybackOverflowDrops + max(0, receivePlayout.discardedPackets - diagnosticsPlaybackDiscardBaseline),
          max(0, receivePlayout.recoveryCount - diagnosticsPlaybackRecoveryBaseline),
          100 / receiveClock.correctionRatio,
-         AVAudioSession.sharedInstance().outputLatency * 1000)
+         hardwareEnabled ? AVAudioSession.sharedInstance().outputLatency * 1000 : 0)
     }
-#if DEBUG
+// REVERB_TESTING exposes audit hooks without enabling DEBUG runtime paths.
+#if DEBUG || REVERB_TESTING
     private var auditScheduledSamples = 0
     private var auditTrimCount = 0
     private var auditTrimmedSamples = 0
@@ -668,7 +671,7 @@ final class AudioEngine: ObservableObject {
          "playoutMaximumWaitMilliseconds": Int(receivePlayout.maximumObservedWait * 1000),
          "concealmentSkippedSamples": auditConcealmentSkippedSamples,
          "remainingSamples": remainingPlaybackSamples, "running": isRunning ? 1 : 0,
-         "actualEngineRunning": engine.isRunning ? 1 : 0,
+         "actualEngineRunning": hardwareEnabled && engine.isRunning ? 1 : 0,
          "timelineResets": auditTimelineResetCount, "graphReplacements": auditGraphReplacementCount,
          "maximumQueuedSamples": playbackQueue.maximumSamples]
 #if targetEnvironment(macCatalyst)
@@ -707,7 +710,8 @@ final class AudioEngine: ObservableObject {
     }
 
     func beginAuditRenderCapture(url: URL) throws -> AudioAuditRenderCapture {
-        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1", engine.isRunning else {
+        guard hardwareEnabled,
+              ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1", engine.isRunning else {
             throw CocoaError(.featureUnsupported)
         }
         auditScheduledSamples = 0
@@ -723,7 +727,7 @@ final class AudioEngine: ObservableObject {
     }
 
     func endAuditRenderCapture(_ capture: AudioAuditRenderCapture) async -> [String: Double] {
-        engine.mainMixerNode.removeTap(onBus: 0)
+        if hardwareEnabled { engine.mainMixerNode.removeTap(onBus: 0) }
         return await capture.finish()
     }
 #endif
@@ -744,7 +748,7 @@ final class AudioEngine: ObservableObject {
     private var rejectedCaptureStreamEpoch: UInt64?
     private var captureDSPResults: [UInt64: (CaptureDSPProcessor.Result, Int, Bool)] = [:]
     private var prepareCaptureTask: Task<Void, Never>?
-    private var inputPreparationGeneration: UInt64 = 0
+    private var inputPreparation = CapturePreparationOwnership()
     private var playbackDesired = false
     private var isAudioInterrupted = false
     private var automaticPlaybackAllowed = true
@@ -779,7 +783,9 @@ final class AudioEngine: ObservableObject {
     private var hasInstalledSessionObservers = false
     private var routePreferenceSubscription: AnyCancellable?
 
-    init() {
+    /// Disable hardware I/O for protocol tests while retaining real codec processing.
+    init(hardwareEnabled: Bool = true) {
+        self.hardwareEnabled = hardwareEnabled
         routePreferenceSubscription = NotificationCenter.default.publisher(for: AudioRoutePreferences.didChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reloadRoutePreferences() }
@@ -791,7 +797,8 @@ final class AudioEngine: ObservableObject {
     }
 
     private func replaceEngineAfterSessionActivation() {
-#if DEBUG
+        guard hardwareEnabled else { return }
+#if DEBUG || REVERB_TESTING
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditGraphReplacementCount += 1 }
 #endif
         recordEngineAudit("graph-replacement-begin")
@@ -857,6 +864,7 @@ final class AudioEngine: ObservableObject {
     private var playbackHistory = ReceivePlaybackHistory()
     private let receiveClock = ReceiveClockCompensator()
     private let receiveSpeech = ReceiveSpeechSmoother()
+    private let receiveNativeSpeech = ReceiveNativeConcealmentSmoother()
     private var receivePlayout = ReceiveAdaptivePlayoutBuffer()
     private var receivePlayoutTask: Task<Void, Never>?
     private var receivePlayoutGeneration: UInt64 = 0
@@ -865,8 +873,8 @@ final class AudioEngine: ObservableObject {
 
     // State transitions only; keep packet scheduling diagnostics separate.
     private func recordEngineAudit(_ event: String) {
-#if DEBUG
-        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
+#if DEBUG || REVERB_TESTING
+        guard hardwareEnabled, ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
         let row = ["time": String(ProcessInfo.processInfo.systemUptime), "event": event,
                    "engine": String(describing: ObjectIdentifier(engine)),
                    "actualRunning": String(engine.isRunning), "publishedRunning": String(isRunning),
@@ -879,8 +887,8 @@ final class AudioEngine: ObservableObject {
     }
 
     private func recordAudioFailure(_ error: Error, operation: String) {
-#if DEBUG
-        guard ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
+#if DEBUG || REVERB_TESTING
+        guard hardwareEnabled, ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" else { return }
         let failure = error as NSError
         let session = AVAudioSession.sharedInstance()
 #if os(watchOS)
@@ -909,6 +917,8 @@ final class AudioEngine: ObservableObject {
         prepareCaptureTask?.cancel()
         captureRecoveryTask?.cancel()
         audioDeviceRecoveryTask?.cancel()
+        outputLevelDecayTask?.cancel()
+        receivePlayoutTask?.cancel()
         for token in sessionObservers {
             NotificationCenter.default.removeObserver(token.rawValue)
         }
@@ -916,6 +926,7 @@ final class AudioEngine: ObservableObject {
 
     /// Start playback/capture engine so received audio can be rendered even when not transmitting.
     func startPlayback(rebuildGraph: Bool = false) {
+        guard hardwareEnabled else { return }
         let isNewPlaybackRequest = !playbackDesired
         playbackDesired = true
         automaticPlaybackAllowed = true
@@ -983,17 +994,19 @@ final class AudioEngine: ObservableObject {
     /// gesture. Automatic preparation never presents a permission prompt.
     /// RX remains available if permission or the input route fails.
     func prepareCaptureInput(requestPermission: Bool = true) async -> Bool {
+        guard hardwareEnabled else { return false }
 #if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
         return false
 #else
         guard !isCaptureReady else { return true }
         guard requestPermission || MicrophoneAccess.status == .granted else { return false }
-        guard !isPreparingCapture else { return false }
-        let preparationGeneration = inputPreparationGeneration
-        isPreparingCapture = true
+        guard let preparationGeneration = inputPreparation.begin() else { return false }
+        isPreparingCapture = inputPreparation.isPreparing
         capturePreparationFailed = false
         defer {
-            if inputPreparationGeneration == preparationGeneration { isPreparingCapture = false }
+            if inputPreparation.finish(generation: preparationGeneration) {
+                isPreparingCapture = inputPreparation.isPreparing
+            }
         }
 
         if !requestPermission,
@@ -1008,31 +1021,31 @@ final class AudioEngine: ObservableObject {
 
         if tapInstalled && engine.isRunning {
             for _ in 0..<20 {
-                guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+                guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
                 if isCaptureReady { return true }
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
         for attempt in 0..<3 {
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             if tapInstalled { stopCaptureTap(preservingIntent: false) }
             let installed = await startCapture(requestPermission: requestPermission)
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             captureRequested = false
             if installed {
                 for _ in 0..<20 {
-                    guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+                    guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
                     if isCaptureReady { return true }
                     try? await Task.sleep(for: .milliseconds(50))
                 }
             }
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             VoiceDiagnosticLog.record("capture preparation attempt=\(attempt + 1) inputCallback=\(isCaptureReady)")
             stopCaptureTap(preservingIntent: false)
-            guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+            guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
             try? await Task.sleep(for: .milliseconds(500))
         }
-        guard !Task.isCancelled, inputPreparationGeneration == preparationGeneration else { return false }
+        guard !Task.isCancelled, inputPreparation.isCurrent(preparationGeneration) else { return false }
         capturePreparationFailed = true
         return false
 #endif
@@ -1040,6 +1053,7 @@ final class AudioEngine: ObservableObject {
 
     /// Start capturing audio from the microphone (PTT pressed).
     func startCapture(requestPermission: Bool = true) async -> Bool {
+        guard hardwareEnabled else { return false }
         guard !isAudioInterrupted, !isDeviceRecovering else { return false }
 #if os(iOS) && !targetEnvironment(simulator)
         if tapInstalled && isCaptureReady && !isPreparingCapture {
@@ -1347,6 +1361,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func restoreHighQualityReceiveProfileIfNeeded() {
+        guard hardwareEnabled else { return }
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         guard playbackDesired,
               audioSessionRoutePolicy.profile(captureRequested: false) == .highQualityReceive else { return }
@@ -1380,10 +1395,10 @@ final class AudioEngine: ObservableObject {
         audioDeviceRecoveryTask = nil
         isDeviceRecovering = false
         rxWindowActive = false
-        inputPreparationGeneration &+= 1
+        inputPreparation.reset()
         prepareCaptureTask?.cancel()
         prepareCaptureTask = nil
-        isPreparingCapture = false
+        isPreparingCapture = inputPreparation.isPreparing
         isCaptureReady = false
         capturePreparationFailed = false
         invalidateCaptureStart(preservingIntent: false)
@@ -1393,11 +1408,13 @@ final class AudioEngine: ObservableObject {
         nativeMicrophoneCapture = nil
 #endif
         stopPlaybackTimeline(reason: "stop-all")
-        engine.stop()
-        if engine.attachedNodes.contains(playerNode) {
-            engine.detach(playerNode)
+        if hardwareEnabled {
+            engine.stop()
+            if engine.attachedNodes.contains(playerNode) {
+                engine.detach(playerNode)
+            }
+            detachReceivePeakProtection()
         }
-        detachReceivePeakProtection()
         sessionObserverGeneration &+= 1
         for token in sessionObservers {
             NotificationCenter.default.removeObserver(token.rawValue)
@@ -1406,14 +1423,16 @@ final class AudioEngine: ObservableObject {
         hasInstalledSessionObservers = false
         // Discard the stopped I/O graph without touching a fresh input node.
         // The next connection builds its hardware graph after activation.
-        engine = AVAudioEngine()
-        playerNode = AVAudioPlayerNode()
-        playerNode.volume = receiveOutputMuted ? 0 : 1
+        if hardwareEnabled {
+            engine = AVAudioEngine()
+            playerNode = AVAudioPlayerNode()
+            playerNode.volume = receiveOutputMuted ? 0 : 1
+        }
         isConfigured = false
         isRunning = false
         // Deactivate only after taps and I/O are stopped. The shared owner
         // coordinator leaves the session active for another live radio.
-        RecordingAudioSession.shared.endLiveAudio(owner: self)
+        if hardwareEnabled { RecordingAudioSession.shared.endLiveAudio(owner: self) }
         outputLevelDecayTask?.cancel()
         outputLevelDecayTask = nil
         outputLevel = 0
@@ -1466,6 +1485,12 @@ final class AudioEngine: ObservableObject {
         guard !samples.isEmpty else { return }
         onRecordingPCM?(samples)
         guard !isAudioInterrupted, automaticPlaybackAllowed, !isDeviceRecovering else { return }
+        if !hardwareEnabled {
+            // Protocol activity is based on decoded samples, not a pretend render clock.
+            accumulateRXWindow(samples: samples)
+            recordOutputLevel(from: samples)
+            return
+        }
         if !isRunning { startPlayback() }
         guard isRunning else { return }
         accumulateRXWindow(samples: samples)
@@ -1475,15 +1500,25 @@ final class AudioEngine: ObservableObject {
         if now - lastReceiveArrival >= 0.5 { receiveClock.reset() }
         lastReceiveArrival = now
         let playbackSamples: [Int16]
+        let rendererLead = remainingPlaybackSamples
+        let pendingSamples = receivePlayout.pendingSampleCount
         if let nativeConcealment {
             receiveSpeech.reset()
-            let retained = playbackQueue.retainedConcealment(nativeConcealment,
-                receivedSamples: samples.count, remainingSamples: remainingPlaybackSamples)
-#if DEBUG
-            auditConcealmentSkippedSamples += nativeConcealment.count - retained.count
+            let budget = playbackQueue.concealmentSampleBudget(
+                receivedSamples: samples.count, remainingSamples: rendererLead,
+                pendingSamples: pendingSamples)
+#if DEBUG || REVERB_TESTING
+            auditConcealmentSkippedSamples += nativeConcealment.count - min(nativeConcealment.count, budget)
 #endif
-            playbackSamples = Array(retained) + samples
-        } else { playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now) }
+            playbackSamples = receiveNativeSpeech.process(samples, concealed: nativeConcealment,
+                metadata: metadata, now: now, maximumConcealmentSamples: budget)
+        } else {
+            receiveNativeSpeech.reset()
+            playbackSamples = receiveSpeech.process(samples, metadata: metadata, now: now,
+                maximumConcealmentSamples: playbackQueue.concealmentSampleBudget(
+                    receivedSamples: samples.count, remainingSamples: rendererLead,
+                    pendingSamples: pendingSamples))
+        }
         drainReceivePlayout()
         receivePlayout.enqueue(playbackSamples, networkSampleCount: samples.count, now: now,
                               rendererLeadSamples: remainingPlaybackSamples)
@@ -1528,6 +1563,7 @@ final class AudioEngine: ObservableObject {
         receivePlayoutTask = nil
         receivePlayout.reset()
         receiveSpeech.reset()
+        receiveNativeSpeech.reset()
         receiveClock.reset()
     }
 
@@ -1554,6 +1590,7 @@ final class AudioEngine: ObservableObject {
     // MARK: - Private Setup
 
     private func configureAudioSession() throws {
+        guard hardwareEnabled else { return }
         reloadRoutePreferences()
         let session = AVAudioSession.sharedInstance()
 #if os(watchOS)
@@ -1628,6 +1665,7 @@ final class AudioEngine: ObservableObject {
     func setOutputPreference(_ preference: AudioOutputPreference) {
         outputPreference = preference
         AudioRoutePreferences.save(output: preference)
+        guard hardwareEnabled else { return }
 #if !os(watchOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
         let session = AVAudioSession.sharedInstance()
         audioSessionRoutePolicy.observeReceiveRoute(
@@ -1679,6 +1717,7 @@ final class AudioEngine: ObservableObject {
 #endif
         selectedInputDeviceID = id
         AudioRoutePreferences.save(inputUID: id)
+        guard hardwareEnabled else { return }
 #if os(iOS) && !os(watchOS) && !targetEnvironment(simulator)
         let session = AVAudioSession.sharedInstance()
         refreshAvailableInputDevices(session: session)
@@ -1746,6 +1785,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func ensureSessionReadyForCapture() throws {
+        guard hardwareEnabled else { return }
 #if targetEnvironment(simulator)
         return
 #else
@@ -1767,7 +1807,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func setupEngineIfNeeded() throws {
-        guard !isConfigured else { return }
+        guard hardwareEnabled, !isConfigured else { return }
 
         engine.attach(playerNode)
         defer {
@@ -1883,7 +1923,7 @@ final class AudioEngine: ObservableObject {
         let start = freshTimelineStart ?? max(playbackEndSampleTime, max(0, renderedSnapshot ?? 0))
         let scheduledBuffer = buffer
         let scheduledSamples = incomingSamples
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         let auditEventIndex = auditScheduleEvents.count
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" {
             auditScheduledSamples += incomingCount
@@ -1896,7 +1936,7 @@ final class AudioEngine: ObservableObject {
             diagnosticsPlaybackOverflowDrops += 1
             // Preserve scheduled speech and the native render clock. Restarting
             // the player here adds preroll and can cascade into further losses.
-#if DEBUG
+#if DEBUG || REVERB_TESTING
             auditTrimCount += 1
             auditOverflowDropCount += 1
             auditTrimmedSamples += incomingCount
@@ -1916,7 +1956,7 @@ final class AudioEngine: ObservableObject {
         let count = scheduledSamples.count
         playbackEndSampleTime = start + Int64(count)
         playbackHistory.append(scheduledSamples, startingAt: start)
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         if auditScheduleEvents.count > auditEventIndex {
             auditScheduleEvents[auditEventIndex]["scheduledCount"] = Double(count)
             auditScheduleEvents[auditEventIndex]["scheduledStart"] = Double(start)
@@ -1948,7 +1988,7 @@ final class AudioEngine: ObservableObject {
     private var renderedPlaybackSampleTime: Int64? {
         // Activation can fail before the player is attached. Native player
         // timeline APIs require an engine and raise an Objective-C exception.
-        guard engine.attachedNodes.contains(playerNode) else { return nil }
+        guard hardwareEnabled, engine.attachedNodes.contains(playerNode) else { return nil }
         guard let renderTime = playerNode.lastRenderTime,
               renderTime.isSampleTimeValid || renderTime.isHostTimeValid,
               let playerTime = playerNode.playerTime(forNodeTime: renderTime),
@@ -1960,8 +2000,16 @@ final class AudioEngine: ObservableObject {
         playbackHistory.remainingSamples(renderedSampleTime: renderedPlaybackSampleTime)
     }
 
+    /// Confirmed native output lead available to recover a reordered packet.
+    /// Pending decoded speech and output preroll are not guaranteed coverage.
+    var receiveReorderHeadroomSamples: Int {
+        guard hardwareEnabled, isRunning, engine.isRunning, playerNode.isPlaying, !receiveOutputMuted,
+              let rendered = renderedPlaybackSampleTime, rendered >= 0 else { return 0 }
+        return playbackHistory.remainingSamples(renderedSampleTime: rendered)
+    }
+
     private func trimPlaybackTimeline(reason: String = "backlog-trim") {
-#if DEBUG
+#if DEBUG || REVERB_TESTING
         if ProcessInfo.processInfo.environment["ECHOLINK_RUN_AUDIO_AUDIT"] == "1" { auditTimelineResetCount += 1 }
 #endif
         recordEngineAudit("timeline-reset reason=\(reason)")
@@ -1969,7 +2017,7 @@ final class AudioEngine: ObservableObject {
         playbackHistory.reset()
         playbackEndSampleTime = 0
         receiveClock.reset()
-        if engine.attachedNodes.contains(playerNode) { playerNode.stop() }
+        if hardwareEnabled && engine.attachedNodes.contains(playerNode) { playerNode.stop() }
     }
 
     private func stopPlaybackTimeline(reason: String = "stop-playback") {
@@ -1988,6 +2036,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func recordFirstRXDiagnostics(samples: [Int16], codec: String) {
+        guard hardwareEnabled else { return }
         let session = AVAudioSession.sharedInstance()
         let route = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
         let peak = samples.reduce(0) { max($0, abs(Int($1))) }
@@ -2641,20 +2690,19 @@ final class AudioEngine: ObservableObject {
     }
 
     private func scheduleInputPreparation() {
+        guard hardwareEnabled else { return }
 #if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
-        guard prepareCaptureTask == nil else { return }
-        inputPreparationGeneration &+= 1
-        let generation = inputPreparationGeneration
+        guard let generation = inputPreparation.schedule(hasPendingTask: prepareCaptureTask != nil) else { return }
         prepareCaptureTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
             _ = await self.prepareCaptureInput(requestPermission: false)
-            if self.inputPreparationGeneration == generation { self.prepareCaptureTask = nil }
+            if self.inputPreparation.isCurrent(generation) { self.prepareCaptureTask = nil }
         }
 #endif
     }
 
     private func installAudioSessionObserversIfNeeded() {
-        guard !hasInstalledSessionObservers else { return }
+        guard hardwareEnabled, !hasInstalledSessionObservers else { return }
         sessionObserverGeneration &+= 1
         let observerGeneration = sessionObserverGeneration
         let center = NotificationCenter.default

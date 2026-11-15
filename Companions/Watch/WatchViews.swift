@@ -500,6 +500,11 @@ private struct WatchSettingsView: View {
                     CallRestrictionsView(demo: model.connectionService.isLocalDemoMode)
                 }
             }
+            Section("About") {
+                NavigationLink("Licenses") {
+                    LicensesView()
+                }
+            }
             if model.isWatchLoggedIn {
                 Button("Sign Out", role: .destructive) {
                     Task { await model.signOut() }

@@ -9,8 +9,8 @@ settings:
     PRODUCT_MODULE_NAME: ReverbQSO
     SWIFT_VERSION: 6.0
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "45"
+    MARKETING_VERSION: "1.0.1"
+    CURRENT_PROJECT_VERSION: "50"
     DEVELOPMENT_TEAM: FRFXFRT624
     INFOPLIST_FILE: ReverbQSO/Resources/Info.plist
     SWIFT_OBJC_BRIDGING_HEADER: ReverbQSO/App/ReverbQSO-Bridging-Header.h
@@ -94,12 +94,15 @@ targets:
       - path: ReverbQSO/Features/Recent/RecordingsView.swift
       - path: Companions/Watch/PrivacyInfo.xcprivacy
       - path: ReverbQSO/Features/Settings/CallRestrictionsView.swift
+      - path: ReverbQSO/Features/Settings/LicensesView.swift
       - path: ReverbQSO/Features/Settings/RecordingSettingsRows.swift
       - path: Companions/Watch
         excludes:
           - WatchInfo.plist
           - PrivacyInfo.xcprivacy
       - path: ReverbQSO/Resources/Audio
+      - path: ReverbQSO/Resources/Legal
+        buildPhase: resources
       - path: ReverbQSO/Models
         excludes:
           - RecentConnection.swift

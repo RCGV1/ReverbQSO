@@ -8,7 +8,8 @@ final class ReceiveSpeechSmoother {
     private var previous: EchoLinkVoicePacketMetadata?
     private var previousCount = 0
     private var lastArrival = -Double.infinity
-    func process(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata?, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [Int16] {
+    func process(_ samples: [Int16], metadata: EchoLinkVoicePacketMetadata?, now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+                 maximumConcealmentSamples: Int = 1280) -> [Int16] {
         guard !samples.isEmpty else { return [] }
         var gap: [Int16] = []
         if let metadata, let previous, metadata.ssrc == previous.ssrc,
@@ -21,7 +22,9 @@ final class ReceiveSpeechSmoother {
                     timestampGap >= UInt32(min(80, previousCount)) && timestampGap <= 1280
                 let missing = plausibleTimestamp ? Int(timestampGap) : (distance - 1) * previousCount
                 if (1...1280).contains(missing) {
-                    gap = concealer.conceal(sampleCount: missing)
+                    // Advance the full loss run without displacing queued speech.
+                    gap = concealer.conceal(sampleCount: missing,
+                        maximumOutputSamples: maximumConcealmentSamples)
                 } else { concealer.reset() }
             } else if distance != 1 { concealer.reset() }
         } else { concealer.reset() }

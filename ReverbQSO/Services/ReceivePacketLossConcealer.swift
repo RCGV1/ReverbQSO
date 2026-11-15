@@ -19,6 +19,7 @@ final class ReceivePacketLossConcealer {
     private var history: [Int16] = []
     private var concealedSampleCount = 0
     private var lastConcealedSample: Int16?
+    private var lastConcealmentRetainedNoSamples = false
 
     /// Adds decoded audio to the recent speech history and begins a new loss run.
     func record(_ samples: [Int16]) {
@@ -26,19 +27,24 @@ final class ReceivePacketLossConcealer {
         appendToHistory(samples)
         concealedSampleCount = 0
         lastConcealedSample = nil
+        lastConcealmentRetainedNoSamples = false
     }
 
     /// Produces at most two nominal packets of concealment for the current gap.
-    /// Samples beyond the synthesis budget are silence.
-    func conceal(sampleCount: Int) -> [Int16] {
+    /// Samples beyond the synthesis budget are silence. A smaller output budget
+    /// retains the gap's suffix, but still advances the entire bounded loss run.
+    func conceal(sampleCount: Int, maximumOutputSamples: Int = 1280) -> [Int16] {
         guard sampleCount > 0 else { return [] }
         let outputCount = min(sampleCount, Self.synthesisBudget)
+        let retainedCount = min(outputCount, max(0, maximumOutputSamples))
+        lastConcealmentRetainedNoSamples = retainedCount == 0
         guard !history.isEmpty else {
             concealedSampleCount = min(Self.synthesisBudget, concealedSampleCount + outputCount)
             lastConcealedSample = nil
-            return [Int16](repeating: 0, count: outputCount)
+            return [Int16](repeating: 0, count: retainedCount)
         }
 
+        let precedingSample = lastConcealedSample ?? history.last
         let remainingSynthesis = max(0, Self.synthesisBudget - concealedSampleCount)
         let generatedCount = min(outputCount, remainingSynthesis)
         let period = estimatedPitchPeriod()
@@ -64,7 +70,19 @@ final class ReceivePacketLossConcealer {
         }
 
         concealedSampleCount = min(Self.synthesisBudget, concealedSampleCount + outputCount)
-        lastConcealedSample = output.last
+        if retainedCount < outputCount {
+            output = Array(output.suffix(retainedCount))
+            // Trimming discards the original fade from the preceding audio.
+            if let previous = precedingSample {
+                for index in 0..<min(Self.boundaryBlendSamples, output.count) {
+                    let blend = Double(index + 1) / Double(Self.boundaryBlendSamples)
+                    output[index] = clampedInt16(Double(previous) * (1 - blend)
+                        + Double(output[index]) * blend)
+                }
+            }
+        }
+        // An empty retained gap must not recover from an unrendered PLC tail.
+        lastConcealedSample = output.last ?? precedingSample
         return output
     }
 
@@ -72,7 +90,9 @@ final class ReceivePacketLossConcealer {
     /// the actual received samples as the basis for any later loss.
     func processReceived(_ samples: [Int16]) -> [Int16] {
         guard !samples.isEmpty else { return [] }
-        guard concealedSampleCount > 0, let previous = lastConcealedSample else {
+        // With no retained PLC, an exactly matched join needs no recovery fade.
+        guard concealedSampleCount > 0, let previous = lastConcealedSample,
+              !(lastConcealmentRetainedNoSamples && previous == samples[0]) else {
             record(samples)
             return samples
         }
@@ -85,9 +105,7 @@ final class ReceivePacketLossConcealer {
                 + Double(samples[index]) * receivedWeight
             output[index] = clampedInt16(value)
         }
-        appendToHistory(samples)
-        concealedSampleCount = 0
-        lastConcealedSample = nil
+        record(samples)
         return output
     }
 
@@ -95,6 +113,7 @@ final class ReceivePacketLossConcealer {
         history.removeAll(keepingCapacity: false)
         concealedSampleCount = 0
         lastConcealedSample = nil
+        lastConcealmentRetainedNoSamples = false
     }
 
     private func appendToHistory(_ samples: [Int16]) {

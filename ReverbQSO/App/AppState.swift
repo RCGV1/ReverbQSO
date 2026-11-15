@@ -882,7 +882,7 @@ final class AppState: ObservableObject {
     }
 }
 
-#if DEBUG && (os(iOS) || targetEnvironment(macCatalyst))
+#if (DEBUG || REVERB_TESTING) && (os(iOS) || targetEnvironment(macCatalyst))
 /// Explicit launch argument for isolated visual QA. No credentials or live
 /// EchoLink endpoints are used in this mode.
 enum SimulatorDemoData {

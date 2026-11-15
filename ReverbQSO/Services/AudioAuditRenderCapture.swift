@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#if DEBUG
+#if DEBUG || REVERB_TESTING
 import AVFoundation
 
 /// Live audit only. Copies mixer output off the real-time callback before disk I/O.
